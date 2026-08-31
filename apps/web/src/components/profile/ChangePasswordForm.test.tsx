@@ -76,7 +76,7 @@ describe("ChangePasswordForm", () => {
 
 		await user.type(newPassword, "short");
 		expect(
-			screen.getByText("New password must be at least 8 characters."),
+			screen.getByText("New password must be at least 12 characters."),
 		).toBeInTheDocument();
 
 		await user.clear(newPassword);
@@ -91,7 +91,7 @@ describe("ChangePasswordForm", () => {
 			screen.queryByText("New password is required."),
 		).not.toBeInTheDocument();
 		expect(
-			screen.queryByText("New password must be at least 8 characters."),
+			screen.queryByText("New password must be at least 12 characters."),
 		).not.toBeInTheDocument();
 		expect(
 			screen.queryByText(

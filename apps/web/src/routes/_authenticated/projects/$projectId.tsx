@@ -10,11 +10,12 @@ import { useTranslation } from "react-i18next";
 
 import { AIChatFloat } from "@/components/projects/ai-chat-float";
 import { useProjectRealtime } from "@/hooks/use-project-realtime";
+import { currentUserQueryOptions } from "@/lib/auth-api";
 import { projectQueryOptions } from "@/lib/project-api";
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId")({
 	loader: async ({ context: { queryClient }, params: { projectId } }) => {
-		const user = queryClient.getQueryData(["auth", "me-optional"]);
+		const user = queryClient.getQueryData(currentUserQueryOptions.queryKey);
 		await queryClient
 			.ensureQueryData(projectQueryOptions(projectId))
 			.catch(() => {
@@ -26,12 +27,13 @@ export const Route = createFileRoute("/_authenticated/projects/$projectId")({
 
 function ProjectLayout() {
 	const { t } = useTranslation("projects");
+	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 	const { projectId } = Route.useParams();
 	const { data: project, isError } = useQuery(projectQueryOptions(projectId));
 
 	// Join realtime rooms for this project.  The hook subscribes on mount and
 	// leaves / cleans up on unmount (i.e. when navigating away from the project).
-	useProjectRealtime(projectId);
+	useProjectRealtime(isInternalPreview ? undefined : projectId);
 
 	// The Conversations page has its own dedicated "New conversation" entry
 	// point in its header, so the floating chat launcher would just be a
@@ -55,7 +57,9 @@ function ProjectLayout() {
 	return (
 		<>
 			<Outlet />
-			{!onConversationsPage && <AIChatFloat projectId={projectId} />}
+			{!isInternalPreview && !onConversationsPage && (
+				<AIChatFloat projectId={projectId} />
+			)}
 		</>
 	);
 }

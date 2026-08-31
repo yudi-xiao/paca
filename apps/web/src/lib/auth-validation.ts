@@ -8,7 +8,7 @@ import type { TFunction } from "i18next";
  */
 
 /** Minimum number of characters a password must contain. */
-export const MIN_PASSWORD_LENGTH = 8;
+export const MIN_PASSWORD_LENGTH = 12;
 
 /** Minimum number of characters a username must contain. */
 export const MIN_USERNAME_LENGTH = 3;

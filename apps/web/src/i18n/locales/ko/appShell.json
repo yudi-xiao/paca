@@ -19,6 +19,7 @@
 		"home": "홈",
 		"administration": "관리",
 		"globalRoles": "전역 역할",
+		"organizationAccess": "Organization Access",
 		"users": "사용자",
 		"plugins": "플러그인",
 		"allProjects": "모든 프로젝트",

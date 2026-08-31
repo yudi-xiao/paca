@@ -138,6 +138,18 @@ export function RoleFormDialog({
 					"globalRoles.formDialog.errors.roleNotFound",
 				),
 				[ApiErrorCode.Forbidden]: t("globalRoles.formDialog.errors.forbidden"),
+				[ApiErrorCode.GlobalRoleBuiltIn]: t(
+					"globalRoles.formDialog.errors.forbidden",
+				),
+				[ApiErrorCode.RolePermissionEscalation]: t(
+					"globalRoles.formDialog.errors.forbidden",
+				),
+				[ApiErrorCode.GlobalRoleDescriptionInvalid]: t(
+					"globalRoles.formDialog.errors.generic",
+				),
+				[ApiErrorCode.RolePermissionsInvalid]: t(
+					"globalRoles.formDialog.errors.generic",
+				),
 				[ApiErrorCode.InternalError]: t(
 					"globalRoles.formDialog.errors.internalError",
 				),

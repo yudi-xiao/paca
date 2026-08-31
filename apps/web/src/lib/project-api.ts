@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 
 import { apiClient } from "./api-client";
 import type { SuccessEnvelope } from "./api-error";
@@ -64,11 +64,29 @@ export interface ProjectMember {
 	agent_acp_provider?: string | null;
 }
 
+export interface ProjectMemberCandidate {
+	id: string;
+	username: string;
+	full_name: string;
+	email?: string | null;
+	avatar_url?: string | null;
+	avatar_thumb_url?: string | null;
+	created_at: string;
+}
+
+export interface ProjectMemberCandidateList {
+	items: ProjectMemberCandidate[];
+	total: number;
+	page: number;
+	page_size: number;
+}
+
 export interface ProjectRole {
 	id: string;
 	project_id?: string;
 	role_name: string;
 	permissions: Record<string, unknown>;
+	is_built_in?: boolean;
 	created_at: string;
 	updated_at: string;
 }
@@ -171,6 +189,32 @@ export async function removeProjectMember(
 	memberId: string,
 ): Promise<void> {
 	await apiClient.instance.delete(`/projects/${projectId}/members/${memberId}`);
+}
+
+export async function listProjectMemberCandidates(
+	projectId: string,
+	page = 1,
+	pageSize = 20,
+): Promise<ProjectMemberCandidateList> {
+	const { data } = await apiClient.instance.get<
+		SuccessEnvelope<ProjectMemberCandidateList>
+	>(`/projects/${projectId}/member-candidates`, {
+		params: { page, page_size: pageSize },
+	});
+	return data.data;
+}
+
+export function projectMemberCandidatesInfiniteQueryOptions(projectId: string) {
+	return infiniteQueryOptions({
+		queryKey: ["projects", projectId, "member-candidates"],
+		queryFn: ({ pageParam }: { pageParam: number }) =>
+			listProjectMemberCandidates(projectId, pageParam, 20),
+		initialPageParam: 1,
+		getNextPageParam: (lastPage) =>
+			lastPage.page * lastPage.page_size < lastPage.total
+				? lastPage.page + 1
+				: undefined,
+	});
 }
 
 export async function getMyProjectPermissions(

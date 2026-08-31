@@ -1,0 +1,104 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "paca-worker-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    }
+  },
+  "assets": {
+    "directory": "../../apps/web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/.well-known/*", "/health", "/internal/*", "/ws/*"]
+  },
+  "vars": {
+    "ENVIRONMENT": "development"
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "f2c6d6944f65417785dd49964e0c3238"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "TASK_ATTACHMENTS",
+      "bucket_name": "paca-attachments-development"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ProjectParty",
+        "class_name": "ProjectParty"
+      },
+      {
+        "name": "UserParty",
+        "class_name": "UserParty"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1-realtime-parties",
+      "new_sqlite_classes": ["ProjectParty", "UserParty"]
+    }
+  ],
+  "env": {
+    "internal": {
+      "name": "paca-worker-api-internal",
+      "workers_dev": true,
+      "routes": [
+        {
+          "pattern": "paca.howlearnwood.com",
+          "custom_domain": true
+        }
+      ],
+      "vars": {
+        "ATTACHMENT_CLEANUP_ENABLED": "true",
+        "BETTER_AUTH_URL": "https://paca.howlearnwood.com",
+        "ENVIRONMENT": "internal",
+        "TRUSTED_ORIGINS": "https://paca.howlearnwood.com"
+      },
+      "triggers": {
+        "crons": ["15 10 * * *"]
+      },
+      "hyperdrive": [
+        {
+          "binding": "HYPERDRIVE",
+          "id": "ec828e1b80664166ab38aa511cfd1f82"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "TASK_ATTACHMENTS",
+          "bucket_name": "paca-attachments-internal"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "ProjectParty",
+            "class_name": "ProjectParty"
+          },
+          {
+            "name": "UserParty",
+            "class_name": "UserParty"
+          }
+        ]
+      }
+    }
+  }
+}

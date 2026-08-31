@@ -5,7 +5,7 @@ import type { TFunction } from "i18next";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
-import { login } from "@/lib/auth-api";
+import { login, registerInternalPreview } from "@/lib/auth-api";
 
 function loginErrorMessage(
 	code: ApiErrorCode | null,
@@ -20,11 +20,17 @@ function loginErrorMessage(
 	return t("login.errors.genericError");
 }
 
-export function useLoginForm() {
+export function useLoginForm(returnTo?: string | null) {
 	const { t } = useTranslation("auth");
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const [serverError, setServerError] = useState<string | null>(null);
+	const [isRegistering, setIsRegistering] = useState(false);
+
+	const completeAuthentication = async () => {
+		await queryClient.invalidateQueries({ queryKey: ["auth"] });
+		await navigate({ href: returnTo ?? "/home", replace: true });
+	};
 
 	const form = useForm({
 		defaultValues: {
@@ -39,8 +45,7 @@ export function useLoginForm() {
 				// Invalidate the entire "auth" query namespace so the ("auth"/"me")
 				// cache is refreshed. Without this the sidebar keeps the previous
 				// user's data.
-				await queryClient.invalidateQueries({ queryKey: ["auth"] });
-				await navigate({ to: "/home" });
+				await completeAuthentication();
 			} catch (err: unknown) {
 				const code = getApiErrorCode(err);
 				setServerError(loginErrorMessage(code, t));
@@ -48,5 +53,22 @@ export function useLoginForm() {
 		},
 	});
 
-	return { form, serverError };
+	const createInternalPreviewAccount = async (
+		email: string,
+		password: string,
+	) => {
+		setServerError(null);
+		setIsRegistering(true);
+		try {
+			await registerInternalPreview(email, password);
+			await completeAuthentication();
+		} catch (err: unknown) {
+			const code = getApiErrorCode(err);
+			setServerError(loginErrorMessage(code, t));
+		} finally {
+			setIsRegistering(false);
+		}
+	};
+
+	return { form, serverError, isRegistering, createInternalPreviewAccount };
 }

@@ -1,4 +1,5 @@
 import {
+	Building2,
 	FolderKanban,
 	type LucideIcon,
 	Puzzle,
@@ -48,6 +49,33 @@ export const KNOWN_PERMISSIONS = [
 		labelKey: "globalRoles.permissions.usersDelete.label",
 		descriptionKey: "globalRoles.permissions.usersDelete.description",
 		domain: "users",
+	},
+	{
+		key: "organization.members.read",
+		labelKey: "globalRoles.permissions.organizationMembersRead.label",
+		descriptionKey:
+			"globalRoles.permissions.organizationMembersRead.description",
+		domain: "organizations",
+	},
+	{
+		key: "organization.members.write",
+		labelKey: "globalRoles.permissions.organizationMembersWrite.label",
+		descriptionKey:
+			"globalRoles.permissions.organizationMembersWrite.description",
+		domain: "organizations",
+	},
+	{
+		key: "organization.roles.read",
+		labelKey: "globalRoles.permissions.organizationRolesRead.label",
+		descriptionKey: "globalRoles.permissions.organizationRolesRead.description",
+		domain: "organizations",
+	},
+	{
+		key: "organization.roles.write",
+		labelKey: "globalRoles.permissions.organizationRolesWrite.label",
+		descriptionKey:
+			"globalRoles.permissions.organizationRolesWrite.description",
+		domain: "organizations",
 	},
 	{
 		key: "projects.read",
@@ -121,6 +149,11 @@ export const PERMISSION_GROUPS = [
 		domain: "users",
 		labelKey: "globalRoles.permissionGroups.users",
 		Icon: Users,
+	},
+	{
+		domain: "organizations",
+		labelKey: "globalRoles.permissionGroups.organizations",
+		Icon: Building2,
 	},
 	{
 		domain: "projects",

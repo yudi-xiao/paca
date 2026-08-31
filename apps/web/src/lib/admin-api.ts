@@ -6,7 +6,9 @@ import type { SuccessEnvelope } from "./api-error";
 export interface GlobalRole {
 	id: string;
 	name: string;
+	description: string;
 	permissions: Record<string, boolean>;
+	is_built_in: boolean;
 	created_at: string;
 	updated_at: string;
 }
@@ -42,6 +44,16 @@ export async function updateGlobalRole(
 
 export async function deleteGlobalRole(roleId: string): Promise<void> {
 	await apiClient.instance.delete(`/admin/global-roles/${roleId}`);
+}
+
+export async function replaceUserGlobalRoles(
+	userId: string,
+	roleIds: string[],
+): Promise<GlobalRole[]> {
+	const { data } = await apiClient.instance.put<
+		SuccessEnvelope<{ user_id: string; roles: GlobalRole[] }>
+	>(`/admin/users/${userId}/global-roles`, { role_ids: roleIds });
+	return data.data.roles;
 }
 
 export async function getMyGlobalPermissions(): Promise<string[]> {

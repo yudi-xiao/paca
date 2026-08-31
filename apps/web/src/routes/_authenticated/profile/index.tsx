@@ -60,6 +60,7 @@ function getInitials(name: string): string {
 
 function ProfilePage() {
 	const { t } = useTranslation("profile");
+	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 	const queryClient = useQueryClient();
 	const { data: user } = useQuery(currentUserQueryOptions);
 
@@ -194,28 +195,34 @@ function ProfilePage() {
 			<Card>
 				<CardHeader>
 					<div className="flex items-center gap-4">
-						<AvatarUpload
-							basePath="/users/me"
-							avatarUrl={user.avatar_url}
-							fallback={initials}
-							className="size-14 rounded-xl"
-							fallbackClassName="bg-primary text-primary-foreground text-lg font-bold"
-							labels={{
-								change: t("avatar.change"),
-								remove: t("avatar.remove"),
-								uploading: t("avatar.uploading"),
-								invalidType: t("avatar.errors.invalidType"),
-								tooLarge: t("avatar.errors.tooLarge"),
-								uploadFailed: t("avatar.errors.uploadFailed"),
-								removeFailed: t("avatar.errors.removeFailed"),
-							}}
-							onChange={(result) => {
-								queryClient.setQueryData(
-									currentUserQueryOptions.queryKey,
-									(old) => (old ? { ...old, ...result } : old),
-								);
-							}}
-						/>
+						{isInternalPreview ? (
+							<div className="flex size-14 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
+								{initials}
+							</div>
+						) : (
+							<AvatarUpload
+								basePath="/users/me"
+								avatarUrl={user.avatar_url}
+								fallback={initials}
+								className="size-14 rounded-xl"
+								fallbackClassName="bg-primary text-primary-foreground text-lg font-bold"
+								labels={{
+									change: t("avatar.change"),
+									remove: t("avatar.remove"),
+									uploading: t("avatar.uploading"),
+									invalidType: t("avatar.errors.invalidType"),
+									tooLarge: t("avatar.errors.tooLarge"),
+									uploadFailed: t("avatar.errors.uploadFailed"),
+									removeFailed: t("avatar.errors.removeFailed"),
+								}}
+								onChange={(result) => {
+									queryClient.setQueryData(
+										currentUserQueryOptions.queryKey,
+										(old) => (old ? { ...old, ...result } : old),
+									);
+								}}
+							/>
+						)}
 						<div>
 							<CardTitle className="text-lg">{displayName}</CardTitle>
 							<CardDescription className="mt-0.5">
@@ -304,35 +311,37 @@ function ProfilePage() {
 					</div>
 				</CardContent>
 
-				<CardFooter className="border-t pt-4">
-					{editing ? (
-						<div className="flex gap-2">
-							<Button
-								size="sm"
-								onClick={() => mutation.mutate()}
-								disabled={
-									mutation.isPending || !fullName.trim() || emailInvalid
-								}
-							>
-								{mutation.isPending
-									? t("actions.saving")
-									: t("actions.saveChanges")}
+				{isInternalPreview ? null : (
+					<CardFooter className="border-t pt-4">
+						{editing ? (
+							<div className="flex gap-2">
+								<Button
+									size="sm"
+									onClick={() => mutation.mutate()}
+									disabled={
+										mutation.isPending || !fullName.trim() || emailInvalid
+									}
+								>
+									{mutation.isPending
+										? t("actions.saving")
+										: t("actions.saveChanges")}
+								</Button>
+								<Button
+									size="sm"
+									variant="outline"
+									onClick={handleCancel}
+									disabled={mutation.isPending}
+								>
+									{t("actions.cancel")}
+								</Button>
+							</div>
+						) : (
+							<Button size="sm" variant="outline" onClick={handleEdit}>
+								{t("actions.editProfile")}
 							</Button>
-							<Button
-								size="sm"
-								variant="outline"
-								onClick={handleCancel}
-								disabled={mutation.isPending}
-							>
-								{t("actions.cancel")}
-							</Button>
-						</div>
-					) : (
-						<Button size="sm" variant="outline" onClick={handleEdit}>
-							{t("actions.editProfile")}
-						</Button>
-					)}
-				</CardFooter>
+						)}
+					</CardFooter>
+				)}
 			</Card>
 
 			{/* Change Password card */}

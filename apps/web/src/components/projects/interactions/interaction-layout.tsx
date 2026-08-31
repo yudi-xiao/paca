@@ -323,6 +323,7 @@ export function InteractionLayout({
 	const { t } = useTranslation("projects");
 	const qc = useQueryClient();
 	const navigate = useNavigate();
+	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	const taskIdPrefix = project?.task_id_prefix ?? "";
@@ -1306,6 +1307,14 @@ export function InteractionLayout({
 	}, [selectedTaskId, selectedTaskConfirmedMissing, tasks]);
 
 	const handleTaskClick = (task: Task) => {
+		if (isInternalPreview) {
+			onTaskClick?.(task);
+			void navigate({
+				to: "/projects/$projectId/tasks/$taskId",
+				params: { projectId, taskId: task.id },
+			});
+			return;
+		}
 		setSelectedTaskId(task.id);
 		onTaskClick?.(task);
 		setTaskIdSearchParam(task.id);
@@ -2044,21 +2053,23 @@ export function InteractionLayout({
 				isPending={renameViewMutation.isPending}
 			/>
 
-			<TaskDetailModal
-				task={selectedTask}
-				open={!!selectedTask}
-				onOpenChange={(v) => {
-					if (!v) {
-						setSelectedTaskId(null);
-						clearTaskIdSearchParam();
-					}
-				}}
-				projectId={projectId}
-				statuses={statuses}
-				taskTypes={taskTypes}
-				members={members}
-				canEdit={canEdit}
-			/>
+			{isInternalPreview ? null : (
+				<TaskDetailModal
+					task={selectedTask}
+					open={!!selectedTask}
+					onOpenChange={(v) => {
+						if (!v) {
+							setSelectedTaskId(null);
+							clearTaskIdSearchParam();
+						}
+					}}
+					projectId={projectId}
+					statuses={statuses}
+					taskTypes={taskTypes}
+					members={members}
+					canEdit={canEdit}
+				/>
+			)}
 
 			<Dialog
 				open={!!deleteConfirmTask}

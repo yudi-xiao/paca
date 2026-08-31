@@ -86,25 +86,27 @@ export function GlobalRolesTable({
 								</TableCell>
 								{canWrite ? (
 									<TableCell className="px-5">
-										<div className="flex items-center justify-end gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-											<Button
-												variant="ghost"
-												size="icon-sm"
-												onClick={() => onEdit(role)}
-												title={t("globalRoles.table.editAction")}
-											>
-												<Edit2 className="size-3.5" />
-											</Button>
-											<Button
-												variant="ghost"
-												size="icon-sm"
-												className="text-destructive hover:text-destructive hover:bg-destructive/10"
-												onClick={() => onDelete(role)}
-												title={t("globalRoles.table.deleteAction")}
-											>
-												<Trash2 className="size-3.5" />
-											</Button>
-										</div>
+										{role.is_built_in ? null : (
+											<div className="flex items-center justify-end gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													onClick={() => onEdit(role)}
+													title={t("globalRoles.table.editAction")}
+												>
+													<Edit2 className="size-3.5" />
+												</Button>
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													className="text-destructive hover:text-destructive hover:bg-destructive/10"
+													onClick={() => onDelete(role)}
+													title={t("globalRoles.table.deleteAction")}
+												>
+													<Trash2 className="size-3.5" />
+												</Button>
+											</div>
+										)}
 									</TableCell>
 								) : null}
 							</TableRow>

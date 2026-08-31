@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import {
 	ArrowLeft,
 	History,
@@ -60,6 +60,14 @@ function extractErrorMessage(err: unknown, fallback: string): string {
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/automation/$automationId",
 )({
+	beforeLoad: ({ params: { projectId } }) => {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+			throw redirect({
+				to: "/projects/$projectId",
+				params: { projectId },
+			});
+		}
+	},
 	loader: async ({
 		context: { queryClient },
 		params: { projectId, automationId },

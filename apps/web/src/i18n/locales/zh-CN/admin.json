@@ -113,6 +113,57 @@
 			}
 		}
 	},
+	"organizationAccess": {
+		"eyebrow": "默认组织",
+		"title": "组织权限",
+		"description": "管理 Paca 组织角色，并为 Better Auth 组织中的现有成员分配一个或多个角色。",
+		"newRole": "新建角色",
+		"name": "角色名称",
+		"permissions": "权限",
+		"actions": "操作",
+		"builtIn": "内置",
+		"cancel": "取消",
+		"save": "保存",
+		"saving": "正在保存…",
+		"delete": "删除",
+		"roles": {
+			"title": "组织角色",
+			"description": "Paca 动态角色与 Better Auth 的组织成员生命周期角色保持语义分离。"
+		},
+		"members": {
+			"title": "组织成员",
+			"description": "成员加入与移除仍由 Better Auth 管理；本页面只管理 Paca 角色分配。",
+			"user": "用户",
+			"roles": "已分配角色",
+			"assign": "分配角色",
+			"assignTitle": "分配组织角色",
+			"assignDescription": "为 {{name}} 选择一个或多个角色。"
+		},
+		"roleDialog": {
+			"create": "创建组织角色",
+			"edit": "编辑组织角色",
+			"description": "角色只能授予您在该组织中已经拥有的权限。",
+			"roleDescription": "描述"
+		},
+		"deleteDialog": {
+			"title": "删除组织角色",
+			"description": "确定删除 {{name}} 吗？仍被成员使用的角色不能删除。"
+		},
+		"errors": {
+			"load": "无法加载组织角色。您可能没有访问权限，或者服务暂时不可用。",
+			"loadMembers": "无法加载组织成员。",
+			"save": "无法保存角色。",
+			"delete": "无法删除角色。",
+			"assign": "无法保存角色分配。",
+			"nameTaken": "已存在同名角色。",
+			"nameInvalid": "角色名称长度必须为 2 到 64 个字符。",
+			"roleHasMembers": "该角色仍被一个或多个成员使用。",
+			"builtIn": "内置角色不能修改或删除。",
+			"lastOwner": "不能移除组织中的最后一位所有者。",
+			"escalation": "不能授予您自己并不拥有的权限。",
+			"forbidden": "您没有权限执行此操作。"
+		}
+	},
 	"globalRoles": {
 		"header": {
 			"title": "全局角色",
@@ -211,6 +262,22 @@
 				"label": "删除用户",
 				"description": "移除用户账户"
 			},
+			"organizationMembersRead": {
+				"label": "查看组织成员",
+				"description": "查看 Paca 组织中的成员"
+			},
+			"organizationMembersWrite": {
+				"label": "编辑组织成员角色",
+				"description": "为成员分配 Paca 组织角色"
+			},
+			"organizationRolesRead": {
+				"label": "查看组织角色",
+				"description": "查看 Paca 组织角色定义"
+			},
+			"organizationRolesWrite": {
+				"label": "编辑组织角色",
+				"description": "创建、更新和删除 Paca 组织角色"
+			},
 			"projectsRead": {
 				"label": "查看所有项目",
 				"description": "查看工作区中的所有项目"
@@ -251,6 +318,7 @@
 		"permissionGroups": {
 			"globalRoles": "全局角色",
 			"users": "用户",
+			"organizations": "组织",
 			"projects": "项目",
 			"plugins": "插件",
 			"settings": "设置"

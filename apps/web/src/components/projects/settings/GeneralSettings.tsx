@@ -85,6 +85,7 @@ export function GeneralSettings({
 		isPublic !== (project?.is_public ?? false);
 
 	const initials = getProjectInitials(project?.name ?? "");
+	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 
 	return (
 		<div className="rounded-xl border border-border/60 bg-card p-6">
@@ -95,33 +96,39 @@ export function GeneralSettings({
 			{/* Identity header — avatar next to the project's name/prefix, same
 			    layout as the profile page's own avatar setting. */}
 			<div className="flex items-center gap-4 mb-6">
-				<AvatarUpload
-					basePath={`/projects/${projectId}`}
-					avatarUrl={project?.avatar_url}
-					fallback={initials}
-					disabled={!canEdit}
-					className="size-14 rounded-xl"
-					fallbackClassName="bg-primary text-primary-foreground text-lg font-bold"
-					labels={{
-						change: t("settings.general.avatar.change"),
-						remove: t("settings.general.avatar.remove"),
-						uploading: t("settings.general.avatar.uploading"),
-						invalidType: t("settings.general.avatar.errors.invalidType"),
-						tooLarge: t("settings.general.avatar.errors.tooLarge"),
-						uploadFailed: t("settings.general.avatar.errors.uploadFailed"),
-						removeFailed: t("settings.general.avatar.errors.removeFailed"),
-					}}
-					onChange={(result) => {
-						queryClient.setQueryData(
-							projectQueryOptions(projectId).queryKey,
-							(old) => (old ? { ...old, ...result } : old),
-						);
-						// Other places reading the project list (sidebar switcher,
-						// home page cards) hold a separate cache entry that
-						// setQueryData above doesn't touch.
-						queryClient.invalidateQueries({ queryKey: ["projects"] });
-					}}
-				/>
+				{isInternalPreview ? (
+					<div className="flex size-14 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
+						{initials}
+					</div>
+				) : (
+					<AvatarUpload
+						basePath={`/projects/${projectId}`}
+						avatarUrl={project?.avatar_url}
+						fallback={initials}
+						disabled={!canEdit}
+						className="size-14 rounded-xl"
+						fallbackClassName="bg-primary text-primary-foreground text-lg font-bold"
+						labels={{
+							change: t("settings.general.avatar.change"),
+							remove: t("settings.general.avatar.remove"),
+							uploading: t("settings.general.avatar.uploading"),
+							invalidType: t("settings.general.avatar.errors.invalidType"),
+							tooLarge: t("settings.general.avatar.errors.tooLarge"),
+							uploadFailed: t("settings.general.avatar.errors.uploadFailed"),
+							removeFailed: t("settings.general.avatar.errors.removeFailed"),
+						}}
+						onChange={(result) => {
+							queryClient.setQueryData(
+								projectQueryOptions(projectId).queryKey,
+								(old) => (old ? { ...old, ...result } : old),
+							);
+							// Other places reading the project list (sidebar switcher,
+							// home page cards) hold a separate cache entry that
+							// setQueryData above doesn't touch.
+							queryClient.invalidateQueries({ queryKey: ["projects"] });
+						}}
+					/>
+				)}
 				<div>
 					<p className="text-lg font-semibold leading-tight">{project?.name}</p>
 					{project?.task_id_prefix ? (

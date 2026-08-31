@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 
 export interface ActivityEntry {
 	id: string;
+	actor_type?: "user" | "agent" | "system";
 	actor_id?: string | null;
 	actor_name: string;
 	actor_username: string;
@@ -333,6 +334,7 @@ function ActivityItemInner<T extends ActivityEntry>({
 
 	const isOwnComment =
 		isComment &&
+		(entry.actor_type === undefined || entry.actor_type === "user") &&
 		!!currentUserId &&
 		!!entry.actor_id &&
 		String(entry.actor_id) === String(currentUserId);

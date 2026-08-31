@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Copy, Key, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -39,6 +39,11 @@ import {
 import { formatDate as formatDateLocale } from "@/lib/format-date";
 
 export const Route = createFileRoute("/_authenticated/profile/api-keys")({
+	beforeLoad: () => {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+			throw redirect({ to: "/home" });
+		}
+	},
 	component: APIKeysPage,
 });
 

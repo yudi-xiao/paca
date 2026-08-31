@@ -44,6 +44,10 @@ export const Route = createFileRoute(
 });
 
 function SprintPage() {
+	return <FullSprintPage />;
+}
+
+function FullSprintPage() {
 	const { t } = useTranslation("projects");
 	const { projectId, sprintId } = Route.useParams();
 	const { hasProjectPermission } = useProjectPermissions(projectId);
@@ -63,7 +67,7 @@ function SprintPage() {
 
 	const canCreate = hasProjectPermission("tasks.write");
 	const canEdit = hasProjectPermission("tasks.write");
-	const canManageViews = hasProjectPermission("projects.write");
+	const canManageViews = hasProjectPermission("sprints.write");
 	const canManageSprints = hasProjectPermission("sprints.write");
 
 	const [completeOpen, setCompleteOpen] = useState(false);

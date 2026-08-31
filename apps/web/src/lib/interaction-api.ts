@@ -582,6 +582,34 @@ export async function listAllTasks(
 	return data.data;
 }
 
+export const TASK_LIST_MAX_PAGE_SIZE = 100;
+
+/** Reads a bounded complete task collection through the Worker's cursor API.
+ * Callers use this only for project-scoped pickers and child lists; large
+ * interactive lists should keep their existing incremental pagination. */
+export async function listTaskPages(
+	projectId: string,
+	opts: Omit<ListTasksOptions, "cursor" | "pageSize"> = {},
+	maxPages = 100,
+): Promise<Task[]> {
+	const items: Task[] = [];
+	const seenCursors = new Set<string>();
+	let cursor: string | undefined;
+	for (let page = 0; page < maxPages; page++) {
+		const result = await listAllTasks(projectId, {
+			...opts,
+			pageSize: TASK_LIST_MAX_PAGE_SIZE,
+			cursor,
+		});
+		items.push(...result.items);
+		const next = result.next_cursor ?? undefined;
+		if (!next || seenCursors.has(next)) break;
+		seenCursors.add(next);
+		cursor = next;
+	}
+	return items;
+}
+
 export async function listSprintTasks(
 	projectId: string,
 	sprintId: string,
@@ -690,12 +718,7 @@ export async function listSubtasks(
 	projectId: string,
 	parentTaskId: string,
 ): Promise<Task[]> {
-	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<TaskListResult>
-	>(`/projects/${projectId}/tasks`, {
-		params: { parent_task_id: parentTaskId, page: 1, page_size: 200 },
-	});
-	return data.data.items;
+	return listTaskPages(projectId, { parentTaskId });
 }
 
 export async function listViewTaskPositions(
@@ -879,7 +902,10 @@ export const epicChildTasksQueryOptions = (projectId: string, epicId: string) =>
 export interface Activity {
 	id: string;
 	task_id: string;
+	actor_type?: "user" | "agent" | "system";
 	actor_id?: string | null;
+	actor_user_id?: string | null;
+	actor_agent_id?: string | null;
 	actor_name: string;
 	actor_username: string;
 	actor_avatar_url?: string | null;

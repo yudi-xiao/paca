@@ -19,16 +19,19 @@ import { Route as AuthenticatedHomeIndexRouteImport } from './routes/_authentica
 import { Route as AuthenticatedConversationsIndexRouteImport } from './routes/_authenticated/conversations/index'
 import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_authenticated/projects/$projectId'
 import { Route as AuthenticatedProfileApiKeysRouteImport } from './routes/_authenticated/profile/api-keys'
+import { Route as AuthenticatedDeviceCapabilitiesRouteImport } from './routes/_authenticated/device/capabilities'
 import { Route as AuthenticatedConversationsConversationIdRouteImport } from './routes/_authenticated/conversations/$conversationId'
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated/projects/$projectId/index'
 import { Route as AuthenticatedAdminUsersIndexRouteImport } from './routes/_authenticated/admin/users/index'
 import { Route as AuthenticatedAdminSettingsIndexRouteImport } from './routes/_authenticated/admin/settings/index'
 import { Route as AuthenticatedAdminPluginsIndexRouteImport } from './routes/_authenticated/admin/plugins/index'
+import { Route as AuthenticatedAdminOrganizationAccessIndexRouteImport } from './routes/_authenticated/admin/organization-access/index'
 import { Route as AuthenticatedAdminGlobalRolesIndexRouteImport } from './routes/_authenticated/admin/global-roles/index'
 import { Route as AuthenticatedAdminChangelogIndexRouteImport } from './routes/_authenticated/admin/changelog/index'
 import { Route as AuthenticatedAdminAgentsIndexRouteImport } from './routes/_authenticated/admin/agents/index'
 import { Route as AuthenticatedProjectsProjectIdConversationsRouteImport } from './routes/_authenticated/projects/$projectId/conversations'
 import { Route as AuthenticatedProjectsProjectIdTeamIndexRouteImport } from './routes/_authenticated/projects/$projectId/team/index'
+import { Route as AuthenticatedProjectsProjectIdTasksIndexRouteImport } from './routes/_authenticated/projects/$projectId/tasks/index'
 import { Route as AuthenticatedProjectsProjectIdSettingsIndexRouteImport } from './routes/_authenticated/projects/$projectId/settings/index'
 import { Route as AuthenticatedProjectsProjectIdEnvironmentsIndexRouteImport } from './routes/_authenticated/projects/$projectId/environments/index'
 import { Route as AuthenticatedProjectsProjectIdDocsIndexRouteImport } from './routes/_authenticated/projects/$projectId/docs/index'
@@ -104,6 +107,12 @@ const AuthenticatedProfileApiKeysRoute =
     path: '/profile/api-keys',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedDeviceCapabilitiesRoute =
+  AuthenticatedDeviceCapabilitiesRouteImport.update({
+    id: '/device/capabilities',
+    path: '/device/capabilities',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedConversationsConversationIdRoute =
   AuthenticatedConversationsConversationIdRouteImport.update({
     id: '/$conversationId',
@@ -134,6 +143,12 @@ const AuthenticatedAdminPluginsIndexRoute =
     path: '/admin/plugins/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedAdminOrganizationAccessIndexRoute =
+  AuthenticatedAdminOrganizationAccessIndexRouteImport.update({
+    id: '/admin/organization-access/',
+    path: '/admin/organization-access/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedAdminGlobalRolesIndexRoute =
   AuthenticatedAdminGlobalRolesIndexRouteImport.update({
     id: '/admin/global-roles/',
@@ -162,6 +177,12 @@ const AuthenticatedProjectsProjectIdTeamIndexRoute =
   AuthenticatedProjectsProjectIdTeamIndexRouteImport.update({
     id: '/team/',
     path: '/team/',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdTasksIndexRoute =
+  AuthenticatedProjectsProjectIdTasksIndexRouteImport.update({
+    id: '/tasks/',
+    path: '/tasks/',
     getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
   } as any)
 const AuthenticatedProjectsProjectIdSettingsIndexRoute =
@@ -297,6 +318,7 @@ export interface FileRoutesByFullPath {
   '/set-password': typeof SetPasswordRoute
   '/conversations': typeof AuthenticatedConversationsRouteWithChildren
   '/conversations/$conversationId': typeof AuthenticatedConversationsConversationIdRoute
+  '/device/capabilities': typeof AuthenticatedDeviceCapabilitiesRoute
   '/profile/api-keys': typeof AuthenticatedProfileApiKeysRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/conversations/': typeof AuthenticatedConversationsIndexRoute
@@ -306,6 +328,7 @@ export interface FileRoutesByFullPath {
   '/admin/agents/': typeof AuthenticatedAdminAgentsIndexRoute
   '/admin/changelog/': typeof AuthenticatedAdminChangelogIndexRoute
   '/admin/global-roles/': typeof AuthenticatedAdminGlobalRolesIndexRoute
+  '/admin/organization-access/': typeof AuthenticatedAdminOrganizationAccessIndexRoute
   '/admin/plugins/': typeof AuthenticatedAdminPluginsIndexRoute
   '/admin/settings/': typeof AuthenticatedAdminSettingsIndexRoute
   '/admin/users/': typeof AuthenticatedAdminUsersIndexRoute
@@ -324,6 +347,7 @@ export interface FileRoutesByFullPath {
   '/projects/$projectId/docs/': typeof AuthenticatedProjectsProjectIdDocsIndexRoute
   '/projects/$projectId/environments/': typeof AuthenticatedProjectsProjectIdEnvironmentsIndexRoute
   '/projects/$projectId/settings/': typeof AuthenticatedProjectsProjectIdSettingsIndexRoute
+  '/projects/$projectId/tasks/': typeof AuthenticatedProjectsProjectIdTasksIndexRoute
   '/projects/$projectId/team/': typeof AuthenticatedProjectsProjectIdTeamIndexRoute
   '/projects/$projectId/environments/$environmentId/connect': typeof AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdConnectRoute
   '/projects/$projectId/environments/$environmentId/terminal': typeof AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdTerminalRoute
@@ -337,6 +361,7 @@ export interface FileRoutesByTo {
   '/change-password': typeof ChangePasswordRoute
   '/set-password': typeof SetPasswordRoute
   '/conversations/$conversationId': typeof AuthenticatedConversationsConversationIdRoute
+  '/device/capabilities': typeof AuthenticatedDeviceCapabilitiesRoute
   '/profile/api-keys': typeof AuthenticatedProfileApiKeysRoute
   '/conversations': typeof AuthenticatedConversationsIndexRoute
   '/home': typeof AuthenticatedHomeIndexRoute
@@ -344,6 +369,7 @@ export interface FileRoutesByTo {
   '/admin/agents': typeof AuthenticatedAdminAgentsIndexRoute
   '/admin/changelog': typeof AuthenticatedAdminChangelogIndexRoute
   '/admin/global-roles': typeof AuthenticatedAdminGlobalRolesIndexRoute
+  '/admin/organization-access': typeof AuthenticatedAdminOrganizationAccessIndexRoute
   '/admin/plugins': typeof AuthenticatedAdminPluginsIndexRoute
   '/admin/settings': typeof AuthenticatedAdminSettingsIndexRoute
   '/admin/users': typeof AuthenticatedAdminUsersIndexRoute
@@ -362,6 +388,7 @@ export interface FileRoutesByTo {
   '/projects/$projectId/docs': typeof AuthenticatedProjectsProjectIdDocsIndexRoute
   '/projects/$projectId/environments': typeof AuthenticatedProjectsProjectIdEnvironmentsIndexRoute
   '/projects/$projectId/settings': typeof AuthenticatedProjectsProjectIdSettingsIndexRoute
+  '/projects/$projectId/tasks': typeof AuthenticatedProjectsProjectIdTasksIndexRoute
   '/projects/$projectId/team': typeof AuthenticatedProjectsProjectIdTeamIndexRoute
   '/projects/$projectId/environments/$environmentId/connect': typeof AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdConnectRoute
   '/projects/$projectId/environments/$environmentId/terminal': typeof AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdTerminalRoute
@@ -378,6 +405,7 @@ export interface FileRoutesById {
   '/set-password': typeof SetPasswordRoute
   '/_authenticated/conversations': typeof AuthenticatedConversationsRouteWithChildren
   '/_authenticated/conversations/$conversationId': typeof AuthenticatedConversationsConversationIdRoute
+  '/_authenticated/device/capabilities': typeof AuthenticatedDeviceCapabilitiesRoute
   '/_authenticated/profile/api-keys': typeof AuthenticatedProfileApiKeysRoute
   '/_authenticated/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/_authenticated/conversations/': typeof AuthenticatedConversationsIndexRoute
@@ -387,6 +415,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/agents/': typeof AuthenticatedAdminAgentsIndexRoute
   '/_authenticated/admin/changelog/': typeof AuthenticatedAdminChangelogIndexRoute
   '/_authenticated/admin/global-roles/': typeof AuthenticatedAdminGlobalRolesIndexRoute
+  '/_authenticated/admin/organization-access/': typeof AuthenticatedAdminOrganizationAccessIndexRoute
   '/_authenticated/admin/plugins/': typeof AuthenticatedAdminPluginsIndexRoute
   '/_authenticated/admin/settings/': typeof AuthenticatedAdminSettingsIndexRoute
   '/_authenticated/admin/users/': typeof AuthenticatedAdminUsersIndexRoute
@@ -405,6 +434,7 @@ export interface FileRoutesById {
   '/_authenticated/projects/$projectId/docs/': typeof AuthenticatedProjectsProjectIdDocsIndexRoute
   '/_authenticated/projects/$projectId/environments/': typeof AuthenticatedProjectsProjectIdEnvironmentsIndexRoute
   '/_authenticated/projects/$projectId/settings/': typeof AuthenticatedProjectsProjectIdSettingsIndexRoute
+  '/_authenticated/projects/$projectId/tasks/': typeof AuthenticatedProjectsProjectIdTasksIndexRoute
   '/_authenticated/projects/$projectId/team/': typeof AuthenticatedProjectsProjectIdTeamIndexRoute
   '/_authenticated/projects/$projectId/environments/$environmentId/connect': typeof AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdConnectRoute
   '/_authenticated/projects/$projectId/environments/$environmentId/terminal': typeof AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdTerminalRoute
@@ -421,6 +451,7 @@ export interface FileRouteTypes {
     | '/set-password'
     | '/conversations'
     | '/conversations/$conversationId'
+    | '/device/capabilities'
     | '/profile/api-keys'
     | '/projects/$projectId'
     | '/conversations/'
@@ -430,6 +461,7 @@ export interface FileRouteTypes {
     | '/admin/agents/'
     | '/admin/changelog/'
     | '/admin/global-roles/'
+    | '/admin/organization-access/'
     | '/admin/plugins/'
     | '/admin/settings/'
     | '/admin/users/'
@@ -448,6 +480,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/docs/'
     | '/projects/$projectId/environments/'
     | '/projects/$projectId/settings/'
+    | '/projects/$projectId/tasks/'
     | '/projects/$projectId/team/'
     | '/projects/$projectId/environments/$environmentId/connect'
     | '/projects/$projectId/environments/$environmentId/terminal'
@@ -461,6 +494,7 @@ export interface FileRouteTypes {
     | '/change-password'
     | '/set-password'
     | '/conversations/$conversationId'
+    | '/device/capabilities'
     | '/profile/api-keys'
     | '/conversations'
     | '/home'
@@ -468,6 +502,7 @@ export interface FileRouteTypes {
     | '/admin/agents'
     | '/admin/changelog'
     | '/admin/global-roles'
+    | '/admin/organization-access'
     | '/admin/plugins'
     | '/admin/settings'
     | '/admin/users'
@@ -486,6 +521,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/docs'
     | '/projects/$projectId/environments'
     | '/projects/$projectId/settings'
+    | '/projects/$projectId/tasks'
     | '/projects/$projectId/team'
     | '/projects/$projectId/environments/$environmentId/connect'
     | '/projects/$projectId/environments/$environmentId/terminal'
@@ -501,6 +537,7 @@ export interface FileRouteTypes {
     | '/set-password'
     | '/_authenticated/conversations'
     | '/_authenticated/conversations/$conversationId'
+    | '/_authenticated/device/capabilities'
     | '/_authenticated/profile/api-keys'
     | '/_authenticated/projects/$projectId'
     | '/_authenticated/conversations/'
@@ -510,6 +547,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/agents/'
     | '/_authenticated/admin/changelog/'
     | '/_authenticated/admin/global-roles/'
+    | '/_authenticated/admin/organization-access/'
     | '/_authenticated/admin/plugins/'
     | '/_authenticated/admin/settings/'
     | '/_authenticated/admin/users/'
@@ -528,6 +566,7 @@ export interface FileRouteTypes {
     | '/_authenticated/projects/$projectId/docs/'
     | '/_authenticated/projects/$projectId/environments/'
     | '/_authenticated/projects/$projectId/settings/'
+    | '/_authenticated/projects/$projectId/tasks/'
     | '/_authenticated/projects/$projectId/team/'
     | '/_authenticated/projects/$projectId/environments/$environmentId/connect'
     | '/_authenticated/projects/$projectId/environments/$environmentId/terminal'
@@ -616,6 +655,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProfileApiKeysRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/device/capabilities': {
+      id: '/_authenticated/device/capabilities'
+      path: '/device/capabilities'
+      fullPath: '/device/capabilities'
+      preLoaderRoute: typeof AuthenticatedDeviceCapabilitiesRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/conversations/$conversationId': {
       id: '/_authenticated/conversations/$conversationId'
       path: '/$conversationId'
@@ -651,6 +697,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminPluginsIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/admin/organization-access/': {
+      id: '/_authenticated/admin/organization-access/'
+      path: '/admin/organization-access'
+      fullPath: '/admin/organization-access/'
+      preLoaderRoute: typeof AuthenticatedAdminOrganizationAccessIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/admin/global-roles/': {
       id: '/_authenticated/admin/global-roles/'
       path: '/admin/global-roles'
@@ -684,6 +737,13 @@ declare module '@tanstack/react-router' {
       path: '/team'
       fullPath: '/projects/$projectId/team/'
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdTeamIndexRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/projects/$projectId/tasks/': {
+      id: '/_authenticated/projects/$projectId/tasks/'
+      path: '/tasks'
+      fullPath: '/projects/$projectId/tasks/'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdTasksIndexRouteImport
       parentRoute: typeof AuthenticatedProjectsProjectIdRoute
     }
     '/_authenticated/projects/$projectId/settings/': {
@@ -877,6 +937,7 @@ interface AuthenticatedProjectsProjectIdRouteChildren {
   AuthenticatedProjectsProjectIdDocsIndexRoute: typeof AuthenticatedProjectsProjectIdDocsIndexRoute
   AuthenticatedProjectsProjectIdEnvironmentsIndexRoute: typeof AuthenticatedProjectsProjectIdEnvironmentsIndexRoute
   AuthenticatedProjectsProjectIdSettingsIndexRoute: typeof AuthenticatedProjectsProjectIdSettingsIndexRoute
+  AuthenticatedProjectsProjectIdTasksIndexRoute: typeof AuthenticatedProjectsProjectIdTasksIndexRoute
   AuthenticatedProjectsProjectIdTeamIndexRoute: typeof AuthenticatedProjectsProjectIdTeamIndexRoute
   AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdConnectRoute: typeof AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdConnectRoute
   AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdTerminalRoute: typeof AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdTerminalRoute
@@ -912,6 +973,8 @@ const AuthenticatedProjectsProjectIdRouteChildren: AuthenticatedProjectsProjectI
       AuthenticatedProjectsProjectIdEnvironmentsIndexRoute,
     AuthenticatedProjectsProjectIdSettingsIndexRoute:
       AuthenticatedProjectsProjectIdSettingsIndexRoute,
+    AuthenticatedProjectsProjectIdTasksIndexRoute:
+      AuthenticatedProjectsProjectIdTasksIndexRoute,
     AuthenticatedProjectsProjectIdTeamIndexRoute:
       AuthenticatedProjectsProjectIdTeamIndexRoute,
     AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdConnectRoute:
@@ -935,6 +998,7 @@ const AuthenticatedProjectsProjectIdRouteWithChildren =
 
 interface AuthenticatedRouteChildren {
   AuthenticatedConversationsRoute: typeof AuthenticatedConversationsRouteWithChildren
+  AuthenticatedDeviceCapabilitiesRoute: typeof AuthenticatedDeviceCapabilitiesRoute
   AuthenticatedProfileApiKeysRoute: typeof AuthenticatedProfileApiKeysRoute
   AuthenticatedProjectsProjectIdRoute: typeof AuthenticatedProjectsProjectIdRouteWithChildren
   AuthenticatedHomeIndexRoute: typeof AuthenticatedHomeIndexRoute
@@ -942,6 +1006,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAdminAgentsIndexRoute: typeof AuthenticatedAdminAgentsIndexRoute
   AuthenticatedAdminChangelogIndexRoute: typeof AuthenticatedAdminChangelogIndexRoute
   AuthenticatedAdminGlobalRolesIndexRoute: typeof AuthenticatedAdminGlobalRolesIndexRoute
+  AuthenticatedAdminOrganizationAccessIndexRoute: typeof AuthenticatedAdminOrganizationAccessIndexRoute
   AuthenticatedAdminPluginsIndexRoute: typeof AuthenticatedAdminPluginsIndexRoute
   AuthenticatedAdminSettingsIndexRoute: typeof AuthenticatedAdminSettingsIndexRoute
   AuthenticatedAdminUsersIndexRoute: typeof AuthenticatedAdminUsersIndexRoute
@@ -951,6 +1016,7 @@ interface AuthenticatedRouteChildren {
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedConversationsRoute: AuthenticatedConversationsRouteWithChildren,
+  AuthenticatedDeviceCapabilitiesRoute: AuthenticatedDeviceCapabilitiesRoute,
   AuthenticatedProfileApiKeysRoute: AuthenticatedProfileApiKeysRoute,
   AuthenticatedProjectsProjectIdRoute:
     AuthenticatedProjectsProjectIdRouteWithChildren,
@@ -960,6 +1026,8 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAdminChangelogIndexRoute: AuthenticatedAdminChangelogIndexRoute,
   AuthenticatedAdminGlobalRolesIndexRoute:
     AuthenticatedAdminGlobalRolesIndexRoute,
+  AuthenticatedAdminOrganizationAccessIndexRoute:
+    AuthenticatedAdminOrganizationAccessIndexRoute,
   AuthenticatedAdminPluginsIndexRoute: AuthenticatedAdminPluginsIndexRoute,
   AuthenticatedAdminSettingsIndexRoute: AuthenticatedAdminSettingsIndexRoute,
   AuthenticatedAdminUsersIndexRoute: AuthenticatedAdminUsersIndexRoute,

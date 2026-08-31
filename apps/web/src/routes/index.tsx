@@ -8,18 +8,25 @@ import {
 import LanguageToggle from "@/components/LanguageToggle";
 import ThemeToggle from "@/components/ThemeToggle";
 import { currentUserQueryOptions } from "@/lib/auth-api";
+import { safeAuthReturnTo } from "@/lib/auth-return-to";
 
 export const Route = createFileRoute("/")({
-	beforeLoad: async ({ context: { queryClient } }) => {
+	validateSearch: (search: Record<string, unknown>) => ({
+		...(safeAuthReturnTo(search.return_to)
+			? { return_to: safeAuthReturnTo(search.return_to) as string }
+			: {}),
+	}),
+	beforeLoad: async ({ context: { queryClient }, search }) => {
 		const user = await queryClient
 			.fetchQuery(currentUserQueryOptions)
 			.catch(() => null);
-		if (user) throw redirect({ to: "/home" });
+		if (user) throw redirect({ href: search.return_to ?? "/home" });
 	},
 	component: LoginPage,
 });
 
 function LoginPage() {
+	const { return_to: returnTo } = Route.useSearch();
 	return (
 		<div className="flex min-h-screen flex-col">
 			{/* Top bar */}
@@ -33,7 +40,7 @@ function LoginPage() {
 				<div className="island-shell rise-in w-full max-w-4xl overflow-hidden rounded-xl">
 					<div className="grid lg:grid-cols-[1fr_400px]">
 						<BrandPanel />
-						<LoginFormPanel />
+						<LoginFormPanel returnTo={returnTo} />
 					</div>
 				</div>
 			</main>

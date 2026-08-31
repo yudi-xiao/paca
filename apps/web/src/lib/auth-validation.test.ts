@@ -44,7 +44,7 @@ describe("validatePassword", () => {
 	});
 
 	it("accepts a sufficiently long value", () => {
-		expect(validatePassword("validpass1", t)).toBeUndefined();
+		expect(validatePassword("validpassword1", t)).toBeUndefined();
 	});
 });
 
@@ -62,13 +62,15 @@ describe("validateNewPassword", () => {
 	});
 
 	it("rejects the same value as the current password", () => {
-		expect(validateNewPassword("SamePass1", "SamePass1", t)).toBe(
+		expect(validateNewPassword("SamePassword1", "SamePassword1", t)).toBe(
 			"New password must be different from current password.",
 		);
 	});
 
 	it("accepts a sufficiently long, different value", () => {
-		expect(validateNewPassword("NewPass123", "OldPass123", t)).toBeUndefined();
+		expect(
+			validateNewPassword("NewPassword123", "OldPassword123", t),
+		).toBeUndefined();
 	});
 });
 

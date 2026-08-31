@@ -1,0 +1,7 @@
+# Copy to .dev.vars for local-only secrets. Never commit .dev.vars.
+BETTER_AUTH_SECRET=replace-with-at-least-32-random-characters
+BETTER_AUTH_URL=http://localhost:8787
+# Optional; autonomous mode stays disabled unless this is at least 32 random characters.
+AUTONOMOUS_HOST_ENROLLMENT_SECRET=replace-with-a-separate-high-entropy-bootstrap-secret
+INTERNAL_HEALTH_TOKEN=replace-with-a-long-random-value
+TRUSTED_ORIGINS=http://localhost:3000,http://localhost:8787

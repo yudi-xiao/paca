@@ -102,7 +102,7 @@ function RoleTableRow({
 	onDelete,
 }: RoleRowProps) {
 	const { t } = useTranslation("projects");
-	const isSystem = !role.project_id;
+	const isSystem = role.is_built_in === true || !role.project_id;
 	const active = activePermissions(role.permissions);
 
 	return (
@@ -179,7 +179,8 @@ export function RolesSettings({
 	const [editRole, setEditRole] = useState<ProjectRole | null>(null);
 	const [deleteRole, setDeleteRole] = useState<ProjectRole | null>(null);
 
-	const systemRoles = roles?.filter((r) => !r.project_id) ?? [];
+	const systemRoles =
+		roles?.filter((r) => r.is_built_in === true || !r.project_id) ?? [];
 
 	return (
 		<div className="rounded-xl border border-border/60 bg-card p-6">

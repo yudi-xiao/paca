@@ -37,6 +37,7 @@ import { getInitials } from "@/lib/utils";
 
 export function UserMenu() {
 	const { t } = useTranslation("appShell");
+	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 	const { t: tShortcuts } = useTranslation("shortcuts");
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
@@ -132,12 +133,14 @@ export function UserMenu() {
 							<User className="size-4" />
 							{t("userMenu.myProfile")}
 						</DropdownMenuItem>
-						<DropdownMenuItem
-							onClick={() => void navigate({ to: "/profile/api-keys" })}
-						>
-							<Key className="size-4" />
-							{t("userMenu.apiKeys")}
-						</DropdownMenuItem>
+						{isInternalPreview ? null : (
+							<DropdownMenuItem
+								onClick={() => void navigate({ to: "/profile/api-keys" })}
+							>
+								<Key className="size-4" />
+								{t("userMenu.apiKeys")}
+							</DropdownMenuItem>
+						)}
 						<DropdownMenuItem onClick={() => openShortcutHelp(true)}>
 							<Keyboard className="size-4" />
 							{tShortcuts("dialog.menuLabel")}

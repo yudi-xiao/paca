@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { AlertCircle, Check, ChevronRight, MessageSquare } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -23,6 +23,14 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/docs/$docId",
 )({
+	beforeLoad: ({ params: { projectId } }) => {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+			throw redirect({
+				to: "/projects/$projectId",
+				params: { projectId },
+			});
+		}
+	},
 	component: DocEditorPage,
 });
 

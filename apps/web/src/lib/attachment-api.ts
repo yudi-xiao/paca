@@ -18,6 +18,8 @@ export interface TaskAttachment {
 	file_id: string;
 	created_by?: string | null;
 	created_at: string;
+	deleted_at?: string | null;
+	purge_after?: string | null;
 	file: AttachmentFile;
 }
 
@@ -58,10 +60,12 @@ const MULTIPART_CHUNK_SIZE = 5 * 1024 * 1024; // 5 MiB — matches server Defaul
 export async function listTaskAttachments(
 	projectId: string,
 	taskId: string,
+	options: { deleted?: boolean } = {},
 ): Promise<TaskAttachment[]> {
+	const params = options.deleted ? "?deleted=true" : "";
 	const { data } = await apiClient.instance.get<
 		SuccessEnvelope<AttachmentListResult>
-	>(`/projects/${projectId}/tasks/${taskId}/attachments`);
+	>(`/projects/${projectId}/tasks/${taskId}/attachments${params}`);
 	return data.data.items;
 }
 
@@ -97,6 +101,16 @@ async function completeUpload(
 	return data.data;
 }
 
+async function cancelUpload(
+	projectId: string,
+	taskId: string,
+	fileId: string,
+): Promise<void> {
+	await apiClient.instance.delete(
+		`/projects/${projectId}/tasks/${taskId}/attachments/uploads/${fileId}`,
+	);
+}
+
 export async function getAttachmentDownloadURL(
 	projectId: string,
 	taskId: string,
@@ -122,6 +136,19 @@ export async function deleteTaskAttachment(
 	);
 }
 
+export async function restoreTaskAttachment(
+	projectId: string,
+	taskId: string,
+	attachmentId: string,
+): Promise<TaskAttachment> {
+	const { data } = await apiClient.instance.post<
+		SuccessEnvelope<TaskAttachment>
+	>(
+		`/projects/${projectId}/tasks/${taskId}/attachments/${attachmentId}/restore`,
+	);
+	return data.data;
+}
+
 // ── Upload orchestration ──────────────────────────────────────────────────────
 
 /**
@@ -144,50 +171,52 @@ export async function uploadAttachment(
 		file_size: file.size,
 	});
 
-	if (session.is_multipart && session.multipart) {
-		// 2a. Multipart path: upload each part sequentially.
-		const { upload_id, parts } = session.multipart;
-		const completedParts: CompletedPart[] = [];
-		let loaded = 0;
+	try {
+		if (session.is_multipart && session.multipart) {
+			// 2a. Multipart path: upload each part sequentially.
+			const { upload_id, parts } = session.multipart;
+			const completedParts: CompletedPart[] = [];
+			let loaded = 0;
 
-		for (const part of parts) {
-			const start = (part.part_number - 1) * MULTIPART_CHUNK_SIZE;
-			const end = Math.min(start + MULTIPART_CHUNK_SIZE, file.size);
-			const chunk = file.slice(start, end);
+			for (const part of parts) {
+				const start = (part.part_number - 1) * MULTIPART_CHUNK_SIZE;
+				const end = Math.min(start + MULTIPART_CHUNK_SIZE, file.size);
+				const chunk = file.slice(start, end);
 
-			const resp = await fetch(part.upload_url, {
-				method: "PUT",
-				body: chunk,
-				headers: { "Content-Type": file.type || "application/octet-stream" },
+				const resp = await fetch(part.upload_url, {
+					method: "PUT",
+					body: chunk,
+					headers: { "Content-Type": file.type || "application/octet-stream" },
+				});
+
+				if (!resp.ok) {
+					throw new Error(
+						`Part ${part.part_number} upload failed: ${resp.status}`,
+					);
+				}
+
+				// S3 / MinIO returns the ETag in the response headers.
+				const etag = resp.headers.get("ETag") ?? resp.headers.get("etag");
+				if (!etag) {
+					throw new Error(
+						`Part ${part.part_number} upload succeeded but did not return an ETag header. ` +
+							`Multipart uploads require the object store to expose ETag via CORS.`,
+					);
+				}
+				completedParts.push({ part_number: part.part_number, etag });
+
+				loaded += chunk.size;
+				onProgress?.(loaded, file.size);
+			}
+
+			// 3a. Complete multipart upload.
+			return completeUpload(projectId, taskId, {
+				file_id: session.file_id,
+				upload_id,
+				parts: completedParts,
 			});
-
-			if (!resp.ok) {
-				throw new Error(
-					`Part ${part.part_number} upload failed: ${resp.status}`,
-				);
-			}
-
-			// S3 / MinIO returns the ETag in the response headers.
-			const etag = resp.headers.get("ETag") ?? resp.headers.get("etag");
-			if (!etag) {
-				throw new Error(
-					`Part ${part.part_number} upload succeeded but did not return an ETag header. ` +
-						`Multipart uploads require the object store to expose ETag via CORS.`,
-				);
-			}
-			completedParts.push({ part_number: part.part_number, etag });
-
-			loaded += chunk.size;
-			onProgress?.(loaded, file.size);
 		}
 
-		// 3a. Complete multipart upload.
-		return completeUpload(projectId, taskId, {
-			file_id: session.file_id,
-			upload_id,
-			parts: completedParts,
-		});
-	} else {
 		// 2b. Single-part path: upload the entire file.
 		if (!session.upload_url) {
 			throw new Error("Server returned no upload URL");
@@ -215,7 +244,14 @@ export async function uploadAttachment(
 		});
 
 		// 3b. Confirm single-part upload.
-		return completeUpload(projectId, taskId, { file_id: session.file_id });
+		return await completeUpload(projectId, taskId, {
+			file_id: session.file_id,
+		});
+	} catch (error) {
+		await cancelUpload(projectId, taskId, session.file_id).catch(
+			() => undefined,
+		);
+		throw error;
 	}
 }
 
@@ -224,10 +260,18 @@ export async function uploadAttachment(
 export const taskAttachmentsQueryOptions = (
 	projectId: string,
 	taskId: string,
+	options: { deleted?: boolean } = {},
 ) =>
 	queryOptions({
-		queryKey: ["projects", projectId, "tasks", taskId, "attachments"] as const,
-		queryFn: () => listTaskAttachments(projectId, taskId),
+		queryKey: [
+			"projects",
+			projectId,
+			"tasks",
+			taskId,
+			"attachments",
+			options.deleted ? "deleted" : "active",
+		] as const,
+		queryFn: () => listTaskAttachments(projectId, taskId, options),
 		enabled: !!projectId && !!taskId,
 		staleTime: 30_000,
 	});

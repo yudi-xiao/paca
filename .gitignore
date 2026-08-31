@@ -7,6 +7,14 @@ dist-ssr
 .env
 .env.production
 .env.dev
+.paca/agent-host.json
+.paca/agent-host.json.tmp-*
+.paca/agents/*.json
+.paca/agents/*.json.tmp-*
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.idea/
 .nitro
 .tanstack
 .wrangler

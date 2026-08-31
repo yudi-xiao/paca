@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
 	type DisplayLinkType,
 	type LinkType,
-	listAllTasks,
+	listTaskPages,
 	type Task,
 } from "@/lib/interaction-api";
 
@@ -66,22 +66,8 @@ const DISPLAY_TO_CANONICAL: Partial<
 	duplicates: { linkType: "duplicates", otherTaskIsSource: false },
 };
 
-// The task list API caps page_size at 200, so the search box needs to page
-// through the full project rather than fetching a single page - otherwise
-// tasks past the first 200 are invisible to the search.
-const MAX_TASK_PAGES = 25;
-
 async function fetchAllProjectTasks(projectId: string): Promise<Task[]> {
-	const all: Task[] = [];
-	let cursor: string | undefined;
-	for (let page = 0; page < MAX_TASK_PAGES; page++) {
-		const result = await listAllTasks(projectId, { pageSize: 200, cursor });
-		all.push(...result.items);
-		const next = result.next_cursor;
-		if (!next) break;
-		cursor = next;
-	}
-	return all;
+	return listTaskPages(projectId);
 }
 
 export function AddTaskLinkModal({

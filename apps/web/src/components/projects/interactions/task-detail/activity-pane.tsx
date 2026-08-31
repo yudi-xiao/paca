@@ -102,6 +102,14 @@ export function TaskActivityPane({
 						? t("taskDetail.activity.removedAttachmentNamed", { fileName })
 						: t("taskDetail.activity.removedAttachment");
 				}
+				case "task.attachment.restored": {
+					const fileName = (c as Record<string, unknown>).file_name as
+						| string
+						| undefined;
+					return fileName
+						? t("taskDetail.activity.restoredAttachmentNamed", { fileName })
+						: t("taskDetail.activity.restoredAttachment");
+				}
 				case "task.link.added": {
 					const linkType =
 						(c as Record<string, unknown>).link_type === "blocks"

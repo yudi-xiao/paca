@@ -51,13 +51,14 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePermissions } from "@/hooks/use-permissions";
-import { type User, usersInfiniteQueryOptions } from "@/lib/admin-api";
 import { type Agent, chattableAgentsQueryOptions } from "@/lib/agent-api";
 import { currentUserQueryOptions } from "@/lib/auth-api";
 import {
 	addProjectMember,
 	type ProjectMember,
+	type ProjectMemberCandidate,
 	type ProjectRole,
+	projectMemberCandidatesInfiniteQueryOptions,
 	projectMembersQueryOptions,
 	projectQueryOptions,
 	projectRolesQueryOptions,
@@ -99,9 +100,9 @@ function UserPickerItem({
 	selected,
 	onSelect,
 }: {
-	user: User;
+	user: ProjectMemberCandidate;
 	selected: boolean;
-	onSelect: (user: User) => void;
+	onSelect: (user: ProjectMemberCandidate) => void;
 }) {
 	const display = user.full_name || user.username;
 	return (
@@ -148,15 +149,14 @@ function AddMemberDialog({
 }) {
 	const { t } = useTranslation("projects");
 	const queryClient = useQueryClient();
-	const { hasPermission: can } = usePermissions();
 	const [mode, setMode] = useState<"user" | "agent">("user");
-	const [selectedUser, setSelectedUser] = useState<User | null>(null);
+	const [selectedUser, setSelectedUser] =
+		useState<ProjectMemberCandidate | null>(null);
 	const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
 	const [selectedRoleId, setSelectedRoleId] = useState<string>("");
 	const [userSearch, setUserSearch] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
-	const canReadUsers = can("users.read");
 	const selectedAgentAvatarUrl = selectedAgent
 		? resolveAgentAvatarUrl(selectedAgent)
 		: undefined;
@@ -174,8 +174,8 @@ function AddMemberDialog({
 		hasNextPage,
 		isFetchingNextPage,
 	} = useInfiniteQuery({
-		...usersInfiniteQueryOptions(),
-		enabled: open && canReadUsers,
+		...projectMemberCandidatesInfiniteQueryOptions(projectId),
+		enabled: open && mode === "user",
 	});
 
 	const usersData = useMemo(
@@ -189,8 +189,8 @@ function AddMemberDialog({
 		onLoadMore: () => void fetchNextPage(),
 	});
 
-	const filteredUsers = useMemo<User[]>(() => {
-		const items: User[] = usersData;
+	const filteredUsers = useMemo<ProjectMemberCandidate[]>(() => {
+		const items: ProjectMemberCandidate[] = usersData;
 		const q = userSearch.toLowerCase();
 		return items
 			.filter((u) => !existingMemberIds.has(u.id))
@@ -273,37 +273,9 @@ function AddMemberDialog({
 				</DialogHeader>
 
 				<div className="space-y-4 py-1">
-					{/* Mode toggle: invite a human user, or invite a global agent */}
-					<div className="grid grid-cols-2 gap-2">
-						{(["user", "agent"] as const).map((m) => {
-							const isSelected = mode === m;
-							return (
-								<button
-									key={m}
-									type="button"
-									onClick={() => {
-										setMode(m);
-										setSelectedUser(null);
-										setSelectedAgent(null);
-										setError(null);
-									}}
-									className={`flex items-center justify-center gap-1.5 rounded-lg border p-2.5 text-xs font-medium transition-all ${
-										isSelected
-											? "border-primary/40 bg-primary/5 ring-1 ring-primary/20"
-											: "border-border/60 hover:border-border hover:bg-muted/30"
-									}`}
-								>
-									{m === "user" ? (
-										<UserRound className="size-3.5" />
-									) : (
-										<Bot className="size-3.5" />
-									)}
-									{m === "user"
-										? t("team.addMemberDialog.modeUser")
-										: t("team.addMemberDialog.modeAgent")}
-								</button>
-							);
-						})}
+					<div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+						<UserRound className="size-3.5 text-primary" />
+						{t("team.addMemberDialog.modeUser")}
 					</div>
 
 					{mode === "agent" ? (
@@ -444,7 +416,7 @@ function AddMemberDialog({
 													: t("team.addMemberDialog.noUsersAvailable")}
 											</p>
 										) : (
-											filteredUsers.map((user: User) => (
+											filteredUsers.map((user: ProjectMemberCandidate) => (
 												<UserPickerItem
 													key={user.id}
 													user={user}

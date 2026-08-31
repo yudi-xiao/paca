@@ -19,6 +19,7 @@
 		"home": "首页",
 		"administration": "系统管理",
 		"globalRoles": "全局角色",
+		"organizationAccess": "组织权限",
 		"users": "用户",
 		"plugins": "插件",
 		"allProjects": "所有项目",

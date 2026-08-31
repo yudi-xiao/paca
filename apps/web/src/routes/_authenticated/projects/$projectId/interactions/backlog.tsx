@@ -11,13 +11,17 @@ export const Route = createFileRoute(
 });
 
 function BacklogPage() {
+	return <FullBacklogPage />;
+}
+
+function FullBacklogPage() {
 	const { projectId } = Route.useParams();
 	const { hasProjectPermission } = useProjectPermissions(projectId);
 	const { t } = useTranslation("projects");
 
 	const canCreate = hasProjectPermission("tasks.write");
 	const canEdit = hasProjectPermission("tasks.write");
-	const canManageViews = hasProjectPermission("projects.write");
+	const canManageViews = hasProjectPermission("sprints.write");
 
 	return (
 		<InteractionLayout

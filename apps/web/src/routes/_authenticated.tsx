@@ -17,6 +17,7 @@ import {
 import { onTokenRefreshed } from "@/lib/api-client";
 import { isPasswordChangeRequired } from "@/lib/api-error";
 import { currentUserQueryOptions } from "@/lib/auth-api";
+import { internalPreviewNavigationTarget } from "@/lib/internal-preview";
 import { playNotificationSound } from "@/lib/notification-sound";
 import { PluginRegistryProvider } from "@/lib/plugins/registry";
 import { ShortcutProvider } from "@/lib/shortcuts/provider";
@@ -47,6 +48,13 @@ const CONVERSATIONS_ROUTE_RE = /^\/conversations(\/|$)/;
 
 export const Route = createFileRoute("/_authenticated")({
 	beforeLoad: async ({ context: { queryClient }, location }) => {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+			const target = internalPreviewNavigationTarget(location.pathname);
+			if (target !== location.pathname) {
+				throw redirect({ to: target as "/home" });
+			}
+		}
+
 		const isProjectRoute = PROJECT_ROUTE_RE.test(location.pathname);
 
 		const user = await queryClient
@@ -62,7 +70,10 @@ export const Route = createFileRoute("/_authenticated")({
 		// reachable without being signed in); every other authenticated route
 		// requires one.
 		if (!user && !isProjectRoute) {
-			throw redirect({ to: "/" });
+			throw redirect({
+				to: "/",
+				search: { return_to: location.href },
+			});
 		}
 
 		if (user?.must_change_password) {
@@ -78,17 +89,20 @@ function AuthenticatedLayout() {
 	const queryClient = useQueryClient();
 	const { data: user } = useQuery(currentUserQueryOptions);
 	const pathname = useRouterState({ select: (s) => s.location.pathname });
+	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 	// Global agent chat is available everywhere except inside a project
 	// (project pages already mount their own project-scoped AIChatFloat, see
 	// routes/_authenticated/projects/$projectId.tsx) or on the global
 	// Conversations page itself (see CONVERSATIONS_ROUTE_RE above).
 	const showGlobalChat =
 		!!user &&
+		!isInternalPreview &&
 		!PROJECT_ROUTE_RE.test(pathname) &&
 		!CONVERSATIONS_ROUTE_RE.test(pathname);
 
 	useEffect(() => {
 		if (!user) return;
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") return;
 
 		const socket = connectSocket();
 

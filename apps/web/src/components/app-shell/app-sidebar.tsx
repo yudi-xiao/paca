@@ -9,6 +9,7 @@ import {
 	ArrowLeft,
 	BookOpen,
 	Bot,
+	Building2,
 	CheckCircle2,
 	ChevronDown,
 	ChevronRight,
@@ -92,6 +93,7 @@ import {
 	updateFolder,
 } from "@/lib/doc-api";
 import { sprintsQueryOptions, updateTask } from "@/lib/interaction-api";
+import { organizationRolesQueryOptions } from "@/lib/organization-api";
 import type { PluginNavRegistration } from "@/lib/plugin-api";
 import { ExtensionPoint } from "@/lib/plugins/extension-point";
 import { resolvePluginIcon } from "@/lib/plugins/icon-resolver";
@@ -1465,10 +1467,15 @@ function ThemeSwitcher() {
 // ── App Sidebar ────────────────────────────────────────────────────────────────
 export function AppSidebar() {
 	const { t } = useTranslation("appShell");
+	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 	const { hasPermission } = usePermissions();
 	const { resolvedMode } = useThemeMode();
 	const { projectId } = useParams({ strict: false });
 	const { data: user } = useQuery(currentUserQueryOptions);
+	const organizationRolesQuery = useQuery({
+		...organizationRolesQueryOptions,
+		enabled: Boolean(user) && isInternalPreview,
+	});
 	const { getNavItems } = usePluginRegistry();
 	const branding = useBranding();
 	const logoUrl = branding?.logo_thumb_url ?? branding?.logo_url;
@@ -1488,6 +1495,8 @@ export function AppSidebar() {
 	const canAccessSettings = hasPermission("settings.write");
 
 	const canCreateProject = hasPermission("projects.create");
+	const canAccessOrganization =
+		isInternalPreview && organizationRolesQuery.isSuccess;
 
 	// Plugin admin nav items are gated by their own declared
 	// `requiredPermission` (falling back to open access if the plugin didn't
@@ -1501,15 +1510,18 @@ export function AppSidebar() {
 
 	const showAdminSection =
 		canAccessGlobalRoles ||
-		canAccessUsers ||
+		canAccessOrganization ||
 		canAccessGlobalAgents ||
-		canAccessPlugins ||
-		canAccessSettings ||
-		adminPluginNavItems.length > 0;
+		(!isInternalPreview &&
+			(canAccessUsers ||
+				canAccessPlugins ||
+				canAccessSettings ||
+				adminPluginNavItems.length > 0));
 	// Plugin-contributed admin pages get their own sidebar section, separate
 	// from core workspace administration — the "Plugins" management link
 	// itself (canAccessPlugins) stays in Administration.
-	const showPluginsSection = adminPluginNavItems.length > 0;
+	const showPluginsSection =
+		!isInternalPreview && adminPluginNavItems.length > 0;
 	const isProjectContext = !!projectId;
 	const isAnonymous = !user;
 
@@ -1560,24 +1572,65 @@ export function AppSidebar() {
 			{/* Navigation — switches between workspace and project context */}
 			<SidebarContent>
 				{isProjectContext ? (
-					<>
-						{user && <ProjectNav />}
-						{user && <SidebarSeparator />}
-						<ProjectInteractionsSection
-							projectId={projectId}
-							isAnonymous={isAnonymous}
-						/>
-						<SidebarSeparator />
-						<DocsSidebarSection projectId={projectId} />
-						<SidebarSeparator />
-						<ExtensionPoint
-							point="sidebar.project.section"
-							componentProps={{ projectId }}
-						/>
-						<SidebarSeparator />
-						<PluginProjectPages projectId={projectId} />
-						<ProjectNavItems projectId={projectId} isAnonymous={isAnonymous} />
-					</>
+					isInternalPreview ? (
+						<>
+							{user && <ProjectNav />}
+							{user && <SidebarSeparator />}
+							<ProjectInteractionsSection
+								projectId={projectId}
+								isAnonymous={isAnonymous}
+							/>
+							<SidebarSeparator />
+							<SidebarGroup>
+								<SidebarGroupContent>
+									<SidebarMenu>
+										<NavItem
+											to={`/projects/${projectId}`}
+											icon={FolderKanban}
+											label={t("nav.project")}
+										/>
+										<NavItem
+											to={`/projects/${projectId}/tasks`}
+											icon={KanbanSquare}
+											label="任务"
+										/>
+										<NavItem
+											to={`/projects/${projectId}/team`}
+											icon={Users}
+											label={t("nav.team")}
+										/>
+										<NavItem
+											to={`/projects/${projectId}/settings`}
+											icon={Settings}
+											label={t("nav.settings")}
+										/>
+									</SidebarMenu>
+								</SidebarGroupContent>
+							</SidebarGroup>
+						</>
+					) : (
+						<>
+							{user && <ProjectNav />}
+							{user && <SidebarSeparator />}
+							<ProjectInteractionsSection
+								projectId={projectId}
+								isAnonymous={isAnonymous}
+							/>
+							<SidebarSeparator />
+							<DocsSidebarSection projectId={projectId} />
+							<SidebarSeparator />
+							<ExtensionPoint
+								point="sidebar.project.section"
+								componentProps={{ projectId }}
+							/>
+							<SidebarSeparator />
+							<PluginProjectPages projectId={projectId} />
+							<ProjectNavItems
+								projectId={projectId}
+								isAnonymous={isAnonymous}
+							/>
+						</>
+					)
 				) : (
 					<>
 						{user && (
@@ -1585,11 +1638,13 @@ export function AppSidebar() {
 								<SidebarGroupContent>
 									<SidebarMenu>
 										<NavItem to="/home" icon={Home} label={t("nav.home")} />
-										<NavItem
-											to="/conversations"
-											icon={MessageSquare}
-											label={t("nav.conversations")}
-										/>
+										{isInternalPreview ? null : (
+											<NavItem
+												to="/conversations"
+												icon={MessageSquare}
+												label={t("nav.conversations")}
+											/>
+										)}
 									</SidebarMenu>
 								</SidebarGroupContent>
 							</SidebarGroup>
@@ -1613,7 +1668,14 @@ export function AppSidebar() {
 													label={t("nav.globalRoles")}
 												/>
 											) : null}
-											{canAccessUsers ? (
+											{canAccessOrganization ? (
+												<NavItem
+													to="/admin/organization-access"
+													icon={Building2}
+													label={t("nav.organizationAccess")}
+												/>
+											) : null}
+											{!isInternalPreview && canAccessUsers ? (
 												<NavItem
 													to="/admin/users"
 													icon={Users}
@@ -1627,7 +1689,7 @@ export function AppSidebar() {
 													label={t("nav.agents")}
 												/>
 											) : null}
-											{canAccessPlugins ? (
+											{!isInternalPreview && canAccessPlugins ? (
 												<NavItem
 													to="/admin/plugins"
 													icon={Puzzle}
@@ -1635,18 +1697,20 @@ export function AppSidebar() {
 													exact
 												/>
 											) : null}
-											{canAccessSettings ? (
+											{!isInternalPreview && canAccessSettings ? (
 												<NavItem
 													to="/admin/settings"
 													icon={Settings}
 													label={t("nav.settings")}
 												/>
 											) : null}
-											<NavItem
-												to="/admin/changelog"
-												icon={Sparkles}
-												label={t("nav.changelog")}
-											/>
+											{!isInternalPreview ? (
+												<NavItem
+													to="/admin/changelog"
+													icon={Sparkles}
+													label={t("nav.changelog")}
+												/>
+											) : null}
 										</SidebarMenu>
 									</SidebarGroupContent>
 								</SidebarGroup>

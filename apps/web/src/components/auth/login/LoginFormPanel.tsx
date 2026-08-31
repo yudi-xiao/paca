@@ -13,10 +13,11 @@ import { cn } from "@/lib/utils";
 
 import { FieldError } from "./FieldError";
 
-export function LoginFormPanel() {
+export function LoginFormPanel({ returnTo }: { returnTo?: string | null }) {
 	const { t } = useTranslation("auth");
 	const { t: tCommon } = useTranslation("common");
-	const { form, serverError } = useLoginForm();
+	const { form, serverError, isRegistering, createInternalPreviewAccount } =
+		useLoginForm(returnTo);
 	const [showPassword, setShowPassword] = useState(false);
 	const branding = useBranding();
 	const logoUrl = branding?.logo_thumb_url ?? branding?.logo_url;
@@ -74,8 +75,8 @@ export function LoginFormPanel() {
 								<Input
 									id={field.name}
 									name={field.name}
-									type="text"
-									autoComplete="username"
+									type="email"
+									autoComplete="email"
 									placeholder={t("login.usernamePlaceholder")}
 									value={field.state.value}
 									onBlur={field.handleBlur}
@@ -179,25 +180,54 @@ export function LoginFormPanel() {
 							isSubmitting: state.isSubmitting,
 						})}
 					>
-						{({ username, password, isSubmitting }) => (
-							<button
-								type="submit"
-								className={cn(
-									buttonVariants({ size: "lg" }),
-									"mt-1 h-11 w-full font-semibold tracking-wide bg-primary text-primary-foreground hover:bg-primary/90",
-								)}
-								disabled={isSubmitting || !username.trim() || !password}
-							>
-								{isSubmitting ? t("login.signingIn") : t("login.signIn")}
-							</button>
-						)}
+						{({ username, password, isSubmitting }) => {
+							const credentialsInvalid =
+								!username.includes("@") || password.length < 12;
+							return (
+								<div className="space-y-2.5">
+									<button
+										type="submit"
+										className={cn(
+											buttonVariants({ size: "lg" }),
+											"mt-1 h-11 w-full font-semibold tracking-wide bg-primary text-primary-foreground hover:bg-primary/90",
+										)}
+										disabled={
+											isSubmitting || isRegistering || credentialsInvalid
+										}
+									>
+										{isSubmitting ? t("login.signingIn") : t("login.signIn")}
+									</button>
+									{import.meta.env.VITE_INTERNAL_PREVIEW === "true" ? (
+										<button
+											type="button"
+											className={cn(
+												buttonVariants({ size: "lg", variant: "outline" }),
+												"h-11 w-full font-semibold",
+											)}
+											disabled={
+												isSubmitting || isRegistering || credentialsInvalid
+											}
+											onClick={() =>
+												void createInternalPreviewAccount(username, password)
+											}
+										>
+											{isRegistering
+												? t("login.creatingPreviewAccount")
+												: t("login.createPreviewAccount")}
+										</button>
+									) : null}
+								</div>
+							);
+						}}
 					</form.Subscribe>
 				</form>
 
 				{/* Divider + admin note */}
 				<div className="mt-6 border-t border-(--line) pt-5">
 					<p className="text-xs leading-relaxed text-(--sea-ink-soft)/70">
-						{t("login.adminManagedNote")}
+						{import.meta.env.VITE_INTERNAL_PREVIEW === "true"
+							? t("login.previewSignUpNote")
+							: t("login.adminManagedNote")}
 					</p>
 				</div>
 			</div>

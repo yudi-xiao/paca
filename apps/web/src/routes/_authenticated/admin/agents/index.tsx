@@ -4,6 +4,7 @@ import { Bot, Plus } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { AgentAuthPage } from "@/components/admin/agents/agent-auth-page";
 import { AgentCard } from "@/components/projects/agents/agent-card";
 import {
 	AcpSetupDialog,
@@ -39,12 +40,24 @@ export const Route = createFileRoute("/_authenticated/admin/agents/")({
 		}
 	},
 	loader: async ({ context: { queryClient } }) => {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+			const { agentAuthAgentsQueryOptions } = await import(
+				"@/lib/agent-auth-api"
+			);
+			await queryClient.ensureQueryData(agentAuthAgentsQueryOptions);
+			return;
+		}
 		await Promise.all([
 			queryClient.ensureQueryData(globalAgentsQueryOptions),
 			queryClient.ensureQueryData(llmModelsQueryOptions),
 		]);
 	},
-	component: GlobalAgentsPage,
+	component: () =>
+		import.meta.env.VITE_INTERNAL_PREVIEW === "true" ? (
+			<AgentAuthPage />
+		) : (
+			<GlobalAgentsPage />
+		),
 });
 
 // ── Page ───────────────────────────────────────────────────────────────────────

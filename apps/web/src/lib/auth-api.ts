@@ -1,8 +1,88 @@
 import { queryOptions } from "@tanstack/react-query";
-import axios from "axios";
 
 import { apiClient } from "./api-client";
-import type { SuccessEnvelope } from "./api-error";
+
+type JsonRecord = Record<string, unknown>;
+
+type BetterAuthUser = {
+	id: string;
+	name: string;
+	email: string;
+	emailVerified: boolean;
+	image: string | null;
+	createdAt: string;
+};
+
+type CurrentUserResponse = {
+	status: "ok";
+	data: {
+		user: BetterAuthUser;
+		expiresAt: string;
+	};
+};
+
+export class AuthApiError extends Error {
+	readonly status: number;
+	readonly code: string | null;
+
+	constructor(status: number, code: string | null) {
+		super(code ?? `AUTH_HTTP_${status}`);
+		this.name = "AuthApiError";
+		this.status = status;
+		this.code = code;
+	}
+}
+
+function asRecord(value: unknown): JsonRecord | null {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as JsonRecord)
+		: null;
+}
+
+async function readJson(response: Response): Promise<unknown> {
+	const contentType = response.headers.get("content-type") ?? "";
+	return contentType.includes("application/json") ? response.json() : null;
+}
+
+function isCurrentUserResponse(value: unknown): value is CurrentUserResponse {
+	const root = asRecord(value);
+	const data = asRecord(root?.data);
+	const user = asRecord(data?.user);
+	return (
+		root?.status === "ok" &&
+		typeof data?.expiresAt === "string" &&
+		typeof user?.id === "string" &&
+		typeof user?.name === "string" &&
+		typeof user?.email === "string" &&
+		typeof user?.emailVerified === "boolean" &&
+		(user?.image === null || typeof user?.image === "string") &&
+		typeof user?.createdAt === "string"
+	);
+}
+
+async function authRequest(
+	path: string,
+	init: RequestInit = {},
+): Promise<unknown> {
+	const headers = new Headers(init.headers);
+	headers.set("content-type", "application/json");
+	const response = await fetch(path, {
+		...init,
+		credentials: "include",
+		headers,
+	});
+	const body = await readJson(response);
+
+	if (!response.ok) {
+		const code = asRecord(body)?.code;
+		throw new AuthApiError(
+			response.status,
+			typeof code === "string" ? code : null,
+		);
+	}
+
+	return body;
+}
 
 /** Shape of the authenticated user returned by GET /users/me. */
 export interface User {
@@ -21,9 +101,13 @@ export async function changeMyPassword(
 	currentPassword: string,
 	newPassword: string,
 ): Promise<void> {
-	await apiClient.instance.patch("/users/me/password", {
-		current_password: currentPassword,
-		new_password: newPassword,
+	await authRequest("/api/auth/change-password", {
+		method: "POST",
+		body: JSON.stringify({
+			currentPassword,
+			newPassword,
+			revokeOtherSessions: true,
+		}),
 	});
 }
 
@@ -44,19 +128,40 @@ export async function setPasswordWithToken(
 }
 
 export async function login(
-	username: string,
+	email: string,
 	password: string,
 	rememberMe: boolean,
 ): Promise<void> {
-	await apiClient.instance.post("/auth/login", {
-		username,
-		password,
-		remember_me: rememberMe,
+	await authRequest("/api/auth/sign-in/email", {
+		method: "POST",
+		body: JSON.stringify({
+			email,
+			password,
+			rememberMe,
+		}),
+	});
+}
+
+export async function registerInternalPreview(
+	email: string,
+	password: string,
+): Promise<void> {
+	const localPart = email.split("@", 1)[0]?.trim();
+	await authRequest("/api/auth/sign-up/email", {
+		method: "POST",
+		body: JSON.stringify({
+			email,
+			name: localPart || "Paca Internal Tester",
+			password,
+		}),
 	});
 }
 
 export async function logout(): Promise<void> {
-	await apiClient.instance.post("/auth/logout");
+	await authRequest("/api/auth/sign-out", {
+		method: "POST",
+		body: "{}",
+	});
 }
 
 /**
@@ -72,11 +177,24 @@ export async function logout(): Promise<void> {
  */
 export async function getMe(): Promise<User | null> {
 	try {
-		const { data } =
-			await apiClient.instance.get<SuccessEnvelope<User>>("/users/me");
-		return data.data;
+		const response = await authRequest("/api/me");
+		if (!isCurrentUserResponse(response)) {
+			throw new AuthApiError(502, "AUTH_RESPONSE_INVALID");
+		}
+		const { user } = response.data;
+		return {
+			id: user.id,
+			username: user.email,
+			full_name: user.name,
+			email: user.email,
+			role: "member",
+			must_change_password: false,
+			avatar_url: user.image,
+			avatar_thumb_url: user.image,
+			created_at: user.createdAt,
+		};
 	} catch (err) {
-		if (axios.isAxiosError(err) && err.response?.status === 401) {
+		if (err instanceof AuthApiError && err.status === 401) {
 			return null;
 		}
 		throw err;

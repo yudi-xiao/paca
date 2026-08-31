@@ -52,6 +52,9 @@ export function DeleteRoleDialog({
 				[ApiErrorCode.GlobalRoleHasUsers]: t(
 					"globalRoles.deleteDialog.errors.hasUsersWarning",
 				),
+				[ApiErrorCode.GlobalRoleBuiltIn]: t(
+					"globalRoles.deleteDialog.errors.forbidden",
+				),
 				[ApiErrorCode.Forbidden]: t(
 					"globalRoles.deleteDialog.errors.forbidden",
 				),

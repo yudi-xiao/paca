@@ -169,6 +169,12 @@ export function activityDescription(
 						fileName: content.file_name,
 					})
 				: t("taskDetail.activity.removedAttachment");
+		case "task.attachment.restored":
+			return content.file_name
+				? t("taskDetail.activity.restoredAttachmentNamed", {
+						fileName: content.file_name,
+					})
+				: t("taskDetail.activity.restoredAttachment");
 		case "task.link.added": {
 			const linkType =
 				content.link_type === "blocks"

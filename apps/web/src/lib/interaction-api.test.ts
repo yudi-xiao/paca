@@ -19,13 +19,18 @@ vi.mock("./api-client", () => ({
 }));
 
 import {
+	addComment,
 	createTask,
+	deleteComment,
 	deleteTask,
 	getTask,
 	layoutToViewType,
 	listAllTasks,
 	listSprintTasks,
+	listTaskActivities,
+	listTaskPages,
 	type Task,
+	updateComment,
 	updateTask,
 } from "./interaction-api";
 
@@ -195,6 +200,62 @@ describe("interaction-api", () => {
 			expect(mockDelete).toHaveBeenCalledTimes(1);
 			expect(mockDelete).toHaveBeenCalledWith(
 				`/projects/${PROJECT_ID}/tasks/${TASK_ID}`,
+			);
+		});
+	});
+
+	describe("task activity and comments", () => {
+		const COMMENT_ID = "comment-1";
+		const content = [
+			{ type: "paragraph", content: [{ type: "text", text: "Ready" }] },
+		];
+		const activity = {
+			id: COMMENT_ID,
+			task_id: TASK_ID,
+			actor_id: "user-1",
+			actor_name: "Preview User",
+			actor_username: "preview@example.com",
+			activity_type: "comment",
+			content,
+			created_at: "2026-08-28T00:00:00Z",
+			updated_at: "2026-08-28T00:00:00Z",
+		};
+
+		it("lists task activity using the task-scoped endpoint", async () => {
+			mockGet.mockResolvedValue(ok({ items: [activity] }));
+			await expect(listTaskActivities(PROJECT_ID, TASK_ID)).resolves.toEqual([
+				activity,
+			]);
+			expect(mockGet).toHaveBeenCalledWith(
+				`/projects/${PROJECT_ID}/tasks/${TASK_ID}/activities`,
+			);
+		});
+
+		it("creates, updates and deletes comments through the activity contract", async () => {
+			mockPost.mockResolvedValue(ok(activity));
+			mockPatch.mockResolvedValue(ok(activity));
+			mockDelete.mockResolvedValue(ok({ message: "deleted" }));
+
+			await expect(addComment(PROJECT_ID, TASK_ID, content)).resolves.toEqual(
+				activity,
+			);
+			await expect(
+				updateComment(PROJECT_ID, TASK_ID, COMMENT_ID, content),
+			).resolves.toEqual(activity);
+			await expect(
+				deleteComment(PROJECT_ID, TASK_ID, COMMENT_ID),
+			).resolves.toBeUndefined();
+
+			expect(mockPost).toHaveBeenCalledWith(
+				`/projects/${PROJECT_ID}/tasks/${TASK_ID}/activities/comments`,
+				{ content },
+			);
+			expect(mockPatch).toHaveBeenCalledWith(
+				`/projects/${PROJECT_ID}/tasks/${TASK_ID}/activities/comments/${COMMENT_ID}`,
+				{ content },
+			);
+			expect(mockDelete).toHaveBeenCalledWith(
+				`/projects/${PROJECT_ID}/tasks/${TASK_ID}/activities/comments/${COMMENT_ID}`,
 			);
 		});
 	});
@@ -389,6 +450,41 @@ describe("interaction-api", () => {
 			expect(config.params?.story_points_min).toBeUndefined();
 			expect(config.params?.importance_ranges).toBeUndefined();
 			expect(config.params?.tags).toBeUndefined();
+		});
+	});
+
+	describe("listTaskPages", () => {
+		it("reads every cursor page without exceeding the Worker page-size contract", async () => {
+			const first = makeTask({ id: "task-1" });
+			const second = makeTask({ id: "task-2", task_number: 2 });
+			mockGet
+				.mockResolvedValueOnce(
+					ok({ items: [first], page_size: 100, next_cursor: "next" }),
+				)
+				.mockResolvedValueOnce(
+					ok({ items: [second], page_size: 100, next_cursor: null }),
+				);
+
+			await expect(
+				listTaskPages(PROJECT_ID, { parentTaskId: "parent-1" }),
+			).resolves.toEqual([first, second]);
+			expect(mockGet).toHaveBeenNthCalledWith(
+				1,
+				`/projects/${PROJECT_ID}/tasks`,
+				expect.objectContaining({
+					params: expect.objectContaining({
+						page_size: 100,
+						parent_task_id: "parent-1",
+					}),
+				}),
+			);
+			expect(mockGet).toHaveBeenNthCalledWith(
+				2,
+				`/projects/${PROJECT_ID}/tasks`,
+				expect.objectContaining({
+					params: expect.objectContaining({ page_size: 100, cursor: "next" }),
+				}),
+			);
 		});
 	});
 

@@ -35,6 +35,15 @@ export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/settings/",
 )({
 	loader: async ({ context: { queryClient }, params: { projectId } }) => {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+			await Promise.all([
+				queryClient.ensureQueryData(projectQueryOptions(projectId)),
+				queryClient.ensureQueryData(projectRolesQueryOptions(projectId)),
+				queryClient.ensureQueryData(projectMembersQueryOptions(projectId)),
+				queryClient.ensureQueryData(customFieldsQueryOptions(projectId)),
+			]);
+			return;
+		}
 		await Promise.all([
 			queryClient.ensureQueryData(projectQueryOptions(projectId)),
 			queryClient.ensureQueryData(projectRolesQueryOptions(projectId)),
@@ -81,6 +90,7 @@ const NAV_ITEMS = [
 function SettingsPage() {
 	const { t } = useTranslation("projects");
 	const { projectId } = Route.useParams();
+	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	const { hasPermission } = usePermissions();
 	const { data: currentUser } = useQuery(currentUserQueryOptions);
@@ -126,9 +136,14 @@ function SettingsPage() {
 		(r) => !r.hidden,
 	);
 
+	const availableNavItems = isInternalPreview
+		? NAV_ITEMS.filter((item) =>
+				["general", "roles", "custom-fields", "danger"].includes(item.id),
+			)
+		: NAV_ITEMS;
 	const visibleNavItems = canDelete
-		? NAV_ITEMS
-		: NAV_ITEMS.filter((i) => i.id !== "danger");
+		? availableNavItems
+		: availableNavItems.filter((i) => i.id !== "danger");
 
 	const [activeSection, setActiveSection] = useState<
 		| "general"

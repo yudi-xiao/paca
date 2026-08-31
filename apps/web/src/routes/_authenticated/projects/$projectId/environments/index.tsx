@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { Plus, Server } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -19,6 +19,14 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/environments/",
 )({
+	beforeLoad: ({ params: { projectId } }) => {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+			throw redirect({
+				to: "/projects/$projectId",
+				params: { projectId },
+			});
+		}
+	},
 	validateSearch: (search: Record<string, unknown>) => ({
 		create: search.create === true || search.create === "true",
 	}),

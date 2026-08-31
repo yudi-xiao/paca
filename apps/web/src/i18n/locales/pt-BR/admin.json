@@ -113,6 +113,57 @@
 			}
 		}
 	},
+	"organizationAccess": {
+		"eyebrow": "Default organization",
+		"title": "Organization access",
+		"description": "Manage Paca organization roles and assign one or more roles to existing Better Auth organization members.",
+		"newRole": "New role",
+		"name": "Role name",
+		"permissions": "Permissions",
+		"actions": "Actions",
+		"builtIn": "Built in",
+		"cancel": "Cancel",
+		"save": "Save",
+		"saving": "Saving…",
+		"delete": "Delete",
+		"roles": {
+			"title": "Organization roles",
+			"description": "Dynamic Paca roles stay separate from Better Auth's organization lifecycle roles."
+		},
+		"members": {
+			"title": "Organization members",
+			"description": "Membership lifecycle remains owned by Better Auth; this page manages Paca role assignments only.",
+			"user": "User",
+			"roles": "Assigned roles",
+			"assign": "Assign roles",
+			"assignTitle": "Assign organization roles",
+			"assignDescription": "Choose one or more roles for {{name}}."
+		},
+		"roleDialog": {
+			"create": "Create organization role",
+			"edit": "Edit organization role",
+			"description": "A role can only grant permissions that you already hold in this organization.",
+			"roleDescription": "Description"
+		},
+		"deleteDialog": {
+			"title": "Delete organization role",
+			"description": "Delete {{name}}? Roles that are still assigned to members cannot be deleted."
+		},
+		"errors": {
+			"load": "Organization roles could not be loaded. You may not have access, or the service is temporarily unavailable.",
+			"loadMembers": "Organization members could not be loaded.",
+			"save": "The role could not be saved.",
+			"delete": "The role could not be deleted.",
+			"assign": "The role assignment could not be saved.",
+			"nameTaken": "A role with this name already exists.",
+			"nameInvalid": "Use a role name between 2 and 64 characters.",
+			"roleHasMembers": "This role is still assigned to one or more members.",
+			"builtIn": "Built-in roles cannot be changed or deleted.",
+			"lastOwner": "The last organization owner cannot be removed.",
+			"escalation": "You cannot grant permissions that you do not hold.",
+			"forbidden": "You do not have permission to perform this action."
+		}
+	},
 	"globalRoles": {
 		"header": {
 			"title": "Funções Globais",
@@ -211,6 +262,22 @@
 				"label": "Excluir Usuários",
 				"description": "Remover contas de usuários"
 			},
+			"organizationMembersRead": {
+				"label": "Read Organization Members",
+				"description": "View members in Paca organizations"
+			},
+			"organizationMembersWrite": {
+				"label": "Write Organization Members",
+				"description": "Assign Paca organization roles to members"
+			},
+			"organizationRolesRead": {
+				"label": "Read Organization Roles",
+				"description": "View Paca organization role definitions"
+			},
+			"organizationRolesWrite": {
+				"label": "Write Organization Roles",
+				"description": "Create, update, and delete Paca organization roles"
+			},
 			"projectsRead": {
 				"label": "Ler Todos os Projetos",
 				"description": "Visualizar todos os projetos no workspace"
@@ -251,6 +318,7 @@
 		"permissionGroups": {
 			"globalRoles": "Funções Globais",
 			"users": "Usuários",
+			"organizations": "Organizations",
 			"projects": "Projetos",
 			"plugins": "Plugins",
 			"settings": "Configurações"

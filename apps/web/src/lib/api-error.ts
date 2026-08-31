@@ -25,7 +25,24 @@ export const ApiErrorCode = {
 	GlobalRoleNotFound: "GLOBAL_ROLE_NOT_FOUND",
 	GlobalRoleNameTaken: "GLOBAL_ROLE_NAME_TAKEN",
 	GlobalRoleNameInvalid: "GLOBAL_ROLE_NAME_INVALID",
+	GlobalRoleDescriptionInvalid: "GLOBAL_ROLE_DESCRIPTION_INVALID",
 	GlobalRoleHasUsers: "GLOBAL_ROLE_HAS_ASSIGNED_USERS",
+	GlobalRoleBuiltIn: "GLOBAL_ROLE_BUILT_IN",
+	GlobalRoleAssignmentInvalid: "GLOBAL_ROLE_ASSIGNMENT_INVALID",
+	GlobalRoleLastSuperAdmin: "GLOBAL_ROLE_LAST_SUPER_ADMIN",
+	RolePermissionEscalation: "ROLE_PERMISSION_ESCALATION",
+	RolePermissionsInvalid: "ROLE_PERMISSIONS_INVALID",
+
+	// Organization role and membership domain errors.
+	OrganizationRoleNotFound: "ORGANIZATION_ROLE_NOT_FOUND",
+	OrganizationRoleNameTaken: "ORGANIZATION_ROLE_NAME_TAKEN",
+	OrganizationRoleNameInvalid: "ORGANIZATION_ROLE_NAME_INVALID",
+	OrganizationRoleDescriptionInvalid: "ORGANIZATION_ROLE_DESCRIPTION_INVALID",
+	OrganizationRoleHasMembers: "ORGANIZATION_ROLE_HAS_MEMBERS",
+	OrganizationRoleBuiltIn: "ORGANIZATION_ROLE_BUILT_IN",
+	OrganizationRoleAssignmentInvalid: "ORGANIZATION_ROLE_ASSIGNMENT_INVALID",
+	OrganizationMemberNotFound: "ORGANIZATION_MEMBER_NOT_FOUND",
+	OrganizationMemberLastOwner: "ORGANIZATION_MEMBER_LAST_OWNER",
 
 	// Project domain errors.
 	ProjectNotFound: "PROJECT_NOT_FOUND",
@@ -141,9 +158,15 @@ export type ApiEnvelope<T> = SuccessEnvelope<T> | ApiErrorEnvelope;
  */
 export function getApiErrorCode(error: unknown): ApiErrorCode | null {
 	const err = error as {
+		code?: string;
 		response?: { data?: { error_code?: string } };
 	};
-	const code = err?.response?.data?.error_code;
+	const rawCode = err?.response?.data?.error_code ?? err?.code;
+	const betterAuthMappings: Record<string, ApiErrorCode> = {
+		INVALID_EMAIL_OR_PASSWORD: ApiErrorCode.InvalidCredentials,
+		INVALID_PASSWORD: ApiErrorCode.InvalidCredentials,
+	};
+	const code = rawCode ? (betterAuthMappings[rawCode] ?? rawCode) : null;
 	if (!code) return null;
 	const known = Object.values(ApiErrorCode) as string[];
 	return known.includes(code) ? (code as ApiErrorCode) : null;

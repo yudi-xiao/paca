@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Paperclip, Upload } from "lucide-react";
+import { Paperclip, RotateCcw, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	deleteTaskAttachment,
+	restoreTaskAttachment,
 	taskAttachmentsQueryOptions,
 	uploadAttachment,
 } from "@/lib/attachment-api";
@@ -30,6 +31,9 @@ export function AttachmentsSection({
 	const { data: attachments = [] } = useQuery(
 		taskAttachmentsQueryOptions(projectId, taskId),
 	);
+	const { data: deletedAttachments = [] } = useQuery(
+		taskAttachmentsQueryOptions(projectId, taskId, { deleted: true }),
+	);
 
 	// ── Upload mutation ────────────────────────────────────────────────────
 	const uploadMutation = useMutation({
@@ -48,6 +52,19 @@ export function AttachmentsSection({
 		onSuccess: () => {
 			qc.invalidateQueries({
 				queryKey: ["projects", projectId, "tasks", taskId, "attachments"],
+			});
+		},
+	});
+
+	const restoreMutation = useMutation({
+		mutationFn: (attachmentId: string) =>
+			restoreTaskAttachment(projectId, taskId, attachmentId),
+		onSuccess: () => {
+			qc.invalidateQueries({
+				queryKey: ["projects", projectId, "tasks", taskId, "attachments"],
+			});
+			qc.invalidateQueries({
+				queryKey: ["projects", projectId, "tasks", taskId, "activities"],
 			});
 		},
 	});
@@ -111,6 +128,48 @@ export function AttachmentsSection({
 							canDelete={canEdit}
 							onDelete={(id) => deleteMutation.mutate(id)}
 						/>
+					))}
+				</div>
+			)}
+
+			{deletedAttachments.length > 0 && (
+				<div className="space-y-2 rounded-xl border border-border/30 bg-muted/10 p-3">
+					<p className="text-xs font-medium text-muted-foreground">
+						{t("taskDetail.attachments.deletedTitle")}
+					</p>
+					{deletedAttachments.map((attachment) => (
+						<div
+							key={attachment.id}
+							className="flex items-center justify-between gap-3 rounded-lg bg-background/60 px-3 py-2"
+						>
+							<div className="min-w-0">
+								<p className="truncate text-sm text-foreground/80">
+									{attachment.file.file_name}
+								</p>
+								{attachment.purge_after && (
+									<p className="text-xs text-muted-foreground/60">
+										{t("taskDetail.attachments.purgeAfter", {
+											date: new Intl.DateTimeFormat(undefined, {
+												dateStyle: "medium",
+											}).format(new Date(attachment.purge_after)),
+										})}
+									</p>
+								)}
+							</div>
+							{canEdit && (
+								<button
+									type="button"
+									onClick={() => restoreMutation.mutate(attachment.id)}
+									disabled={restoreMutation.isPending}
+									className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+									aria-label={t("taskDetail.attachments.restoreLabel", {
+										fileName: attachment.file.file_name,
+									})}
+								>
+									<RotateCcw className="size-3.5" />
+								</button>
+							)}
+						</div>
 					))}
 				</div>
 			)}

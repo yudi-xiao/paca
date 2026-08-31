@@ -4,6 +4,7 @@ import { AlertCircle, ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { TaskDetailModal } from "@/components/projects/interactions/task-detail-modal";
+import { InternalPreviewTaskDetail } from "@/components/projects/tasks/internal-preview-task-detail";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { taskQueryOptions } from "@/lib/interaction-api";
@@ -96,9 +97,23 @@ function TaskDetailSkeleton() {
 }
 
 function TaskDetailPage() {
-	const { t } = useTranslation("projects");
 	const { projectId, taskId } = Route.useParams();
+	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 
+	if (isInternalPreview) {
+		return <InternalPreviewTaskDetail projectId={projectId} taskId={taskId} />;
+	}
+	return <LegacyTaskDetailPage projectId={projectId} taskId={taskId} />;
+}
+
+function LegacyTaskDetailPage({
+	projectId,
+	taskId,
+}: {
+	projectId: string;
+	taskId: string;
+}) {
+	const { t } = useTranslation("projects");
 	const { hasProjectPermission } = useProjectPermissions(projectId);
 	const canEdit = hasProjectPermission("tasks.write");
 

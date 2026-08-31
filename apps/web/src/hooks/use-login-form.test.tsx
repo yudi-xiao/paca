@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiErrorCode } from "@/lib/api-error";
-import { login } from "@/lib/auth-api";
+import { login, registerInternalPreview } from "@/lib/auth-api";
 import { useLoginForm } from "./use-login-form";
 
 type SubmitPayload = {
@@ -50,6 +50,7 @@ vi.mock("@/lib/auth-api", async () => {
 	return {
 		...actual,
 		login: vi.fn(),
+		registerInternalPreview: vi.fn(),
 	};
 });
 
@@ -70,6 +71,7 @@ describe("useLoginForm", () => {
 		mocks.getApiErrorCodeMock.mockReset();
 		mocks.handleSubmitMock.mockReset();
 		vi.mocked(login).mockReset();
+		vi.mocked(registerInternalPreview).mockReset();
 	});
 
 	it("submits login and redirects on success", async () => {
@@ -83,20 +85,75 @@ describe("useLoginForm", () => {
 		await act(async () => {
 			await mocks.capturedOnSubmit?.({
 				value: {
-					username: "alice",
-					password: "password123",
+					username: "alice@example.com",
+					password: "password1234",
 					rememberMe: true,
 				},
 			});
 		});
 
-		expect(login).toHaveBeenCalledWith("alice", "password123", true);
+		expect(login).toHaveBeenCalledWith(
+			"alice@example.com",
+			"password1234",
+			true,
+		);
 		// The login flow invalidates the entire "auth" namespace so both the
 		// "auth"/"me" and "auth"/"me-optional" caches are refreshed.
 		expect(mocks.invalidateQueriesMock).toHaveBeenCalledWith({
 			queryKey: ["auth"],
 		});
-		expect(mocks.navigateMock).toHaveBeenCalledWith({ to: "/home" });
+		expect(mocks.navigateMock).toHaveBeenCalledWith({
+			href: "/home",
+			replace: true,
+		});
+	});
+
+	it("creates an internal preview account and redirects", async () => {
+		vi.mocked(registerInternalPreview).mockResolvedValue(undefined);
+		mocks.invalidateQueriesMock.mockResolvedValue(undefined);
+		mocks.navigateMock.mockResolvedValue(undefined);
+
+		const { result } = renderHook(() => useLoginForm());
+
+		await act(async () => {
+			await result.current.createInternalPreviewAccount(
+				"new@example.com",
+				"password1234",
+			);
+		});
+
+		expect(registerInternalPreview).toHaveBeenCalledWith(
+			"new@example.com",
+			"password1234",
+		);
+		expect(mocks.navigateMock).toHaveBeenCalledWith({
+			href: "/home",
+			replace: true,
+		});
+	});
+
+	it("returns to the preserved device authorization URL after login", async () => {
+		vi.mocked(login).mockResolvedValue(undefined);
+		mocks.invalidateQueriesMock.mockResolvedValue(undefined);
+		mocks.navigateMock.mockResolvedValue(undefined);
+
+		renderHook(() =>
+			useLoginForm("/device/capabilities?agent_id=agent-1&code=ABCD-1234"),
+		);
+		await act(async () => {
+			await mocks.capturedOnSubmit?.({
+				value: {
+					username: "alice@example.com",
+					password: "password1234",
+					rememberMe: false,
+				},
+			});
+		});
+
+		expect(mocks.navigateMock).toHaveBeenCalledWith({
+			href: "/device/capabilities?agent_id=agent-1&code=ABCD-1234",
+			replace: true,
+		});
 	});
 
 	it("sets user-friendly server error for known API error codes", async () => {

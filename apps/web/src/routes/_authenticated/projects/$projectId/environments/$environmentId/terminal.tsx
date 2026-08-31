@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { EnvironmentTerminalPage } from "@/components/projects/environments/environment-terminal-page";
 import { environmentQueryOptions } from "@/lib/environment-api";
 
@@ -9,6 +9,14 @@ import { environmentQueryOptions } from "@/lib/environment-api";
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/environments/$environmentId/terminal",
 )({
+	beforeLoad: ({ params: { projectId } }) => {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+			throw redirect({
+				to: "/projects/$projectId",
+				params: { projectId },
+			});
+		}
+	},
 	loader: async ({
 		context: { queryClient },
 		params: { projectId, environmentId },

@@ -1,6 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import "@/i18n/config";
-import { beforeAll, beforeEach } from "vitest";
+import { beforeEach } from "vitest";
 
 type StorageLike = {
 	getItem: (key: string) => string | null;
@@ -26,12 +25,12 @@ function createStorageMock(): StorageLike {
 	};
 }
 
-beforeAll(() => {
-	Object.defineProperty(window, "localStorage", {
-		configurable: true,
-		value: createStorageMock(),
-	});
+Object.defineProperty(window, "localStorage", {
+	configurable: true,
+	value: createStorageMock(),
 });
+
+await import("@/i18n/config");
 
 beforeEach(() => {
 	window.localStorage.clear();

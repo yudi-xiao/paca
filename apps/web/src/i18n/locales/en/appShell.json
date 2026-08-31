@@ -19,6 +19,7 @@
 		"home": "Home",
 		"administration": "Administration",
 		"globalRoles": "Global Roles",
+		"organizationAccess": "Organization Access",
 		"users": "Users",
 		"plugins": "Plugins",
 		"allProjects": "All Projects",

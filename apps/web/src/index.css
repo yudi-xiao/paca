@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600&family=Be+Vietnam+Pro:wght@300;400;500;600;700;800;900&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "tw-shimmer";
@@ -178,9 +177,19 @@
 }
 
 @theme inline {
-	--font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
-	--font-display: "Syne", ui-sans-serif, sans-serif;
-	--font-mono: "JetBrains Mono", ui-monospace, monospace;
+	/*
+	 * Keep the application font stack self-contained. Remote Google Fonts made
+	 * first paint depend on fonts.googleapis.com and did not contain CJK glyphs,
+	 * which produced inconsistent fallback or tofu in Chinese deployments.
+	 */
+	--font-sans:
+		ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+		sans-serif;
+	--font-display:
+		ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+		sans-serif;
+	--font-mono:
+		ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
 	--color-card: var(--card);
@@ -302,16 +311,14 @@ pre code {
 	font-family: var(--font-display);
 }
 
-/*
- * Syne and DM Sans render Vietnamese tone marks (combining diacritics) with
- * visible hinting glitches — Be Vietnam Pro is purpose-built for Vietnamese
- * and renders them correctly, so swap it in whenever the active locale is vi.
- * Locales with their own font needs can add a sibling `html[lang="..."]`
- * rule here overriding the same two variables — no other CSS to touch.
- */
-html[lang="vi"] {
-	--font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
-	--font-display: "Be Vietnam Pro", ui-sans-serif, sans-serif;
+/* Prefer native Simplified Chinese fonts before the generic system fallback. */
+html[lang="zh-CN"] {
+	--font-sans:
+		"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
+		"Source Han Sans SC", ui-sans-serif, system-ui, sans-serif;
+	--font-display:
+		"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
+		"Source Han Sans SC", ui-sans-serif, system-ui, sans-serif;
 }
 
 .island-shell {

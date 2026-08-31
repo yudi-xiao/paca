@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { ConversationsLayout } from "@/components/projects/agents/conversations-layout";
 import {
 	chattableAgentsQueryOptions,
@@ -11,6 +11,11 @@ import {
 // conversations (with global agents, from the home/admin pages) instead of
 // one project's.
 export const Route = createFileRoute("/_authenticated/conversations")({
+	beforeLoad: () => {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+			throw redirect({ to: "/home" });
+		}
+	},
 	loader: async ({ context: { queryClient } }) => {
 		await Promise.all([
 			queryClient.ensureInfiniteQueryData(globalConversationsQueryOptions()),

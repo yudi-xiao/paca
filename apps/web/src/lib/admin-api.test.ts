@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockGet, mockPost, mockPatch, mockDelete } = vi.hoisted(() => ({
-	mockGet: vi.fn(),
-	mockPost: vi.fn(),
-	mockPatch: vi.fn(),
-	mockDelete: vi.fn(),
-}));
+const { mockGet, mockPost, mockPatch, mockPut, mockDelete } = vi.hoisted(
+	() => ({
+		mockGet: vi.fn(),
+		mockPost: vi.fn(),
+		mockPatch: vi.fn(),
+		mockPut: vi.fn(),
+		mockDelete: vi.fn(),
+	}),
+);
 
 vi.mock("./api-client", () => ({
 	apiClient: {
@@ -13,6 +16,7 @@ vi.mock("./api-client", () => ({
 			get: mockGet,
 			post: mockPost,
 			patch: mockPatch,
+			put: mockPut,
 			delete: mockDelete,
 		},
 	},
@@ -29,6 +33,7 @@ import {
 	getUsers,
 	globalRolesQueryOptions,
 	myPermissionsQueryOptions,
+	replaceUserGlobalRoles,
 	resetUserPassword,
 	type User,
 	updateGlobalRole,
@@ -46,7 +51,9 @@ describe("admin-api", () => {
 			{
 				id: "r1",
 				name: "Admin",
+				description: "Built-in administrator",
 				permissions: { "users.manage": true },
+				is_built_in: true,
 				created_at: "2026-03-29T00:00:00.000Z",
 				updated_at: "2026-03-29T00:00:00.000Z",
 			},
@@ -67,7 +74,9 @@ describe("admin-api", () => {
 		const created: GlobalRole = {
 			id: "r2",
 			name: "Editor",
+			description: "",
 			permissions: payload.permissions,
+			is_built_in: false,
 			created_at: "2026-03-29T00:00:00.000Z",
 			updated_at: "2026-03-29T00:00:00.000Z",
 		};
@@ -87,7 +96,9 @@ describe("admin-api", () => {
 		const updated: GlobalRole = {
 			id: "r3",
 			name: "Support",
+			description: "",
 			permissions: payload.permissions,
+			is_built_in: false,
 			created_at: "2026-03-29T00:00:00.000Z",
 			updated_at: "2026-03-29T00:01:00.000Z",
 		};
@@ -104,6 +115,28 @@ describe("admin-api", () => {
 
 		await expect(deleteGlobalRole("r4")).resolves.toBeUndefined();
 		expect(mockDelete).toHaveBeenCalledWith("/admin/global-roles/r4");
+	});
+
+	it("replaces a user's global roles and unwraps the assigned roles", async () => {
+		const roles: GlobalRole[] = [
+			{
+				id: "r2",
+				name: "Editor",
+				description: "",
+				permissions: { "projects.read": true },
+				is_built_in: false,
+				created_at: "2026-03-29T00:00:00.000Z",
+				updated_at: "2026-03-29T00:00:00.000Z",
+			},
+		];
+		mockPut.mockResolvedValue({
+			data: { data: { user_id: "u1", roles } },
+		});
+
+		await expect(replaceUserGlobalRoles("u1", ["r2"])).resolves.toEqual(roles);
+		expect(mockPut).toHaveBeenCalledWith("/admin/users/u1/global-roles", {
+			role_ids: ["r2"],
+		});
 	});
 
 	it("unwraps global permissions list from response", async () => {
