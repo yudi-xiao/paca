@@ -27,6 +27,9 @@ const ONE_DAY_SECONDS = 60 * 60 * 24;
 const SESSION_EXPIRES_IN_SECONDS = ONE_DAY_SECONDS * 7;
 
 type AuthDatabase = NonNullable<BetterAuthOptions["database"]>;
+type BackgroundTaskHandler = NonNullable<
+  NonNullable<BetterAuthOptions["advanced"]>["backgroundTasks"]
+>["handler"];
 
 export type CurrentUserSession = {
   id: string;
@@ -116,6 +119,7 @@ export function createAuthOptions(
   agentAuthPlugin: ReturnType<typeof pacaAgentAuth> = pacaAgentAuth(),
   agentApprovalGuard: ReturnType<typeof pacaAgentApprovalGuard> = pacaAgentApprovalGuard(),
   secondaryStorage?: BetterAuthOptions["secondaryStorage"],
+  backgroundTaskHandler?: BackgroundTaskHandler,
 ) {
   const configuration = requireAuthConfiguration(env);
 
@@ -142,6 +146,7 @@ export function createAuthOptions(
     },
     advanced: {
       useSecureCookies: configuration.secureCookies,
+      ...(backgroundTaskHandler ? { backgroundTasks: { handler: backgroundTaskHandler } } : {}),
       defaultCookieAttributes: {
         httpOnly: true,
         secure: configuration.secureCookies,
@@ -169,7 +174,11 @@ export function createAuthOptions(
   } satisfies BetterAuthOptions;
 }
 
-export function createAuth(db: PacaDatabase, env: AppBindings) {
+export function createAuth(
+  db: PacaDatabase,
+  env: AppBindings,
+  backgroundTaskHandler?: BackgroundTaskHandler,
+) {
   const database = drizzleAdapter(db, {
     provider: "pg",
     schema,
@@ -210,13 +219,34 @@ export function createAuth(db: PacaDatabase, env: AppBindings) {
       agentAuthPlugin,
       agentApprovalGuard,
       secondaryStorage,
+      backgroundTaskHandler,
     ),
   );
 }
 
-export async function handleAuthRequest(request: Request, env: AppBindings): Promise<Response> {
+async function withAuthDatabase<T>(
+  env: AppBindings,
+  operation: (auth: ReturnType<typeof createAuth>, db: PacaDatabase) => Promise<T>,
+): Promise<T> {
   return withDatabase(env, async (db) => {
-    const auth = createAuth(db, env);
+    const backgroundTasks: Promise<unknown>[] = [];
+    const auth = createAuth(db, env, (promise) => {
+      backgroundTasks.push(promise);
+    });
+
+    try {
+      return await operation(auth, db);
+    } finally {
+      // Better Auth starts Agent audit, heartbeat, and expiry maintenance in
+      // the background. This adapter owns one pg Client per request, so those
+      // tasks must settle before withDatabase closes that Client.
+      await Promise.allSettled(backgroundTasks);
+    }
+  });
+}
+
+export async function handleAuthRequest(request: Request, env: AppBindings): Promise<Response> {
+  return withAuthDatabase(env, async (auth, db) => {
     const isSignOut =
       request.method === "POST" && new URL(request.url).pathname === "/api/auth/sign-out";
     const current = isSignOut
@@ -249,8 +279,8 @@ export async function handleAgentConfigurationRequest(
   _request: Request,
   env: AppBindings,
 ): Promise<Response> {
-  return withDatabase(env, async (db) => {
-    const configuration = await createAuth(db, env).api.getAgentConfiguration();
+  return withAuthDatabase(env, async (auth) => {
+    const configuration = await auth.api.getAgentConfiguration();
     return Response.json(configuration, {
       headers: { "cache-control": "public, max-age=300" },
     });
@@ -261,14 +291,34 @@ export async function readCurrentUserSession(
   request: Request,
   env: AppBindings,
 ): Promise<CurrentUserSession | null> {
-  return withDatabase(env, (db) => readCurrentUserSessionFromDatabase(db, request, env));
+  return withAuthDatabase(env, async (auth) => {
+    const result = await auth.api.getSession({
+      headers: request.headers,
+      query: { disableCookieCache: true },
+    });
+
+    if (!result) return null;
+
+    return {
+      id: result.session.id,
+      user: {
+        id: result.user.id,
+        name: result.user.name,
+        email: result.user.email,
+        emailVerified: result.user.emailVerified,
+        image: result.user.image ?? null,
+        createdAt: result.user.createdAt.toISOString(),
+      },
+      expiresAt: result.session.expiresAt.toISOString(),
+    };
+  });
 }
 
 export async function readCurrentAgentSession(
   request: Request,
   env: AppBindings,
 ): Promise<AgentSession | null> {
-  return withDatabase(env, (db) => readCurrentAgentSessionFromDatabase(db, request, env));
+  return withAuthDatabase(env, (auth) => auth.api.getAgentSession({ headers: request.headers }));
 }
 
 export async function readCurrentAgentSessionFromDatabase(

@@ -275,6 +275,7 @@ async function createProtocolHarness() {
   return {
     auth,
     db,
+    cookie,
     onExecute,
     defaultLocation,
     hostId,
@@ -339,6 +340,43 @@ describe("Better Auth Agent Auth protocol", () => {
     const replay = await execute(harness, token);
     expect(replay.status).toBe(401);
     await expect(replay.json()).resolves.toMatchObject({ error: "jti_replay" });
+    expect(harness.onExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it("reactivates a durable Agent after the sliding 24-hour grant horizon", async () => {
+    const harness = await createProtocolHarness();
+    const agent = harness.db.agent.find((candidate) => candidate.id === harness.agentId);
+    if (!agent) throw new Error("Expected registered protocol Agent");
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60_000);
+    agent.createdAt = twoDaysAgo;
+    agent.activatedAt = twoDaysAgo;
+    agent.expiresAt = new Date(Date.now() - 60_000);
+
+    const staleGrantToken = await agentJwt(harness, { jti: "reactivate-durable-agent" });
+    const staleGrantResponse = await execute(harness, staleGrantToken);
+
+    expect(staleGrantResponse.status).toBe(403);
+    await expect(staleGrantResponse.json()).resolves.toMatchObject({
+      error: "capability_not_granted",
+    });
+    expect(agent.status).toBe("active");
+    expect(new Date(String(agent.expiresAt)).getTime()).toBeGreaterThan(Date.now());
+
+    const refreshedGrant = await harness.auth.handler(
+      post(
+        "/agent/grant-capability",
+        {
+          agent_id: harness.agentId,
+          capabilities: [{ name: "project.read", constraints: harness.constraints }],
+        },
+        { cookie: harness.cookie },
+      ),
+    );
+    expect(refreshedGrant.status).toBe(200);
+
+    const refreshedToken = await agentJwt(harness, { jti: "execute-reactivated-agent" });
+    const response = await execute(harness, refreshedToken);
+    expect(response.status).toBe(200);
     expect(harness.onExecute).toHaveBeenCalledTimes(1);
   });
 

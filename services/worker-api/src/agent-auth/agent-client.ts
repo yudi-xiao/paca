@@ -381,6 +381,43 @@ export async function executeAgentCapability(input: {
   return body;
 }
 
+export async function fetchWithDelegatedAgent(input: {
+  config: DelegatedAgentConfig;
+  path: string;
+  capabilities: string[];
+  init?: RequestInit;
+  fetch?: typeof fetch;
+}): Promise<Response> {
+  if (
+    !input.path.startsWith("/api/v1/agent/") ||
+    input.path.includes("//") ||
+    input.capabilities.length === 0 ||
+    new Set(input.capabilities).size !== input.capabilities.length
+  ) {
+    throw new AgentHostEnrollmentError("AGENT_FETCH_INPUT_INVALID");
+  }
+  const target = new URL(input.path, input.config.providerOrigin);
+  if (target.origin !== new URL(input.config.providerOrigin).origin) {
+    throw new AgentHostEnrollmentError("AGENT_FETCH_ORIGIN_INVALID");
+  }
+  const jwt = await signJwt({
+    privateKey: input.config.privateKey,
+    type: "agent+jwt",
+    issuer: input.config.hostId,
+    subject: input.config.agentId,
+    audience: input.config.defaultLocation,
+    capabilities: input.capabilities,
+  });
+  const headers = new Headers(input.init?.headers);
+  headers.set("accept", "application/json");
+  headers.set("authorization", `Bearer ${jwt}`);
+  return (input.fetch ?? fetch)(target, {
+    ...input.init,
+    headers,
+    redirect: "error",
+  });
+}
+
 export async function getDelegatedAgentStatus(input: {
   config: DelegatedAgentConfig;
   fetch?: typeof fetch;

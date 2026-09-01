@@ -57,10 +57,16 @@ export function pacaAgentAuth(options: PacaAgentAuthPluginOptions = {}) {
     jwtMaxAge: 60,
     agentSessionTTL: AGENT_SESSION_TTL_SECONDS,
     agentMaxLifetime: AGENT_MAX_LIFETIME_SECONDS,
-    absoluteLifetime: AGENT_MAX_LIFETIME_SECONDS,
+    // A registered Agent is a durable identity. Short JWTs, sliding session
+    // expiry, explicit revocation, and key rotation protect its use; a 24-hour
+    // absolute lifetime would permanently reject otherwise healthy Agents.
+    absoluteLifetime: 0,
     maxAgentsPerUser: 25,
     freshSessionWindow: 5 * 60,
-    blockedCapabilities: ["environment.connect", "workflow.execute"],
+    // environment.connect remains blocked until its execution boundary exists.
+    // workflow.execute is enabled because every public run route now enforces
+    // a concrete Workflow definition plus a second domain Capability Grant.
+    blockedCapabilities: ["environment.connect"],
     jtiCacheStorage: "secondary-storage",
     jwksCacheStorage: "secondary-storage",
     dangerouslySkipJtiCheck: false,
