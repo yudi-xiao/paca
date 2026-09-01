@@ -5,11 +5,19 @@ import {
   createPacaAgentExecutor,
   type PacaAgentExecutionDependencies,
 } from "../src/agent-auth/execution";
+import type {
+  DocumentAgentEditInput,
+  DocumentAgentEditResult,
+  DocumentAgentSnapshot,
+} from "../src/document/agent-operations";
 import type { Project } from "../src/project/service";
 import type { Task, TaskActor } from "../src/task/service";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const TASK_ID = "22222222-2222-4222-8222-222222222222";
+const DOCUMENT_ID = "44444444-4444-4444-8444-444444444444";
+const REQUEST_ID = "55555555-5555-4555-8555-555555555555";
+const RUN_ID = "66666666-6666-4666-8666-666666666666";
 const NOW = new Date();
 
 const project: Project = {
@@ -47,6 +55,53 @@ const task: Task = {
   viewGroupKey: null,
   createdAt: NOW,
   updatedAt: NOW,
+};
+
+const documentSnapshot: DocumentAgentSnapshot = {
+  documentId: DOCUMENT_ID,
+  revision: 7,
+  stateVector: "c3RhdGU",
+  blocks: [
+    {
+      blockId: "block-a",
+      version: "dmVyc2lvbg",
+      blockJson: JSON.stringify({
+        id: "block-a",
+        type: "paragraph",
+        props: {},
+        content: [],
+      }),
+    },
+  ],
+};
+
+const documentEdit: DocumentAgentEditInput = {
+  requestId: REQUEST_ID,
+  runId: RUN_ID,
+  baseRevision: 7,
+  baseStateVector: "c3RhdGU",
+  operationMode: "collaborate",
+  operations: [
+    {
+      type: "replace_block_content",
+      blockId: "block-a",
+      expectedBlockVersion: "dmVyc2lvbg",
+      content: [{ type: "text", text: "Agent edit", styles: {} }],
+    },
+  ],
+};
+
+const documentEditResult: DocumentAgentEditResult = {
+  applied: true,
+  conflict: false,
+  documentId: DOCUMENT_ID,
+  requestId: REQUEST_ID,
+  runId: RUN_ID,
+  mode: "collaborate",
+  baseRevision: 7,
+  revision: 8,
+  stateVector: "bmV3LXN0YXRl",
+  targets: [{ blockId: "block-a", version: "bmV3LXZlcnNpb24" }],
 };
 
 function agentSession(capability: string, constraints: CapabilityConstraints): AgentSession {
@@ -104,12 +159,25 @@ function dependencies(
       ...task,
       title: input.title ?? task.title,
     }),
+    findDocumentScope: async () => ({
+      documentId: DOCUMENT_ID,
+      organizationId: "paca-default",
+      projectId: PROJECT_ID,
+    }),
+    readDocument: async () => documentSnapshot,
+    editDocument: async () => documentEditResult,
     ...overrides,
   };
 }
 
 function executeContext(
-  capability: "project.read" | "task.read" | "task.write" | "task.create",
+  capability:
+    | "project.read"
+    | "task.read"
+    | "task.write"
+    | "task.create"
+    | "document.read"
+    | "document.edit",
   session: AgentSession,
   args: Record<string, unknown>,
 ) {
@@ -334,5 +402,105 @@ describe("Paca Agent Auth execution boundary", () => {
       { type: "agent", id: "agent-1" },
       { title: "Autonomous update" },
     );
+  });
+
+  it("reads only the exact scoped document and intersects delegated docs.read", async () => {
+    const hasProjectPermission = vi.fn(async () => ({ allowed: true, scopeExists: true }));
+    const readDocument = vi.fn(async () => documentSnapshot);
+    const executor = createPacaAgentExecutor(dependencies({ hasProjectPermission, readDocument }));
+    const constraints = { ...scope, documentId: DOCUMENT_ID } satisfies CapabilityConstraints;
+    const session = agentSession("document.read", constraints);
+
+    await expect(executor(executeContext("document.read", session, constraints))).resolves.toEqual(
+      documentSnapshot,
+    );
+    expect(hasProjectPermission).toHaveBeenCalledWith("user-1", PROJECT_ID, {
+      docs: ["read"],
+    });
+    expect(readDocument).toHaveBeenCalledWith(DOCUMENT_ID);
+
+    const wrongScopeExecutor = createPacaAgentExecutor(
+      dependencies({
+        findDocumentScope: async () => ({
+          documentId: DOCUMENT_ID,
+          organizationId: "other-org",
+          projectId: PROJECT_ID,
+        }),
+      }),
+    );
+    await expect(
+      wrongScopeExecutor(executeContext("document.read", session, constraints)),
+    ).rejects.toThrow("AGENT_DOCUMENT_SCOPE_MISMATCH");
+  });
+
+  it("executes a constrained document edit with the trusted Agent identity", async () => {
+    const editDocument = vi.fn(
+      async (_actorId: string, _documentId: string, _input: DocumentAgentEditInput) =>
+        documentEditResult,
+    );
+    const hasProjectPermission = vi.fn(async () => ({ allowed: true, scopeExists: true }));
+    const executor = createPacaAgentExecutor(dependencies({ editDocument, hasProjectPermission }));
+    const constraints = {
+      ...scope,
+      documentId: DOCUMENT_ID,
+      field: "block.content",
+      operationMode: { in: ["suggest", "collaborate"] },
+    } satisfies CapabilityConstraints;
+    const session = agentSession("document.edit", constraints);
+    const arguments_ = {
+      ...scope,
+      documentId: DOCUMENT_ID,
+      field: "block.content",
+      ...documentEdit,
+    };
+
+    await expect(executor(executeContext("document.edit", session, arguments_))).resolves.toEqual(
+      documentEditResult,
+    );
+    expect(hasProjectPermission).toHaveBeenCalledWith("user-1", PROJECT_ID, {
+      docs: ["write"],
+    });
+    expect(editDocument).toHaveBeenCalledWith("agent-1", DOCUMENT_ID, documentEdit);
+  });
+
+  it("rejects revoked delegated document permission and allows an autonomous scoped Grant", async () => {
+    const constraints = {
+      ...scope,
+      documentId: DOCUMENT_ID,
+      field: "block.content",
+      operationMode: "collaborate",
+    } satisfies CapabilityConstraints;
+    const arguments_ = {
+      ...scope,
+      documentId: DOCUMENT_ID,
+      field: "block.content",
+      ...documentEdit,
+    };
+    const deniedExecutor = createPacaAgentExecutor(
+      dependencies({
+        hasProjectPermission: async () => ({ allowed: false, scopeExists: true }),
+      }),
+    );
+    await expect(
+      deniedExecutor(
+        executeContext("document.edit", agentSession("document.edit", constraints), arguments_),
+      ),
+    ).rejects.toThrow("AGENT_DELEGATED_PERMISSION_DENIED");
+
+    const hasProjectPermission = vi.fn(async () => ({ allowed: false, scopeExists: true }));
+    const editDocument = vi.fn(async () => documentEditResult);
+    const autonomousExecutor = createPacaAgentExecutor(
+      dependencies({ hasProjectPermission, editDocument }),
+    );
+    await expect(
+      autonomousExecutor(
+        executeContext(
+          "document.edit",
+          autonomousSession("document.edit", constraints),
+          arguments_,
+        ),
+      ),
+    ).resolves.toEqual(documentEditResult);
+    expect(hasProjectPermission).not.toHaveBeenCalled();
   });
 });

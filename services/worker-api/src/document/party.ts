@@ -3,6 +3,15 @@ import { YServer } from "y-partyserver";
 import { applyUpdate, encodeStateAsUpdate, Doc as YDoc } from "yjs";
 
 import {
+  applyDocumentAgentOperations,
+  type DocumentAgentEditInput,
+  type DocumentAgentEditResult,
+  type DocumentAgentSnapshot,
+  documentAgentEditInputSchema,
+  evaluateDocumentAgentEdit,
+  inspectDocumentForAgent,
+} from "./agent-operations";
+import {
   DOCUMENT_CONTEXT_HEADER,
   type DocumentConnectionState,
   decodeDocumentConnectionState,
@@ -18,6 +27,20 @@ type UpdateRow = {
 type DocumentUpdateActor = {
   actorType: "agent" | "system" | "user";
   actorId: string;
+};
+
+type AgentOperationAudit = {
+  actorId: string;
+  inputFingerprint: string;
+  input: DocumentAgentEditInput;
+  result: DocumentAgentEditResult;
+  status: "applied" | "conflict" | "suggested" | "unchanged";
+};
+
+type AgentOperationOrigin = {
+  marker: symbol;
+  state: { actorType: "agent"; actorId: string };
+  audit?: AgentOperationAudit;
 };
 
 export type DocumentPersistenceStats = {
@@ -42,9 +65,18 @@ const AUTHORIZATION_CLOSE_REASON = "document authorization changed";
 const MAX_UPDATE_BYTES = 256 * 1024;
 const CHECKPOINT_UPDATE_COUNT = 128;
 const CHECKPOINT_UPDATE_BYTES = 1024 * 1024;
+const AGENT_OPERATION_ORIGIN = Symbol("paca.document.agent-operation");
 
 function cloneArrayBuffer(value: Uint8Array): ArrayBuffer {
   return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer;
+}
+
+async function agentOperationFingerprint(input: DocumentAgentEditInput): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify(input)),
+  );
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function actorFromOrigin(origin: unknown): DocumentUpdateActor {
@@ -63,6 +95,12 @@ function actorFromOrigin(origin: unknown): DocumentUpdateActor {
     return { actorType, actorId };
   }
   return { actorType: "system", actorId: "system" };
+}
+
+function agentAuditFromOrigin(origin: unknown): AgentOperationAudit | null {
+  if (!origin || typeof origin !== "object") return null;
+  const candidate = origin as Partial<AgentOperationOrigin>;
+  return candidate.marker === AGENT_OPERATION_ORIGIN && candidate.audit ? candidate.audit : null;
 }
 
 export class DocumentParty extends YServer {
@@ -120,6 +158,20 @@ export class DocumentParty extends YServer {
           acknowledged_revision INTEGER NOT NULL CHECK (acknowledged_revision >= 0),
           updated_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS paca_document_agent_operation_audit (
+          request_id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          agent_id TEXT NOT NULL,
+          operation_mode TEXT NOT NULL,
+          base_revision INTEGER NOT NULL,
+          result_revision INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          operation_summary TEXT NOT NULL,
+          result_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS paca_document_agent_operation_run_idx
+          ON paca_document_agent_operation_audit (run_id, created_at);
         INSERT OR IGNORE INTO paca_document_materialization_state
           (singleton, revision, queued_revision, acknowledged_revision, updated_at)
         SELECT 1,
@@ -134,6 +186,8 @@ export class DocumentParty extends YServer {
         VALUES (1, unixepoch('subsec') * 1000);
         INSERT OR IGNORE INTO paca_document_sql_migration (version, applied_at)
         VALUES (2, unixepoch('subsec') * 1000);
+        INSERT OR IGNORE INTO paca_document_sql_migration (version, applied_at)
+        VALUES (3, unixepoch('subsec') * 1000);
       `);
     });
   }
@@ -287,6 +341,129 @@ export class DocumentParty extends YServer {
     return cloneArrayBuffer(encodeStateAsUpdate(this.document));
   }
 
+  async readForAgent(): Promise<DocumentAgentSnapshot> {
+    await this.setName(this.name);
+    const stats = this.persistenceStats();
+    if (!stats.initialized || stats.revision <= 0) {
+      throw new Error("DOCUMENT_AGENT_NOT_INITIALIZED");
+    }
+    return inspectDocumentForAgent(this.document, this.name, stats.revision);
+  }
+
+  async editAsAgent(actorId: string, value: unknown): Promise<DocumentAgentEditResult> {
+    await this.setName(this.name);
+    if (!actorId || actorId.length > 255) throw new Error("DOCUMENT_AGENT_ACTOR_INVALID");
+    const input = documentAgentEditInputSchema.parse(value);
+    const inputFingerprint = await agentOperationFingerprint(input);
+    const duplicate = this.findAgentOperationResult(input.requestId, actorId, inputFingerprint);
+    if (duplicate) return duplicate;
+
+    const stats = this.persistenceStats();
+    if (!stats.initialized || stats.revision <= 0) {
+      throw new Error("DOCUMENT_AGENT_NOT_INITIALIZED");
+    }
+    const before = inspectDocumentForAgent(this.document, this.name, stats.revision);
+    const { conflicts } = evaluateDocumentAgentEdit(before, input);
+    if (conflicts.length > 0) {
+      const result: DocumentAgentEditResult = {
+        applied: false,
+        conflict: true,
+        documentId: this.name,
+        requestId: input.requestId,
+        runId: input.runId,
+        mode: input.operationMode,
+        baseRevision: input.baseRevision,
+        revision: before.revision,
+        stateVector: before.stateVector,
+        targets: conflicts.map((conflict) => ({
+          blockId: conflict.blockId,
+          version: conflict.version ?? "missing",
+        })),
+      };
+      this.recordAgentOperation(actorId, inputFingerprint, input, result, "conflict");
+      return result;
+    }
+
+    const versions = new Map(before.blocks.map((entry) => [entry.blockId, entry.version]));
+    const targets = input.operations.map((operation) => ({
+      blockId: operation.blockId,
+      version: versions.get(operation.blockId) ?? "missing",
+    }));
+    if (input.operationMode === "suggest") {
+      const result: DocumentAgentEditResult = {
+        applied: false,
+        conflict: false,
+        documentId: this.name,
+        requestId: input.requestId,
+        runId: input.runId,
+        mode: "suggest",
+        baseRevision: input.baseRevision,
+        revision: before.revision,
+        stateVector: before.stateVector,
+        targets,
+      };
+      this.recordAgentOperation(actorId, inputFingerprint, input, result, "suggested");
+      return result;
+    }
+
+    const blocks = new Map(
+      before.blocks.map((entry) => [
+        entry.blockId,
+        JSON.parse(entry.blockJson) as Record<string, unknown>,
+      ]),
+    );
+    const changes = input.operations.some(
+      (operation) =>
+        JSON.stringify(blocks.get(operation.blockId)?.content ?? []) !==
+        JSON.stringify(operation.content),
+    );
+    if (!changes) {
+      const result: DocumentAgentEditResult = {
+        applied: false,
+        conflict: false,
+        documentId: this.name,
+        requestId: input.requestId,
+        runId: input.runId,
+        mode: "collaborate",
+        baseRevision: input.baseRevision,
+        revision: before.revision,
+        stateVector: before.stateVector,
+        targets,
+      };
+      this.recordAgentOperation(actorId, inputFingerprint, input, result, "unchanged");
+      return result;
+    }
+
+    let result: DocumentAgentEditResult | null = null;
+    const origin: AgentOperationOrigin = {
+      marker: AGENT_OPERATION_ORIGIN,
+      state: { actorType: "agent", actorId },
+    };
+    this.document.transact(() => {
+      applyDocumentAgentOperations(this.document, input.operations);
+      const after = inspectDocumentForAgent(this.document, this.name, before.revision + 1);
+      const afterVersions = new Map(after.blocks.map((entry) => [entry.blockId, entry.version]));
+      result = {
+        applied: true,
+        conflict: false,
+        documentId: this.name,
+        requestId: input.requestId,
+        runId: input.runId,
+        mode: "collaborate",
+        baseRevision: input.baseRevision,
+        revision: after.revision,
+        stateVector: after.stateVector,
+        targets: input.operations.map((operation) => ({
+          blockId: operation.blockId,
+          version: afterVersions.get(operation.blockId) ?? "missing",
+        })),
+      };
+      origin.audit = { actorId, inputFingerprint, input, result, status: "applied" };
+    }, origin);
+    if (!result) throw new Error("DOCUMENT_AGENT_UPDATE_NOT_APPLIED");
+    return result;
+  }
+
   async materializationSnapshot(minimumRevision: number): Promise<DocumentMaterializationSnapshot> {
     await this.setName(this.name);
     if (!Number.isSafeInteger(minimumRevision) || minimumRevision <= 0) {
@@ -424,6 +601,7 @@ export class DocumentParty extends YServer {
       throw new Error("DOCUMENT_UPDATE_TOO_LARGE");
     }
     const actor = actorFromOrigin(origin);
+    const audit = agentAuditFromOrigin(origin);
     const now = Date.now();
     this.durableState.storage.transactionSync(() => {
       this.durableState.storage.sql.exec(
@@ -442,7 +620,69 @@ export class DocumentParty extends YServer {
           WHERE singleton = 1`,
         now,
       );
+      if (audit) this.insertAgentOperationAudit(audit, now);
     });
+  }
+
+  private findAgentOperationResult(
+    requestId: string,
+    actorId: string,
+    inputFingerprint: string,
+  ): DocumentAgentEditResult | null {
+    const [row] = this.durableState.storage.sql
+      .exec<{ agentId: string; operationSummary: string; resultJson: string }>(
+        `SELECT agent_id AS agentId, operation_summary AS operationSummary,
+                result_json AS resultJson
+           FROM paca_document_agent_operation_audit
+          WHERE request_id = ?`,
+        requestId,
+      )
+      .toArray();
+    if (!row) return null;
+    const summary = JSON.parse(row.operationSummary) as { inputFingerprint?: unknown };
+    if (row.agentId !== actorId || summary.inputFingerprint !== inputFingerprint) {
+      throw new Error("DOCUMENT_AGENT_REQUEST_ID_REUSED");
+    }
+    return JSON.parse(row.resultJson) as DocumentAgentEditResult;
+  }
+
+  private recordAgentOperation(
+    actorId: string,
+    inputFingerprint: string,
+    input: DocumentAgentEditInput,
+    result: DocumentAgentEditResult,
+    status: AgentOperationAudit["status"],
+  ): void {
+    this.insertAgentOperationAudit(
+      { actorId, inputFingerprint, input, result, status },
+      Date.now(),
+    );
+  }
+
+  private insertAgentOperationAudit(audit: AgentOperationAudit, createdAt: number): void {
+    const summary = {
+      inputFingerprint: audit.inputFingerprint,
+      operations: audit.input.operations.map((operation) => ({
+        type: operation.type,
+        blockId: operation.blockId,
+      })),
+    };
+    this.durableState.storage.sql.exec(
+      `INSERT INTO paca_document_agent_operation_audit
+         (request_id, run_id, agent_id, operation_mode, base_revision,
+          result_revision, status, operation_summary, result_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      audit.input.requestId,
+      audit.input.runId,
+      audit.actorId,
+      audit.input.operationMode,
+      audit.input.baseRevision,
+      audit.result.revision,
+      audit.status,
+      JSON.stringify(summary),
+      JSON.stringify(audit.result),
+      createdAt,
+    );
   }
 
   private materializationState(): {

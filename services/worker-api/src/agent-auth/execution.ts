@@ -1,7 +1,17 @@
 import type { AgentAuthOptions, AgentSession } from "@better-auth/agent-auth";
+import { and, eq, isNull } from "drizzle-orm";
 import * as z from "zod";
 
+import type { AppBindings } from "../bindings";
 import type { PacaDatabase } from "../database";
+import * as schema from "../db/schema";
+import {
+  type DocumentAgentEditInput,
+  type DocumentAgentEditResult,
+  type DocumentAgentSnapshot,
+  documentAgentEditInputSchema,
+} from "../document/agent-operations";
+import type { DocumentScope } from "../document/postgres-scope-repository";
 import { PostgresPacaPermissionStore } from "../permission/postgres-store";
 import { PacaPermissionService } from "../permission/service";
 import type { PermissionRequest } from "../permission/statement";
@@ -37,6 +47,13 @@ export type PacaAgentExecutionDependencies = {
     actor: TaskActor,
     input: TaskUpdateInput,
   ): Promise<Task>;
+  findDocumentScope(documentId: string): Promise<DocumentScope | null>;
+  readDocument(documentId: string): Promise<DocumentAgentSnapshot>;
+  editDocument(
+    actorId: string,
+    documentId: string,
+    input: DocumentAgentEditInput,
+  ): Promise<DocumentAgentEditResult>;
 };
 
 const scopeSchema = z.object({
@@ -69,6 +86,12 @@ const taskCreateSchema = scopeSchema.extend({
   importance: z.number().int().min(0).max(1_000_000).optional(),
   storyPoints: z.number().int().min(0).max(1_000_000).nullable().optional(),
   tags: z.array(z.string().max(100)).max(50).optional(),
+});
+const documentReadSchema = scopeSchema.extend({ documentId: z.uuid() });
+const documentEditSchema = scopeSchema.extend({
+  documentId: z.uuid(),
+  field: z.literal("block.content"),
+  ...documentAgentEditInputSchema.shape,
 });
 
 function denied(code: string): never {
@@ -133,19 +156,45 @@ async function requireAgentProjectAccess(
 function requireGrant(
   session: AgentSession,
   capability: PacaCapabilityName,
-  input:
-    | z.infer<typeof taskWriteSchema>
-    | z.infer<typeof taskReadSchema>
-    | z.infer<typeof scopeSchema>,
+  input: {
+    organizationId: string;
+    projectId: string;
+    taskId?: string;
+    documentId?: string;
+    field?: string;
+    operationMode?: string;
+  },
 ) {
   const decision = evaluateAgentCapability(session, capability, {
     organizationId: input.organizationId,
     projectId: input.projectId,
     taskId: "taskId" in input ? input.taskId : undefined,
+    documentId: "documentId" in input ? input.documentId : undefined,
     field: "field" in input ? input.field : undefined,
     operationMode: "operationMode" in input ? input.operationMode : undefined,
   });
   if (!decision.allowed) denied(decision.code);
+}
+
+async function requireAgentDocumentAccess(
+  dependencies: PacaAgentExecutionDependencies,
+  session: AgentSession,
+  input: z.infer<typeof documentReadSchema>,
+  permission: PermissionRequest,
+): Promise<void> {
+  const scope = await dependencies.findDocumentScope(input.documentId);
+  if (
+    !scope ||
+    scope.organizationId !== input.organizationId ||
+    scope.projectId !== input.projectId
+  ) {
+    denied("AGENT_DOCUMENT_SCOPE_MISMATCH");
+  }
+  if (session.type === "autonomous") return;
+  const userId = requireDelegatedUser(session);
+  const decision = await dependencies.hasProjectPermission(userId, input.projectId, permission);
+  if (!decision.scopeExists) denied("AGENT_PROJECT_NOT_FOUND");
+  if (!decision.allowed) denied("AGENT_DELEGATED_PERMISSION_DENIED");
 }
 
 export type AgentProjectScope = z.infer<typeof scopeSchema>;
@@ -232,19 +281,46 @@ export function createPacaAgentExecutor(
           create,
         );
       }
+      case "document.read": {
+        const input = documentReadSchema.parse(context.arguments);
+        requireGrant(context.agentSession, "document.read", input);
+        await requireAgentDocumentAccess(dependencies, context.agentSession, input, {
+          docs: ["read"],
+        });
+        return dependencies.readDocument(input.documentId);
+      }
+      case "document.edit": {
+        const input = documentEditSchema.parse(context.arguments);
+        requireGrant(context.agentSession, "document.edit", input);
+        await requireAgentDocumentAccess(dependencies, context.agentSession, input, {
+          docs: ["write"],
+        });
+        return dependencies.editDocument(context.agentSession.agentId, input.documentId, {
+          requestId: input.requestId,
+          runId: input.runId,
+          baseRevision: input.baseRevision,
+          baseStateVector: input.baseStateVector,
+          operationMode: input.operationMode,
+          operations: input.operations,
+        });
+      }
       default:
         denied("AGENT_CAPABILITY_NOT_EXECUTABLE");
     }
   };
 }
 
-export function createPostgresPacaAgentExecutor(database: PacaDatabase): AgentExecuteHandler {
-  const dependencies = postgresPacaAgentExecutionDependencies(database);
+export function createPostgresPacaAgentExecutor(
+  database: PacaDatabase,
+  env: AppBindings,
+): AgentExecuteHandler {
+  const dependencies = postgresPacaAgentExecutionDependencies(database, env);
   return createPacaAgentExecutor(dependencies);
 }
 
 function postgresPacaAgentExecutionDependencies(
   database: PacaDatabase,
+  env?: AppBindings,
 ): PacaAgentExecutionDependencies {
   const permissionStore = new PostgresPacaPermissionStore(database);
   const permissionService = new PacaPermissionService(permissionStore);
@@ -260,6 +336,33 @@ function postgresPacaAgentExecutionDependencies(
     createTask: (projectId, actor, input) => taskService.createAs(projectId, actor, input),
     updateTask: (projectId, taskId, actor, input) =>
       taskService.updateAs(projectId, taskId, actor, input),
+    findDocumentScope: async (documentId) => {
+      const [scope] = await database
+        .select({
+          documentId: schema.pacaDocuments.id,
+          organizationId: schema.pacaProjects.organizationId,
+          projectId: schema.pacaDocuments.projectId,
+        })
+        .from(schema.pacaDocuments)
+        .innerJoin(schema.pacaProjects, eq(schema.pacaProjects.id, schema.pacaDocuments.projectId))
+        .where(
+          and(
+            eq(schema.pacaDocuments.id, documentId),
+            isNull(schema.pacaDocuments.deletedAt),
+            eq(schema.pacaProjects.status, "active"),
+          ),
+        )
+        .limit(1);
+      return scope ?? null;
+    },
+    readDocument: (documentId) => {
+      if (!env) denied("AGENT_DOCUMENT_RUNTIME_UNAVAILABLE");
+      return env.DocumentParty.getByName(documentId).readForAgent();
+    },
+    editDocument: (actorId, documentId, input) => {
+      if (!env) denied("AGENT_DOCUMENT_RUNTIME_UNAVAILABLE");
+      return env.DocumentParty.getByName(documentId).editAsAgent(actorId, input);
+    },
   };
 }
 

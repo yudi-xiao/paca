@@ -60,12 +60,7 @@ export function pacaAgentAuth(options: PacaAgentAuthPluginOptions = {}) {
     absoluteLifetime: AGENT_MAX_LIFETIME_SECONDS,
     maxAgentsPerUser: 25,
     freshSessionWindow: 5 * 60,
-    blockedCapabilities: [
-      "document.read",
-      "document.edit",
-      "environment.connect",
-      "workflow.execute",
-    ],
+    blockedCapabilities: ["environment.connect", "workflow.execute"],
     jtiCacheStorage: "secondary-storage",
     jwksCacheStorage: "secondary-storage",
     dangerouslySkipJtiCheck: false,

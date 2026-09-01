@@ -36,6 +36,79 @@ const scopedInput = (properties: Record<string, unknown>, required: string[]) =>
   required: ["organizationId", "projectId", "validUntil", ...required],
 });
 
+const documentTextContentInput = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    type: { const: "text" },
+    text: { type: "string", maxLength: 100_000 },
+    styles: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        bold: { type: "boolean" },
+        italic: { type: "boolean" },
+        underline: { type: "boolean" },
+        strike: { type: "boolean" },
+        code: { type: "boolean" },
+        textColor: { type: "string", minLength: 1, maxLength: 100 },
+        backgroundColor: { type: "string", minLength: 1, maxLength: 100 },
+      },
+    },
+  },
+  required: ["type", "text"],
+} as const;
+
+const documentReferenceContentInput = (type: string, properties: Record<string, unknown>) => ({
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    type: { const: type },
+    props: {
+      type: "object",
+      additionalProperties: false,
+      properties,
+      required: Object.keys(properties).filter((key) => key !== "avatar"),
+    },
+  },
+  required: ["type", "props"],
+});
+
+const documentInlineContentInput = {
+  oneOf: [
+    documentTextContentInput,
+    {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        type: { const: "link" },
+        href: { type: "string", minLength: 1, maxLength: 2_048 },
+        content: {
+          type: "array",
+          minItems: 1,
+          maxItems: 500,
+          items: documentTextContentInput,
+        },
+      },
+      required: ["type", "href", "content"],
+    },
+    documentReferenceContentInput("teamMention", {
+      id: { type: "string", minLength: 1, maxLength: 255 },
+      name: { type: "string", minLength: 1, maxLength: 500 },
+      avatar: { type: "string", maxLength: 2_048 },
+    }),
+    documentReferenceContentInput("taskReference", {
+      id: { type: "string", minLength: 1, maxLength: 255 },
+      title: { type: "string", minLength: 1, maxLength: 500 },
+      status: { type: "string", minLength: 1, maxLength: 100 },
+    }),
+    documentReferenceContentInput("docReference", {
+      id: { type: "string", minLength: 1, maxLength: 255 },
+      title: { type: "string", minLength: 1, maxLength: 500 },
+    }),
+  ],
+} as const;
+
 export const pacaCapabilities = [
   {
     name: "project.read",
@@ -122,10 +195,57 @@ export const pacaCapabilities = [
     input: scopedInput(
       {
         documentId: { type: "string", format: "uuid" },
-        field: { type: "string", minLength: 1, maxLength: 100 },
-        operationMode: { type: "string", enum: ["suggest", "collaborate", "exclusive"] },
+        field: { const: "block.content" },
+        requestId: { type: "string", format: "uuid" },
+        runId: { type: "string", format: "uuid" },
+        baseRevision: {
+          type: "integer",
+          minimum: 0,
+          maximum: Number.MAX_SAFE_INTEGER,
+        },
+        baseStateVector: {
+          type: "string",
+          minLength: 1,
+          maxLength: 400_000,
+          pattern: "^[A-Za-z0-9_-]+$",
+        },
+        operationMode: { type: "string", enum: ["suggest", "collaborate"] },
+        operations: {
+          type: "array",
+          minItems: 1,
+          maxItems: 10,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              type: { const: "replace_block_content" },
+              blockId: { type: "string", minLength: 1, maxLength: 255 },
+              expectedBlockVersion: {
+                type: "string",
+                minLength: 1,
+                maxLength: 400_000,
+                pattern: "^[A-Za-z0-9_-]+$",
+              },
+              content: {
+                type: "array",
+                maxItems: 500,
+                items: documentInlineContentInput,
+              },
+            },
+            required: ["type", "blockId", "expectedBlockVersion", "content"],
+          },
+        },
       },
-      ["documentId", "field", "operationMode"],
+      [
+        "documentId",
+        "field",
+        "requestId",
+        "runId",
+        "baseRevision",
+        "baseStateVector",
+        "operationMode",
+        "operations",
+      ],
     ),
   },
   {

@@ -192,11 +192,8 @@ function parseBlockGroup(
   });
 }
 
-export function materializeBlockNoteSnapshot(snapshot: ArrayBuffer | Uint8Array): unknown[] {
-  const bytes = snapshot instanceof Uint8Array ? snapshot : new Uint8Array(snapshot);
-  const document = new YDoc();
+export function materializeBlockNoteDocument(document: YDoc): unknown[] {
   try {
-    applyUpdate(document, bytes);
     const fragment = document.getXmlFragment(DOCUMENT_FRAGMENT_NAME);
     const roots = fragment.toArray();
     if (roots.length === 0) fail("DOCUMENT_BLOCKNOTE_ROOT_MISSING");
@@ -212,6 +209,18 @@ export function materializeBlockNoteSnapshot(snapshot: ArrayBuffer | Uint8Array)
       fail("DOCUMENT_BLOCKNOTE_PROJECTION_TOO_LARGE");
     }
     return blocks;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("DOCUMENT_BLOCKNOTE_")) throw error;
+    throw new Error("DOCUMENT_BLOCKNOTE_SNAPSHOT_INVALID");
+  }
+}
+
+export function materializeBlockNoteSnapshot(snapshot: ArrayBuffer | Uint8Array): unknown[] {
+  const bytes = snapshot instanceof Uint8Array ? snapshot : new Uint8Array(snapshot);
+  const document = new YDoc();
+  try {
+    applyUpdate(document, bytes);
+    return materializeBlockNoteDocument(document);
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("DOCUMENT_BLOCKNOTE_")) throw error;
     throw new Error("DOCUMENT_BLOCKNOTE_SNAPSHOT_INVALID");

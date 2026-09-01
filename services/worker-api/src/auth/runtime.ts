@@ -184,7 +184,7 @@ export function createAuth(db: PacaDatabase, env: AppBindings) {
   const agentAuthPlugin = pacaAgentAuth({
     autonomousHostEnrollmentSecret: env.AUTONOMOUS_HOST_ENROLLMENT_SECRET,
     onEvent: (event) => recordAgentAuthEvent(db, event),
-    onExecute: createPostgresPacaAgentExecutor(db),
+    onExecute: createPostgresPacaAgentExecutor(db, env),
   });
   const agentApprovalGuard = pacaAgentApprovalGuard({
     permissionService: new PacaPermissionService(permissionStore),

@@ -17,6 +17,43 @@ export type AgentAuthAuditFailure = {
 
 type AuditFailureLogger = (failure: AgentAuthAuditFailure) => void;
 
+const EXECUTION_SCOPE_KEYS = [
+  "organizationId",
+  "projectId",
+  "documentId",
+  "taskId",
+  "field",
+  "operationMode",
+  "requestId",
+  "runId",
+] as const;
+
+function safeExecutionScope(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const arguments_ = value as Record<string, unknown>;
+  const scope: Record<string, unknown> = {};
+  for (const key of EXECUTION_SCOPE_KEYS) {
+    const item = arguments_[key];
+    if (typeof item === "string") scope[key] = item.slice(0, 1_000);
+  }
+  if (
+    typeof arguments_.baseRevision === "number" &&
+    Number.isSafeInteger(arguments_.baseRevision)
+  ) {
+    scope.baseRevision = arguments_.baseRevision;
+  }
+  if (Array.isArray(arguments_.operations)) {
+    scope.operationCount = arguments_.operations.length;
+    scope.operationTargets = arguments_.operations.slice(0, 10).flatMap((operation) => {
+      if (!operation || typeof operation !== "object" || Array.isArray(operation)) return [];
+      const entry = operation as Record<string, unknown>;
+      if (typeof entry.type !== "string" || typeof entry.blockId !== "string") return [];
+      return [{ type: entry.type.slice(0, 100), blockId: entry.blockId.slice(0, 255) }];
+    });
+  }
+  return scope;
+}
+
 function sanitize(value: unknown, depth = 0): unknown {
   if (depth > 3) return "[truncated]";
   if (value === null || typeof value === "boolean" || typeof value === "number") return value;
@@ -72,6 +109,7 @@ export async function recordAgentAuthEvent(
           provider: execution.provider,
           agentName: execution.agentName,
           argumentKeys: Object.keys(execution.arguments ?? {}).sort(),
+          executionScope: safeExecutionScope(execution.arguments),
           outputType: execution.output === null ? "null" : typeof execution.output,
           error: execution.error?.slice(0, 1_000),
         }

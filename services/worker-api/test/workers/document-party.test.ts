@@ -1,11 +1,18 @@
 /// <reference types="@cloudflare/vitest-plugin/types" />
 
-import { evictDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import * as encoding from "lib0/encoding";
 import { describe, expect, it } from "vitest";
 import * as syncProtocol from "y-protocols/sync";
-import { applyUpdate, encodeStateAsUpdate, Doc as YDoc } from "yjs";
+import {
+  applyUpdate,
+  encodeStateAsUpdate,
+  encodeStateVector,
+  Doc as YDoc,
+  XmlElement as YXmlElement,
+  XmlText as YXmlText,
+} from "yjs";
 
 import {
   DOCUMENT_CONTEXT_HEADER,
@@ -49,6 +56,44 @@ function arrayBuffer(update: Uint8Array): ArrayBuffer {
     update.byteOffset,
     update.byteOffset + update.byteLength,
   ) as ArrayBuffer;
+}
+
+function paragraph(id: string, value: string): YXmlElement {
+  const container = new YXmlElement("blockContainer");
+  container.setAttribute("id", id);
+  const content = new YXmlElement("paragraph");
+  const text = new YXmlText();
+  text.insert(0, value);
+  content.insert(0, [text]);
+  container.insert(0, [content]);
+  return container;
+}
+
+function blockNoteDocument(): YDoc {
+  const document = new YDoc();
+  const group = new YXmlElement("blockGroup");
+  group.insert(0, [paragraph("block-a", "Alpha"), paragraph("block-b", "Beta")]);
+  document.getXmlFragment("document-store").insert(0, [group]);
+  return document;
+}
+
+function replaceParagraphText(document: YDoc, blockId: string, value: string): void {
+  const group = document.getXmlFragment("document-store").get(0);
+  if (!(group instanceof YXmlElement)) throw new Error("BLOCK_GROUP_MISSING");
+  const container = group
+    .toArray()
+    .find(
+      (candidate): candidate is YXmlElement =>
+        candidate instanceof YXmlElement && candidate.getAttribute("id") === blockId,
+    );
+  const content = container?.get(0);
+  if (!(content instanceof YXmlElement)) throw new Error("BLOCK_CONTENT_MISSING");
+  document.transact(() => {
+    if (content.length > 0) content.delete(0, content.length);
+    const text = new YXmlText();
+    text.insert(0, value);
+    content.insert(0, [text]);
+  });
 }
 
 async function connect(state: DocumentConnectionState) {
@@ -189,6 +234,168 @@ describe("DocumentParty Durable Object runtime", () => {
       invalid: true,
     });
     expect(await stub.persistenceStats()).toMatchObject({ initialized: false, updateCount: 0 });
+  });
+
+  it("keeps suggestions non-mutating and applies an idempotent structured Agent edit", async () => {
+    const documentId = "aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    const stub = env.DocumentParty.getByName(documentId);
+    await stub.initializeIfEmpty(arrayBuffer(encodeStateAsUpdate(blockNoteDocument())));
+    const before = await stub.readForAgent();
+    const operation = {
+      type: "replace_block_content" as const,
+      blockId: "block-a",
+      expectedBlockVersion: before.blocks[0]?.version ?? "missing",
+      content: [{ type: "text" as const, text: "Agent result", styles: { bold: true } }],
+    };
+    const suggestion = {
+      requestId: "aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+      runId: "aaaaaaa3-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
+      baseRevision: before.revision,
+      baseStateVector: before.stateVector,
+      operationMode: "suggest" as const,
+      operations: [operation],
+    };
+
+    await expect(stub.editAsAgent("agent-1", suggestion)).resolves.toMatchObject({
+      applied: false,
+      conflict: false,
+      mode: "suggest",
+      revision: before.revision,
+    });
+    expect(
+      JSON.parse((await stub.readForAgent()).blocks[0]?.blockJson ?? "null").content,
+    ).toMatchObject([{ type: "text", text: "Alpha" }]);
+
+    const edit = {
+      ...suggestion,
+      requestId: "aaaaaaa4-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
+      operationMode: "collaborate" as const,
+    };
+    const applied = await stub.editAsAgent("agent-1", edit);
+    expect(applied).toMatchObject({ applied: true, conflict: false, revision: 2 });
+    await expect(stub.editAsAgent("agent-1", edit)).resolves.toEqual(applied);
+    const changedReplay = await runInDurableObject(stub, async (instance) => {
+      try {
+        await instance.editAsAgent("agent-1", {
+          ...edit,
+          operations: [
+            {
+              ...edit.operations[0],
+              content: [{ type: "text" as const, text: "Changed replay", styles: {} }],
+            },
+          ],
+        });
+        return "unexpected-success";
+      } catch (error) {
+        return error instanceof Error ? error.message : "unknown-error";
+      }
+    });
+    expect(changedReplay).toBe("DOCUMENT_AGENT_REQUEST_ID_REUSED");
+    expect(await stub.persistenceStats()).toMatchObject({ revision: 2, updateCount: 2 });
+    expect(JSON.parse((await stub.readForAgent()).blocks[0]?.blockJson ?? "null").content).toEqual([
+      { type: "text", text: "Agent result", styles: { bold: true } },
+    ]);
+
+    const audit = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql
+        .exec<{
+          agentId: string;
+          operationSummary: string;
+          requestId: string;
+          runId: string;
+          status: string;
+        }>(
+          `SELECT request_id AS requestId, run_id AS runId, agent_id AS agentId,
+                  status, operation_summary AS operationSummary
+             FROM paca_document_agent_operation_audit
+            ORDER BY created_at ASC`,
+        )
+        .toArray(),
+    );
+    expect(audit).toEqual([
+      {
+        requestId: suggestion.requestId,
+        runId: suggestion.runId,
+        agentId: "agent-1",
+        status: "suggested",
+        operationSummary: expect.stringContaining('"operations"'),
+      },
+      {
+        requestId: edit.requestId,
+        runId: edit.runId,
+        agentId: "agent-1",
+        status: "applied",
+        operationSummary: expect.stringContaining('"operations"'),
+      },
+    ]);
+    expect(JSON.stringify(audit)).not.toContain("Agent result");
+    expect(audit.map((entry) => JSON.parse(entry.operationSummary))).toEqual([
+      {
+        inputFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+        operations: [{ type: "replace_block_content", blockId: "block-a" }],
+      },
+      {
+        inputFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+        operations: [{ type: "replace_block_content", blockId: "block-a" }],
+      },
+    ]);
+  });
+
+  it("conflicts on a changed target but accepts an older snapshot for an unchanged block", async () => {
+    const documentId = "bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
+    const stub = env.DocumentParty.getByName(documentId);
+    await stub.initializeIfEmpty(arrayBuffer(encodeStateAsUpdate(blockNoteDocument())));
+    const before = await stub.readForAgent();
+    const baseDocument = new YDoc();
+    applyUpdate(baseDocument, new Uint8Array(await stub.snapshot()));
+    const userDocument = new YDoc();
+    applyUpdate(userDocument, encodeStateAsUpdate(baseDocument));
+    replaceParagraphText(userDocument, "block-b", "User changed Beta");
+    const userUpdate = encodeStateAsUpdate(userDocument, encodeStateVector(baseDocument));
+    const connection = await connect(connectionState({ documentId }));
+    connection.socket.send(framedUpdate(userUpdate));
+    await waitForUpdates(stub, 2);
+
+    const olderButDisjoint = {
+      requestId: "bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
+      runId: "bbbbbbb3-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
+      baseRevision: before.revision,
+      baseStateVector: before.stateVector,
+      operationMode: "collaborate" as const,
+      operations: [
+        {
+          type: "replace_block_content" as const,
+          blockId: "block-a",
+          expectedBlockVersion: before.blocks[0]?.version ?? "missing",
+          content: [{ type: "text" as const, text: "Agent changed Alpha", styles: {} }],
+        },
+      ],
+    };
+    await expect(stub.editAsAgent("agent-1", olderButDisjoint)).resolves.toMatchObject({
+      applied: true,
+      conflict: false,
+      baseRevision: 1,
+      revision: 3,
+    });
+
+    const current = await stub.readForAgent();
+    expect(current.blocks.map((entry) => JSON.parse(entry.blockJson).content)).toEqual([
+      [{ type: "text", text: "Agent changed Alpha", styles: {} }],
+      [{ type: "text", text: "User changed Beta", styles: {} }],
+    ]);
+    await expect(
+      stub.editAsAgent("agent-1", {
+        ...olderButDisjoint,
+        requestId: "bbbbbbb4-bbbb-4bbb-8bbb-bbbbbbbbbbb4",
+        operations: [
+          {
+            ...olderButDisjoint.operations[0],
+            content: [{ type: "text" as const, text: "Stale overwrite", styles: {} }],
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({ applied: false, conflict: true, revision: 3 });
+    connection.socket.close(1000, "done");
   });
 
   it("persists session invalidation across hibernation and rejects a stale reconnect", async () => {
