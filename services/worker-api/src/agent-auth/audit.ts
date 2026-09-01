@@ -24,6 +24,7 @@ const EXECUTION_SCOPE_KEYS = [
   "taskId",
   "field",
   "operationMode",
+  "action",
   "requestId",
   "runId",
 ] as const;

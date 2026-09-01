@@ -51,6 +51,7 @@ export type PacaAgentApprovalGuardOptions = {
   onEvent?: (event: AgentAuthEvent) => void | Promise<void>;
   onCapabilitiesRevoked?: (change: {
     agentId: string;
+    documentIds: string[];
     projectIds: string[];
   }) => void | Promise<void>;
 };
@@ -166,8 +167,16 @@ export function pacaAgentApprovalGuard(options: PacaAgentApprovalGuardOptions = 
                 .filter((projectId): projectId is string => Boolean(projectId)),
             ),
           ];
+          const documentIds = [
+            ...new Set(
+              revocable
+                .map((grant) => exactConstraintString(grant.constraints?.documentId))
+                .filter((documentId): documentId is string => Boolean(documentId)),
+            ),
+          ];
           await options.onCapabilitiesRevoked?.({
             agentId: context.body.agent_id,
+            documentIds,
             projectIds,
           });
 

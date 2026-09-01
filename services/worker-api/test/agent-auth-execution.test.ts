@@ -6,8 +6,11 @@ import {
   type PacaAgentExecutionDependencies,
 } from "../src/agent-auth/execution";
 import type {
+  DocumentAgentCommand,
+  DocumentAgentCommandResult,
   DocumentAgentEditInput,
   DocumentAgentEditResult,
+  DocumentAgentLeaseResult,
   DocumentAgentSnapshot,
 } from "../src/document/agent-operations";
 import type { Project } from "../src/project/service";
@@ -76,6 +79,7 @@ const documentSnapshot: DocumentAgentSnapshot = {
 };
 
 const documentEdit: DocumentAgentEditInput = {
+  action: "apply",
   requestId: REQUEST_ID,
   runId: RUN_ID,
   baseRevision: 7,
@@ -92,6 +96,7 @@ const documentEdit: DocumentAgentEditInput = {
 };
 
 const documentEditResult: DocumentAgentEditResult = {
+  action: "apply",
   applied: true,
   conflict: false,
   documentId: DOCUMENT_ID,
@@ -165,7 +170,7 @@ function dependencies(
       projectId: PROJECT_ID,
     }),
     readDocument: async () => documentSnapshot,
-    editDocument: async () => documentEditResult,
+    executeDocumentCommand: async () => documentEditResult,
     ...overrides,
   };
 }
@@ -180,6 +185,7 @@ function executeContext(
     | "document.edit",
   session: AgentSession,
   args: Record<string, unknown>,
+  grantConstraints = session.agent.capabilityGrants[0]?.constraints ?? null,
 ) {
   return {
     ctx: {} as never,
@@ -191,7 +197,7 @@ function executeContext(
       id: "grant-1",
       agentId: session.agentId,
       capability,
-      constraints: session.agent.capabilityGrants[0]?.constraints ?? null,
+      constraints: grantConstraints,
       grantedBy: "approver-1",
       deniedBy: null,
       reason: null,
@@ -434,17 +440,24 @@ describe("Paca Agent Auth execution boundary", () => {
   });
 
   it("executes a constrained document edit with the trusted Agent identity", async () => {
-    const editDocument = vi.fn(
-      async (_actorId: string, _documentId: string, _input: DocumentAgentEditInput) =>
-        documentEditResult,
+    const executeDocumentCommand = vi.fn(
+      async (
+        _actorId: string,
+        _documentId: string,
+        _input: DocumentAgentCommand,
+        _authorizationExpiresAt: number,
+      ): Promise<DocumentAgentCommandResult> => documentEditResult,
     );
     const hasProjectPermission = vi.fn(async () => ({ allowed: true, scopeExists: true }));
-    const executor = createPacaAgentExecutor(dependencies({ editDocument, hasProjectPermission }));
+    const executor = createPacaAgentExecutor(
+      dependencies({ executeDocumentCommand, hasProjectPermission }),
+    );
     const constraints = {
       ...scope,
       documentId: DOCUMENT_ID,
       field: "block.content",
       operationMode: { in: ["suggest", "collaborate"] },
+      action: "apply",
     } satisfies CapabilityConstraints;
     const session = agentSession("document.edit", constraints);
     const arguments_ = {
@@ -460,7 +473,12 @@ describe("Paca Agent Auth execution boundary", () => {
     expect(hasProjectPermission).toHaveBeenCalledWith("user-1", PROJECT_ID, {
       docs: ["write"],
     });
-    expect(editDocument).toHaveBeenCalledWith("agent-1", DOCUMENT_ID, documentEdit);
+    expect(executeDocumentCommand).toHaveBeenCalledWith(
+      "agent-1",
+      DOCUMENT_ID,
+      documentEdit,
+      expect.any(Number),
+    );
   });
 
   it("rejects revoked delegated document permission and allows an autonomous scoped Grant", async () => {
@@ -469,6 +487,7 @@ describe("Paca Agent Auth execution boundary", () => {
       documentId: DOCUMENT_ID,
       field: "block.content",
       operationMode: "collaborate",
+      action: "apply",
     } satisfies CapabilityConstraints;
     const arguments_ = {
       ...scope,
@@ -488,9 +507,9 @@ describe("Paca Agent Auth execution boundary", () => {
     ).rejects.toThrow("AGENT_DELEGATED_PERMISSION_DENIED");
 
     const hasProjectPermission = vi.fn(async () => ({ allowed: false, scopeExists: true }));
-    const editDocument = vi.fn(async () => documentEditResult);
+    const executeDocumentCommand = vi.fn(async () => documentEditResult);
     const autonomousExecutor = createPacaAgentExecutor(
-      dependencies({ hasProjectPermission, editDocument }),
+      dependencies({ hasProjectPermission, executeDocumentCommand }),
     );
     await expect(
       autonomousExecutor(
@@ -502,5 +521,96 @@ describe("Paca Agent Auth execution boundary", () => {
       ),
     ).resolves.toEqual(documentEditResult);
     expect(hasProjectPermission).not.toHaveBeenCalled();
+  });
+
+  it("executes an exclusive lease command only within action-scoped document Grants", async () => {
+    const leaseResult: DocumentAgentLeaseResult = {
+      action: "acquire_lease",
+      acquired: true,
+      conflict: false,
+      documentId: DOCUMENT_ID,
+      expiresAt: Date.now() + 30_000,
+      leaseId: "77777777-7777-4777-8777-777777777777",
+      released: false,
+      requestId: REQUEST_ID,
+      revision: 7,
+      runId: RUN_ID,
+    };
+    const executeDocumentCommand = vi.fn(async () => leaseResult);
+    const executor = createPacaAgentExecutor(dependencies({ executeDocumentCommand }));
+    const constraints = {
+      ...scope,
+      documentId: DOCUMENT_ID,
+      field: "block.content",
+      operationMode: "exclusive",
+      action: { in: ["acquire_lease", "renew_lease", "apply", "release_lease"] },
+    } satisfies CapabilityConstraints;
+    const session = agentSession("document.edit", constraints);
+    const command = {
+      action: "acquire_lease" as const,
+      requestId: REQUEST_ID,
+      runId: RUN_ID,
+      operationMode: "exclusive" as const,
+      leaseDurationMs: 30_000,
+    };
+
+    await expect(
+      executor(
+        executeContext("document.edit", session, {
+          ...scope,
+          documentId: DOCUMENT_ID,
+          field: "block.content",
+          ...command,
+        }),
+      ),
+    ).resolves.toEqual(leaseResult);
+    expect(executeDocumentCommand).toHaveBeenCalledWith(
+      "agent-1",
+      DOCUMENT_ID,
+      command,
+      expect.any(Number),
+    );
+
+    const multiGrantSession = agentSession("document.edit", {
+      ...constraints,
+      operationMode: "collaborate",
+      action: "apply",
+    });
+    multiGrantSession.agent.capabilityGrants.push({
+      capability: "document.edit",
+      constraints,
+      grantedBy: "approver-1",
+      status: "active",
+    });
+    await expect(
+      executor(
+        executeContext(
+          "document.edit",
+          multiGrantSession,
+          {
+            ...scope,
+            documentId: DOCUMENT_ID,
+            field: "block.content",
+            ...command,
+          },
+          constraints,
+        ),
+      ),
+    ).resolves.toEqual(leaseResult);
+
+    const applyOnly = agentSession("document.edit", {
+      ...constraints,
+      action: "apply",
+    });
+    await expect(
+      executor(
+        executeContext("document.edit", applyOnly, {
+          ...scope,
+          documentId: DOCUMENT_ID,
+          field: "block.content",
+          ...command,
+        }),
+      ),
+    ).rejects.toThrow("AGENT_GRANT_CONSTRAINT_MISMATCH");
   });
 });

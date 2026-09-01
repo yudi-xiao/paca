@@ -12,6 +12,8 @@ const MAX_OPERATION_COUNT = 10;
 const MAX_INLINE_COUNT = 500;
 const MAX_INLINE_TEXT_LENGTH = 100_000;
 const MAX_CONTENT_BYTES = 256_000;
+export const DOCUMENT_AGENT_LEASE_MIN_DURATION_MS = 5_000;
+export const DOCUMENT_AGENT_LEASE_MAX_DURATION_MS = 60_000;
 const textEncoder = new TextEncoder();
 
 const styleSchema = z
@@ -114,6 +116,7 @@ const replaceBlockContentSchema = z
 
 export const documentAgentEditInputSchema = z
   .object({
+    action: z.literal("apply"),
     requestId: z.uuid(),
     runId: z.uuid(),
     baseRevision: z.number().int().nonnegative().safe(),
@@ -122,11 +125,26 @@ export const documentAgentEditInputSchema = z
       .min(1)
       .max(400_000)
       .regex(/^[A-Za-z0-9_-]+$/),
-    operationMode: z.enum(["suggest", "collaborate"]),
+    operationMode: z.enum(["suggest", "collaborate", "exclusive"]),
+    leaseId: z.uuid().optional(),
     operations: z.array(replaceBlockContentSchema).min(1).max(MAX_OPERATION_COUNT),
   })
   .strict()
   .superRefine((value, context) => {
+    if (value.operationMode === "exclusive" && !value.leaseId) {
+      context.addIssue({
+        code: "custom",
+        message: "DOCUMENT_AGENT_EXCLUSIVE_LEASE_REQUIRED",
+        path: ["leaseId"],
+      });
+    }
+    if (value.operationMode !== "exclusive" && value.leaseId) {
+      context.addIssue({
+        code: "custom",
+        message: "DOCUMENT_AGENT_LEASE_MODE_INVALID",
+        path: ["leaseId"],
+      });
+    }
     const seen = new Set<string>();
     for (const operation of value.operations) {
       if (seen.has(operation.blockId)) {
@@ -140,8 +158,52 @@ export const documentAgentEditInputSchema = z
     }
   });
 
+const documentAgentLeaseBaseSchema = z.object({
+  requestId: z.uuid(),
+  runId: z.uuid(),
+  operationMode: z.literal("exclusive"),
+});
+
+const documentAgentAcquireLeaseSchema = documentAgentLeaseBaseSchema
+  .extend({
+    action: z.literal("acquire_lease"),
+    leaseDurationMs: z
+      .number()
+      .int()
+      .min(DOCUMENT_AGENT_LEASE_MIN_DURATION_MS)
+      .max(DOCUMENT_AGENT_LEASE_MAX_DURATION_MS),
+  })
+  .strict();
+
+const documentAgentRenewLeaseSchema = documentAgentLeaseBaseSchema
+  .extend({
+    action: z.literal("renew_lease"),
+    leaseId: z.uuid(),
+    leaseDurationMs: z
+      .number()
+      .int()
+      .min(DOCUMENT_AGENT_LEASE_MIN_DURATION_MS)
+      .max(DOCUMENT_AGENT_LEASE_MAX_DURATION_MS),
+  })
+  .strict();
+
+const documentAgentReleaseLeaseSchema = documentAgentLeaseBaseSchema
+  .extend({
+    action: z.literal("release_lease"),
+    leaseId: z.uuid(),
+  })
+  .strict();
+
+export const documentAgentCommandSchema = z.discriminatedUnion("action", [
+  documentAgentEditInputSchema,
+  documentAgentAcquireLeaseSchema,
+  documentAgentRenewLeaseSchema,
+  documentAgentReleaseLeaseSchema,
+]);
+
 export type DocumentAgentEditInput = z.infer<typeof documentAgentEditInputSchema>;
 export type DocumentAgentOperation = DocumentAgentEditInput["operations"][number];
+export type DocumentAgentCommand = z.infer<typeof documentAgentCommandSchema>;
 
 export type VersionedDocumentBlock = {
   blockJson: string;
@@ -157,17 +219,33 @@ export type DocumentAgentSnapshot = {
 };
 
 export type DocumentAgentEditResult = {
+  action: "apply";
   applied: boolean;
   conflict: boolean;
   documentId: string;
   requestId: string;
   runId: string;
-  mode: "suggest" | "collaborate";
+  mode: "suggest" | "collaborate" | "exclusive";
   baseRevision: number;
   revision: number;
   stateVector: string;
   targets: Array<{ blockId: string; version: string }>;
 };
+
+export type DocumentAgentLeaseResult = {
+  action: "acquire_lease" | "release_lease" | "renew_lease";
+  acquired: boolean;
+  conflict: boolean;
+  documentId: string;
+  expiresAt: number | null;
+  leaseId: string | null;
+  released: boolean;
+  requestId: string;
+  revision: number;
+  runId: string;
+};
+
+export type DocumentAgentCommandResult = DocumentAgentEditResult | DocumentAgentLeaseResult;
 
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = "";

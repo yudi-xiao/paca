@@ -22,6 +22,22 @@ function userParty(env: AppBindings): RealtimeNamespace | null {
   );
 }
 
+function documentParty(env: AppBindings): RealtimeNamespace | null {
+  return (
+    ((env as Partial<AppBindings>).DocumentParty as unknown as RealtimeNamespace | undefined) ??
+    null
+  );
+}
+
+export async function invalidateDocumentActor(
+  env: AppBindings,
+  documentId: string,
+  actorType: "user" | "agent",
+  actorId: string,
+): Promise<number> {
+  return (await documentParty(env)?.getByName(documentId).invalidateActor(actorType, actorId)) ?? 0;
+}
+
 export async function invalidateProjectActor(
   env: AppBindings,
   projectId: string,

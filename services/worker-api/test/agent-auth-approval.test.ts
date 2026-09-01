@@ -129,6 +129,7 @@ async function signedInAuth(
   onEvent?: (event: AgentAuthEvent) => void | Promise<void>,
   onCapabilitiesRevoked?: (change: {
     agentId: string;
+    documentIds: string[];
     projectIds: string[];
   }) => void | Promise<void>,
 ) {
@@ -263,6 +264,48 @@ describe("Paca Agent Auth approval guard", () => {
     );
     expect(onCapabilitiesRevoked).toHaveBeenCalledWith({
       agentId: "agent-1",
+      documentIds: [],
+      projectIds: [PROJECT_ID],
+    });
+  });
+
+  it("reports exact document scopes so Grant revocation can release an exclusive lease", async () => {
+    const onCapabilitiesRevoked = vi.fn();
+    const { auth, cookie, db } = await signedInAuth(true, undefined, onCapabilitiesRevoked);
+    seedAutonomousAgent(db);
+    const documentId = "44444444-4444-4444-8444-444444444444";
+    const constraints = {
+      organizationId: "paca-default",
+      projectId: PROJECT_ID,
+      documentId,
+      field: "block.content",
+      operationMode: "exclusive",
+      action: { in: ["acquire_lease", "renew_lease", "apply", "release_lease"] },
+      validUntil: FUTURE,
+    };
+    const grant = await auth.handler(
+      new Request(`${BASE_URL}/api/auth/agent/grant-capability`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json", origin: BASE_URL },
+        body: JSON.stringify({
+          agent_id: "agent-1",
+          capabilities: [{ name: "document.edit", constraints }],
+        }),
+      }),
+    );
+    expect(grant.status).toBe(200);
+
+    const revoke = await auth.handler(
+      new Request(`${BASE_URL}/api/auth/paca-agent/revoke-capability`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json", origin: BASE_URL },
+        body: JSON.stringify({ agent_id: "agent-1", capabilities: ["document.edit"] }),
+      }),
+    );
+    expect(revoke.status).toBe(200);
+    expect(onCapabilitiesRevoked).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      documentIds: [documentId],
       projectIds: [PROJECT_ID],
     });
   });

@@ -4,10 +4,12 @@ import { applyUpdate, encodeStateAsUpdate, Doc as YDoc } from "yjs";
 
 import {
   applyDocumentAgentOperations,
-  type DocumentAgentEditInput,
+  type DocumentAgentCommand,
+  type DocumentAgentCommandResult,
   type DocumentAgentEditResult,
+  type DocumentAgentLeaseResult,
   type DocumentAgentSnapshot,
-  documentAgentEditInputSchema,
+  documentAgentCommandSchema,
   evaluateDocumentAgentEdit,
   inspectDocumentForAgent,
 } from "./agent-operations";
@@ -32,9 +34,26 @@ type DocumentUpdateActor = {
 type AgentOperationAudit = {
   actorId: string;
   inputFingerprint: string;
-  input: DocumentAgentEditInput;
-  result: DocumentAgentEditResult;
-  status: "applied" | "conflict" | "suggested" | "unchanged";
+  input: DocumentAgentCommand;
+  result: DocumentAgentCommandResult;
+  status:
+    | "applied"
+    | "conflict"
+    | "lease_acquired"
+    | "lease_conflict"
+    | "lease_released"
+    | "lease_renewed"
+    | "suggested"
+    | "unchanged";
+};
+
+type AgentLeaseRow = {
+  acquiredAt: number;
+  agentId: string;
+  expiresAt: number;
+  leaseId: string;
+  renewedAt: number;
+  runId: string;
 };
 
 type AgentOperationOrigin = {
@@ -66,12 +85,13 @@ const MAX_UPDATE_BYTES = 256 * 1024;
 const CHECKPOINT_UPDATE_COUNT = 128;
 const CHECKPOINT_UPDATE_BYTES = 1024 * 1024;
 const AGENT_OPERATION_ORIGIN = Symbol("paca.document.agent-operation");
+const AGENT_LEASE_MESSAGE_TYPE = "document.agent-lease";
 
 function cloneArrayBuffer(value: Uint8Array): ArrayBuffer {
   return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer;
 }
 
-async function agentOperationFingerprint(input: DocumentAgentEditInput): Promise<string> {
+async function agentOperationFingerprint(input: DocumentAgentCommand): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(JSON.stringify(input)),
@@ -172,6 +192,15 @@ export class DocumentParty extends YServer {
         );
         CREATE INDEX IF NOT EXISTS paca_document_agent_operation_run_idx
           ON paca_document_agent_operation_audit (run_id, created_at);
+        CREATE TABLE IF NOT EXISTS paca_document_agent_lease (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          lease_id TEXT NOT NULL UNIQUE,
+          agent_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          acquired_at INTEGER NOT NULL,
+          renewed_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
         INSERT OR IGNORE INTO paca_document_materialization_state
           (singleton, revision, queued_revision, acknowledged_revision, updated_at)
         SELECT 1,
@@ -188,6 +217,8 @@ export class DocumentParty extends YServer {
         VALUES (2, unixepoch('subsec') * 1000);
         INSERT OR IGNORE INTO paca_document_sql_migration (version, applied_at)
         VALUES (3, unixepoch('subsec') * 1000);
+        INSERT OR IGNORE INTO paca_document_sql_migration (version, applied_at)
+        VALUES (4, unixepoch('subsec') * 1000);
       `);
     });
   }
@@ -276,6 +307,7 @@ export class DocumentParty extends YServer {
     }
     connection.setState(state);
     await super.onConnect(connection, context);
+    this.sendAgentLeaseStatus(connection);
   }
 
   override onMessage(connection: DocumentConnection, message: WSMessage): void {
@@ -299,7 +331,12 @@ export class DocumentParty extends YServer {
 
   override isReadOnly(connection: DocumentConnection): boolean {
     const state = connection.state;
-    return !state?.canWrite || state.expiresAt <= Date.now() || this.isInvalidated(state);
+    return (
+      !state?.canWrite ||
+      state.expiresAt <= Date.now() ||
+      this.isInvalidated(state) ||
+      Boolean(this.activeAgentLease())
+    );
   }
 
   async initializeIfEmpty(update: ArrayBuffer): Promise<{
@@ -350,10 +387,14 @@ export class DocumentParty extends YServer {
     return inspectDocumentForAgent(this.document, this.name, stats.revision);
   }
 
-  async editAsAgent(actorId: string, value: unknown): Promise<DocumentAgentEditResult> {
+  async executeAsAgent(
+    actorId: string,
+    value: unknown,
+    authorizationExpiresAt: number,
+  ): Promise<DocumentAgentCommandResult> {
     await this.setName(this.name);
     if (!actorId || actorId.length > 255) throw new Error("DOCUMENT_AGENT_ACTOR_INVALID");
-    const input = documentAgentEditInputSchema.parse(value);
+    const input = documentAgentCommandSchema.parse(value);
     const inputFingerprint = await agentOperationFingerprint(input);
     const duplicate = this.findAgentOperationResult(input.requestId, actorId, inputFingerprint);
     if (duplicate) return duplicate;
@@ -362,10 +403,47 @@ export class DocumentParty extends YServer {
     if (!stats.initialized || stats.revision <= 0) {
       throw new Error("DOCUMENT_AGENT_NOT_INITIALIZED");
     }
+    if (input.action === "acquire_lease") {
+      return this.acquireAgentLease(
+        actorId,
+        inputFingerprint,
+        input,
+        stats.revision,
+        authorizationExpiresAt,
+      );
+    }
+    if (input.action === "renew_lease") {
+      return this.renewAgentLease(
+        actorId,
+        inputFingerprint,
+        input,
+        stats.revision,
+        authorizationExpiresAt,
+      );
+    }
+    if (input.action === "release_lease") {
+      return this.releaseAgentLease(actorId, inputFingerprint, input, stats.revision);
+    }
+
+    const activeLease = this.activeAgentLease();
+    if (input.operationMode === "exclusive") {
+      if (
+        !activeLease ||
+        activeLease.agentId !== actorId ||
+        activeLease.runId !== input.runId ||
+        activeLease.leaseId !== input.leaseId
+      ) {
+        throw new Error("DOCUMENT_AGENT_EXCLUSIVE_LEASE_INVALID");
+      }
+    } else if (input.operationMode === "collaborate" && activeLease) {
+      throw new Error("DOCUMENT_AGENT_LEASE_HELD");
+    }
+
     const before = inspectDocumentForAgent(this.document, this.name, stats.revision);
     const { conflicts } = evaluateDocumentAgentEdit(before, input);
     if (conflicts.length > 0) {
       const result: DocumentAgentEditResult = {
+        action: "apply",
         applied: false,
         conflict: true,
         documentId: this.name,
@@ -391,6 +469,7 @@ export class DocumentParty extends YServer {
     }));
     if (input.operationMode === "suggest") {
       const result: DocumentAgentEditResult = {
+        action: "apply",
         applied: false,
         conflict: false,
         documentId: this.name,
@@ -419,12 +498,13 @@ export class DocumentParty extends YServer {
     );
     if (!changes) {
       const result: DocumentAgentEditResult = {
+        action: "apply",
         applied: false,
         conflict: false,
         documentId: this.name,
         requestId: input.requestId,
         runId: input.runId,
-        mode: "collaborate",
+        mode: input.operationMode,
         baseRevision: input.baseRevision,
         revision: before.revision,
         stateVector: before.stateVector,
@@ -444,12 +524,13 @@ export class DocumentParty extends YServer {
       const after = inspectDocumentForAgent(this.document, this.name, before.revision + 1);
       const afterVersions = new Map(after.blocks.map((entry) => [entry.blockId, entry.version]));
       result = {
+        action: "apply",
         applied: true,
         conflict: false,
         documentId: this.name,
         requestId: input.requestId,
         runId: input.runId,
-        mode: "collaborate",
+        mode: input.operationMode,
         baseRevision: input.baseRevision,
         revision: after.revision,
         stateVector: after.stateVector,
@@ -544,7 +625,17 @@ export class DocumentParty extends YServer {
   invalidateActor(actorType: "user" | "agent", actorId: string): number {
     if (!actorId || actorId.length > 255) throw new Error("DOCUMENT_ACTOR_INVALID");
     const subject = `${actorType}:${actorId}`;
-    this.setInvalidation("actor", subject);
+    const releasedLease = actorType === "agent" && this.agentLease()?.agentId === actorId;
+    this.durableState.storage.transactionSync(() => {
+      this.setInvalidation("actor", subject);
+      if (actorType === "agent") {
+        this.durableState.storage.sql.exec(
+          "DELETE FROM paca_document_agent_lease WHERE agent_id = ?",
+          actorId,
+        );
+      }
+    });
+    if (releasedLease) this.broadcastAgentLeaseStatus();
     return this.closeConnections(
       (state) => state.actorType === actorType && state.actorId === actorId,
     );
@@ -557,7 +648,11 @@ export class DocumentParty extends YServer {
   }
 
   invalidateAll(): number {
-    this.setInvalidation("document", this.name);
+    this.durableState.storage.transactionSync(() => {
+      this.setInvalidation("document", this.name);
+      this.durableState.storage.sql.exec("DELETE FROM paca_document_agent_lease");
+    });
+    this.broadcastAgentLeaseStatus();
     return this.closeConnections(() => true);
   }
 
@@ -596,6 +691,216 @@ export class DocumentParty extends YServer {
     }
   }
 
+  private acquireAgentLease(
+    actorId: string,
+    inputFingerprint: string,
+    input: Extract<DocumentAgentCommand, { action: "acquire_lease" }>,
+    revision: number,
+    authorizationExpiresAt: number,
+  ): DocumentAgentLeaseResult {
+    const now = Date.now();
+    const existing = this.activeAgentLease(now);
+    if (existing) {
+      const result: DocumentAgentLeaseResult = {
+        action: "acquire_lease",
+        acquired: false,
+        conflict: true,
+        documentId: this.name,
+        expiresAt: existing.expiresAt,
+        leaseId: null,
+        released: false,
+        requestId: input.requestId,
+        revision,
+        runId: input.runId,
+      };
+      this.recordAgentOperation(actorId, inputFingerprint, input, result, "lease_conflict");
+      return result;
+    }
+
+    const expiresAt = this.agentLeaseExpiry(now, input.leaseDurationMs, authorizationExpiresAt);
+    const leaseId = crypto.randomUUID();
+    const result: DocumentAgentLeaseResult = {
+      action: "acquire_lease",
+      acquired: true,
+      conflict: false,
+      documentId: this.name,
+      expiresAt,
+      leaseId,
+      released: false,
+      requestId: input.requestId,
+      revision,
+      runId: input.runId,
+    };
+    this.durableState.storage.transactionSync(() => {
+      this.durableState.storage.sql.exec(
+        `INSERT INTO paca_document_agent_lease
+           (singleton, lease_id, agent_id, run_id, acquired_at, renewed_at, expires_at)
+         VALUES (1, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (singleton) DO UPDATE SET
+           lease_id = excluded.lease_id,
+           agent_id = excluded.agent_id,
+           run_id = excluded.run_id,
+           acquired_at = excluded.acquired_at,
+           renewed_at = excluded.renewed_at,
+           expires_at = excluded.expires_at`,
+        leaseId,
+        actorId,
+        input.runId,
+        now,
+        now,
+        expiresAt,
+      );
+      this.insertAgentOperationAudit(
+        { actorId, inputFingerprint, input, result, status: "lease_acquired" },
+        now,
+      );
+    });
+    this.broadcastAgentLeaseStatus();
+    return result;
+  }
+
+  private renewAgentLease(
+    actorId: string,
+    inputFingerprint: string,
+    input: Extract<DocumentAgentCommand, { action: "renew_lease" }>,
+    revision: number,
+    authorizationExpiresAt: number,
+  ): DocumentAgentLeaseResult {
+    const now = Date.now();
+    const existing = this.activeAgentLease(now);
+    if (
+      !existing ||
+      existing.agentId !== actorId ||
+      existing.runId !== input.runId ||
+      existing.leaseId !== input.leaseId
+    ) {
+      throw new Error("DOCUMENT_AGENT_EXCLUSIVE_LEASE_INVALID");
+    }
+    const expiresAt = this.agentLeaseExpiry(now, input.leaseDurationMs, authorizationExpiresAt);
+    const result: DocumentAgentLeaseResult = {
+      action: "renew_lease",
+      acquired: true,
+      conflict: false,
+      documentId: this.name,
+      expiresAt,
+      leaseId: input.leaseId,
+      released: false,
+      requestId: input.requestId,
+      revision,
+      runId: input.runId,
+    };
+    this.durableState.storage.transactionSync(() => {
+      this.durableState.storage.sql.exec(
+        `UPDATE paca_document_agent_lease
+            SET renewed_at = ?, expires_at = ?
+          WHERE singleton = 1 AND lease_id = ? AND agent_id = ? AND run_id = ?`,
+        now,
+        expiresAt,
+        input.leaseId,
+        actorId,
+        input.runId,
+      );
+      this.insertAgentOperationAudit(
+        { actorId, inputFingerprint, input, result, status: "lease_renewed" },
+        now,
+      );
+    });
+    this.broadcastAgentLeaseStatus();
+    return result;
+  }
+
+  private releaseAgentLease(
+    actorId: string,
+    inputFingerprint: string,
+    input: Extract<DocumentAgentCommand, { action: "release_lease" }>,
+    revision: number,
+  ): DocumentAgentLeaseResult {
+    const existing = this.agentLease();
+    if (
+      !existing ||
+      existing.agentId !== actorId ||
+      existing.runId !== input.runId ||
+      existing.leaseId !== input.leaseId
+    ) {
+      throw new Error("DOCUMENT_AGENT_EXCLUSIVE_LEASE_INVALID");
+    }
+    const now = Date.now();
+    const result: DocumentAgentLeaseResult = {
+      action: "release_lease",
+      acquired: false,
+      conflict: false,
+      documentId: this.name,
+      expiresAt: null,
+      leaseId: input.leaseId,
+      released: true,
+      requestId: input.requestId,
+      revision,
+      runId: input.runId,
+    };
+    this.durableState.storage.transactionSync(() => {
+      this.durableState.storage.sql.exec(
+        "DELETE FROM paca_document_agent_lease WHERE singleton = 1",
+      );
+      this.insertAgentOperationAudit(
+        { actorId, inputFingerprint, input, result, status: "lease_released" },
+        now,
+      );
+    });
+    this.broadcastAgentLeaseStatus();
+    return result;
+  }
+
+  private agentLeaseExpiry(
+    now: number,
+    durationMs: number,
+    authorizationExpiresAt: number,
+  ): number {
+    if (!Number.isSafeInteger(authorizationExpiresAt) || authorizationExpiresAt <= now) {
+      throw new Error("DOCUMENT_AGENT_AUTHORIZATION_EXPIRED");
+    }
+    const expiresAt = Math.min(now + durationMs, authorizationExpiresAt);
+    if (expiresAt - now < 1_000) {
+      throw new Error("DOCUMENT_AGENT_AUTHORIZATION_TOO_SHORT");
+    }
+    return expiresAt;
+  }
+
+  private agentLease(): AgentLeaseRow | null {
+    const [lease] = this.durableState.storage.sql
+      .exec<AgentLeaseRow>(
+        `SELECT lease_id AS leaseId, agent_id AS agentId, run_id AS runId,
+                acquired_at AS acquiredAt, renewed_at AS renewedAt, expires_at AS expiresAt
+           FROM paca_document_agent_lease
+          WHERE singleton = 1`,
+      )
+      .toArray();
+    return lease ?? null;
+  }
+
+  private activeAgentLease(now = Date.now()): AgentLeaseRow | null {
+    const lease = this.agentLease();
+    return lease && lease.expiresAt > now ? lease : null;
+  }
+
+  private agentLeaseStatusMessage(): string {
+    const serverTime = Date.now();
+    const lease = this.activeAgentLease(serverTime);
+    return JSON.stringify({
+      type: AGENT_LEASE_MESSAGE_TYPE,
+      active: Boolean(lease),
+      expiresAt: lease?.expiresAt ?? null,
+      serverTime,
+    });
+  }
+
+  private sendAgentLeaseStatus(connection: DocumentConnection): void {
+    this.sendCustomMessage(connection, this.agentLeaseStatusMessage());
+  }
+
+  private broadcastAgentLeaseStatus(): void {
+    this.broadcastCustomMessage(this.agentLeaseStatusMessage());
+  }
+
   private persistUpdate(update: Uint8Array, origin: unknown): void {
     if (update.byteLength === 0 || update.byteLength > MAX_UPDATE_BYTES) {
       throw new Error("DOCUMENT_UPDATE_TOO_LARGE");
@@ -628,7 +933,7 @@ export class DocumentParty extends YServer {
     requestId: string,
     actorId: string,
     inputFingerprint: string,
-  ): DocumentAgentEditResult | null {
+  ): DocumentAgentCommandResult | null {
     const [row] = this.durableState.storage.sql
       .exec<{ agentId: string; operationSummary: string; resultJson: string }>(
         `SELECT agent_id AS agentId, operation_summary AS operationSummary,
@@ -643,14 +948,14 @@ export class DocumentParty extends YServer {
     if (row.agentId !== actorId || summary.inputFingerprint !== inputFingerprint) {
       throw new Error("DOCUMENT_AGENT_REQUEST_ID_REUSED");
     }
-    return JSON.parse(row.resultJson) as DocumentAgentEditResult;
+    return JSON.parse(row.resultJson) as DocumentAgentCommandResult;
   }
 
   private recordAgentOperation(
     actorId: string,
     inputFingerprint: string,
-    input: DocumentAgentEditInput,
-    result: DocumentAgentEditResult,
+    input: DocumentAgentCommand,
+    result: DocumentAgentCommandResult,
     status: AgentOperationAudit["status"],
   ): void {
     this.insertAgentOperationAudit(
@@ -662,10 +967,14 @@ export class DocumentParty extends YServer {
   private insertAgentOperationAudit(audit: AgentOperationAudit, createdAt: number): void {
     const summary = {
       inputFingerprint: audit.inputFingerprint,
-      operations: audit.input.operations.map((operation) => ({
-        type: operation.type,
-        blockId: operation.blockId,
-      })),
+      action: audit.input.action,
+      operations:
+        audit.input.action === "apply"
+          ? audit.input.operations.map((operation) => ({
+              type: operation.type,
+              blockId: operation.blockId,
+            }))
+          : [],
     };
     this.durableState.storage.sql.exec(
       `INSERT INTO paca_document_agent_operation_audit
@@ -676,7 +985,7 @@ export class DocumentParty extends YServer {
       audit.input.runId,
       audit.actorId,
       audit.input.operationMode,
-      audit.input.baseRevision,
+      audit.input.action === "apply" ? audit.input.baseRevision : audit.result.revision,
       audit.result.revision,
       audit.status,
       JSON.stringify(summary),

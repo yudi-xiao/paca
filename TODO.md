@@ -15,7 +15,7 @@
 
 更新时间：2026-09-01
 
-当前里程碑：**M8 Yjs 文档纵向切片已形成第三版未部署候选：锁定 `y-partyserver@2.2.0`/`yjs@13.6.30`，一篇文档一个稳定 `documentId` 房间，启用 WebSocket Hibernation，DO SQLite 同步持久化增量并支持 checkpoint、压缩和驱逐恢复。每次持久化更新同步递增修订号，独立 Document Materialization Queue 从 DO 获取不低于请求修订的权威快照，以不可变修订 key 条件写入隔离 R2 bucket，再由轻量服务端解析器物化 BlockNote JSON；PostgreSQL 只接受更高 Yjs 修订，重复/乱序消息不会覆盖新投影，Queue 发送失败由 DO Alarm 补投，消费失败按队列重试/DLQ 边界处理。React 不再直接 PATCH 文档内容，只显示真实协作连接状态；旧 JSON 仍仅在首次打开时原子 bootstrap，失败时降级为只读。Agent 原始 Yjs 连接保持只读并要求精确 `document.read` Grant；`document.edit` 改走 Better Auth Agent Auth 执行边界，只接受受 Organization/Project/Document/字段/模式/有效期 constraints 限定的 block 内容替换，支持非写入建议与乐观并发协作，使用 request ID 幂等并在 DO 更新事务内记录可信 Agent/run 审计。PostgreSQL 0016/0017、Document Queue/R2 资源和 internal 部署尚未执行，独占编辑模式仍待设计。**
+当前里程碑：**M8 Yjs 文档纵向切片已形成第四版未部署候选：锁定 `y-partyserver@2.2.0`/`yjs@13.6.30`，一篇文档一个稳定 `documentId` 房间，启用 WebSocket Hibernation，DO SQLite 同步持久化增量并支持 checkpoint、压缩和驱逐恢复。每次持久化更新同步递增修订号，独立 Document Materialization Queue 从 DO 获取不低于请求修订的权威快照，以不可变修订 key 条件写入隔离 R2 bucket，再由轻量服务端解析器物化 BlockNote JSON；PostgreSQL 只接受更高 Yjs 修订，重复/乱序消息不会覆盖新投影，Queue 发送失败由 DO Alarm 补投，消费失败按队列重试/DLQ 边界处理。React 不再直接 PATCH 文档内容；旧 JSON 仍仅在首次打开时原子 bootstrap，失败时降级为只读。Agent 原始 Yjs 连接保持只读并要求精确 `document.read` Grant；`document.edit` 改走 Better Auth Agent Auth 执行边界，只接受受 Organization/Project/Document/字段/模式/action/有效期 constraints 限定的细粒度 block 内容操作，支持建议、乐观并发协作和 5～60 秒独占租约。独占租约持久化在 DocumentParty SQLite，受实际授权有效期约束，支持幂等 acquire/renew/apply/release、超时接管和 Grant 撤销释放；活跃租约会动态阻断已连接用户的 Yjs 写入，并通过自定义消息让 React 显示只读提示及按到期时间恢复。PostgreSQL 0016/0017、Document Queue/R2 资源和 internal 部署尚未执行。**
 
 已确认前置条件：
 
@@ -243,7 +243,7 @@
 
 ## M8：Yjs DocumentParty
 
-本地候选验收：React 59 个测试文件/626 项、Worker 44 个测试文件/236 项、Workers Runtime 2 个测试文件/11 项全部通过；internal production build、Drizzle check、Wrangler types 和 deploy dry-run 均通过。第三版候选在 Queue/R2 幂等物化、PostgreSQL 新旧修订保护、DO Alarm 补投、服务端 BlockNote 投影和前端单写路径之上，新增 `document.read`/`document.edit` Agent Auth 领域执行器、细粒度 block 内容操作、目标块乐观版本、同 request ID 幂等、建议/协作模式和不含正文的双层审计。0016/0017 尚未应用，Document Queue/R2 尚未创建且 internal 尚未部署，因此涉及远端资源与完整纵向验收的任务继续保持未勾选。
+本地候选验收：React 60 个测试文件/628 项、Worker 44 个测试文件/241 项、Workers Runtime 2 个测试文件/13 项全部通过；internal production build、Drizzle check、Wrangler types、Biome 和 deploy dry-run 均通过。第四版候选在 Queue/R2 幂等物化、PostgreSQL 新旧修订保护、DO Alarm 补投、服务端 BlockNote 投影和前端单写路径之上，新增 `document.read`/`document.edit` Agent Auth 领域执行器、细粒度 block 内容操作、目标块乐观版本、同 request ID 幂等、建议/协作/独占模式和不含正文的双层审计。独占模式使用 DocumentParty SQLite 单例租约，命令受 action constraint 和实际授权到期时间约束；同一 Capability 的多个 action-scoped Grant 会逐一匹配，执行器只信任 Agent Auth 实际选中的 Grant。活跃租约动态阻断已打开的用户写入，acquire/renew/release/撤销通过 `y-partyserver` 自定义消息同步前端只读提示，客户端按服务端到期时间自动恢复。0016/0017 尚未应用，Document Queue/R2 尚未创建且 internal 尚未部署，因此涉及远端资源与完整纵向验收的任务继续保持未勾选。
 
 - [x] 盘点 `services/api/internal/repository/postgres/document_repository.go` 的文档结构和快照语义；旧实现保存当前 BlockNote JSONB 和整份 JSON snapshot，不保存 Yjs state vector/update，因此不能直接作为协作恢复源。
 - [ ] 为 BlockNote 接入 Yjs 和 `y-partyserver/provider`。
@@ -252,8 +252,8 @@
 - [ ] DO SQLite 保存实时增量；R2/业务数据库保存长期快照和可查询业务视图。代码候选已完成独立 Queue、不可变 R2 修订对象、SHA-256/大小元数据、服务端 BlockNote JSON 物化、PostgreSQL 只增修订更新、孤儿清理和 Queue 发送失败 Alarm 补投；待创建隔离 Queue/R2、应用 0016/0017 并完成真实远端重试/乱序/死信恢复验收后勾选。
 - [ ] 用户连接检查 `docs.read`/`docs.write`；Agent 连接检查 `document.read`/`document.edit` Grant 与 constraints。代码候选中用户连接已检查 Project `docs` 权限，Agent 原始 Yjs 连接仅允许精确 `document.read` 且强制只读；编辑通过 Agent Auth `onExecute` 再次检查精确 scope、Grant constraints 和 delegated 当前权限。待远端 Agent read/edit E2E 后勾选。
 - [ ] Agent 只提交细粒度、带 base state vector/版本的操作，不提交无条件整篇覆盖。代码候选仅接受最多 10 个 `replace_block_content`，绑定当前 block opaque version、base revision/state vector、run ID 和 request ID；同块陈旧写入返回 conflict，不同块并发允许合并，正文不会写入审计。待远端协作写入与恢复验证后勾选。
-- [ ] 实现建议、协作和独占三种 Agent 编辑模式。建议模式已实现为非写入结果，协作模式已实现目标块乐观并发和单次 Yjs transaction；独占模式在 lease/续期/释放/超时/撤销语义完成前不进入 capability catalog。
-- [ ] 测试单用户、单 Agent、用户+Agent、断网重连、冲突、checkpoint 恢复和权限撤销。Workers Runtime 已覆盖单 Agent 建议/协作、幂等、同块冲突、用户改 B 块与 Agent 改 A 块合并、审计、checkpoint/驱逐恢复及连接权限撤销；真实断网重连、Agent Auth 远端 Grant 撤销和独占 lease 尚未验收。
+- [ ] 实现建议、协作和独占三种 Agent 编辑模式。本地候选已实现建议模式非写入结果、协作模式目标块乐观并发和单次 Yjs transaction，以及独占模式的持久化 acquire/renew/apply/release、5～60 秒超时接管、授权期限上限、Grant 撤销释放、用户写入阻断和前端只读提示；待远端 Agent Auth + DocumentParty E2E 后勾选。
+- [ ] 测试单用户、单 Agent、用户+Agent、断网重连、冲突、checkpoint 恢复和权限撤销。Workers Runtime 已覆盖单 Agent 建议/协作/独占、命令幂等、租约竞争/续期/释放/超时接管、同块冲突、用户改 B 块与 Agent 改 A 块合并、独占期间已连接用户写入拒绝、租约状态广播、审计、checkpoint/驱逐恢复及连接/Grant 撤销释放；真实断网重连、Agent Auth 远端 Grant 撤销和独占租约仍待验收。
 
 ## M9：Agent 编排与执行环境
 

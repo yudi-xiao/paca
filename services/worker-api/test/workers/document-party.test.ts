@@ -138,6 +138,28 @@ function nextClose(socket: WebSocket): Promise<CloseEvent> {
   });
 }
 
+type AgentLeaseStatusMessage = {
+  active: boolean;
+  expiresAt: number | null;
+  serverTime: number;
+  type: "document.agent-lease";
+};
+
+function nextAgentLeaseStatus(socket: WebSocket): Promise<AgentLeaseStatusMessage> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("AGENT_LEASE_STATUS_TIMEOUT")), 5_000);
+    const handleMessage = (event: MessageEvent) => {
+      if (typeof event.data !== "string" || !event.data.startsWith("__YPS:")) return;
+      const parsed = JSON.parse(event.data.slice(6)) as { type?: string };
+      if (parsed.type !== "document.agent-lease") return;
+      clearTimeout(timeout);
+      socket.removeEventListener("message", handleMessage);
+      resolve(parsed as AgentLeaseStatusMessage);
+    };
+    socket.addEventListener("message", handleMessage);
+  });
+}
+
 describe("DocumentParty Durable Object runtime", () => {
   it("persists a user Yjs update before hibernation and restores the exact state", async () => {
     const { socket, stub } = await connect(connectionState());
@@ -248,6 +270,7 @@ describe("DocumentParty Durable Object runtime", () => {
       content: [{ type: "text" as const, text: "Agent result", styles: { bold: true } }],
     };
     const suggestion = {
+      action: "apply" as const,
       requestId: "aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
       runId: "aaaaaaa3-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
       baseRevision: before.revision,
@@ -256,7 +279,9 @@ describe("DocumentParty Durable Object runtime", () => {
       operations: [operation],
     };
 
-    await expect(stub.editAsAgent("agent-1", suggestion)).resolves.toMatchObject({
+    await expect(
+      stub.executeAsAgent("agent-1", suggestion, Date.now() + 60_000),
+    ).resolves.toMatchObject({
       applied: false,
       conflict: false,
       mode: "suggest",
@@ -271,20 +296,26 @@ describe("DocumentParty Durable Object runtime", () => {
       requestId: "aaaaaaa4-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
       operationMode: "collaborate" as const,
     };
-    const applied = await stub.editAsAgent("agent-1", edit);
+    const applied = await stub.executeAsAgent("agent-1", edit, Date.now() + 60_000);
     expect(applied).toMatchObject({ applied: true, conflict: false, revision: 2 });
-    await expect(stub.editAsAgent("agent-1", edit)).resolves.toEqual(applied);
+    await expect(stub.executeAsAgent("agent-1", edit, Date.now() + 60_000)).resolves.toEqual(
+      applied,
+    );
     const changedReplay = await runInDurableObject(stub, async (instance) => {
       try {
-        await instance.editAsAgent("agent-1", {
-          ...edit,
-          operations: [
-            {
-              ...edit.operations[0],
-              content: [{ type: "text" as const, text: "Changed replay", styles: {} }],
-            },
-          ],
-        });
+        await instance.executeAsAgent(
+          "agent-1",
+          {
+            ...edit,
+            operations: [
+              {
+                ...edit.operations[0],
+                content: [{ type: "text" as const, text: "Changed replay", styles: {} }],
+              },
+            ],
+          },
+          Date.now() + 60_000,
+        );
         return "unexpected-success";
       } catch (error) {
         return error instanceof Error ? error.message : "unknown-error";
@@ -331,10 +362,12 @@ describe("DocumentParty Durable Object runtime", () => {
     expect(JSON.stringify(audit)).not.toContain("Agent result");
     expect(audit.map((entry) => JSON.parse(entry.operationSummary))).toEqual([
       {
+        action: "apply",
         inputFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
         operations: [{ type: "replace_block_content", blockId: "block-a" }],
       },
       {
+        action: "apply",
         inputFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
         operations: [{ type: "replace_block_content", blockId: "block-a" }],
       },
@@ -357,6 +390,7 @@ describe("DocumentParty Durable Object runtime", () => {
     await waitForUpdates(stub, 2);
 
     const olderButDisjoint = {
+      action: "apply" as const,
       requestId: "bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
       runId: "bbbbbbb3-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
       baseRevision: before.revision,
@@ -371,7 +405,9 @@ describe("DocumentParty Durable Object runtime", () => {
         },
       ],
     };
-    await expect(stub.editAsAgent("agent-1", olderButDisjoint)).resolves.toMatchObject({
+    await expect(
+      stub.executeAsAgent("agent-1", olderButDisjoint, Date.now() + 60_000),
+    ).resolves.toMatchObject({
       applied: true,
       conflict: false,
       baseRevision: 1,
@@ -384,18 +420,250 @@ describe("DocumentParty Durable Object runtime", () => {
       [{ type: "text", text: "User changed Beta", styles: {} }],
     ]);
     await expect(
-      stub.editAsAgent("agent-1", {
-        ...olderButDisjoint,
-        requestId: "bbbbbbb4-bbbb-4bbb-8bbb-bbbbbbbbbbb4",
-        operations: [
-          {
-            ...olderButDisjoint.operations[0],
-            content: [{ type: "text" as const, text: "Stale overwrite", styles: {} }],
-          },
-        ],
-      }),
+      stub.executeAsAgent(
+        "agent-1",
+        {
+          ...olderButDisjoint,
+          requestId: "bbbbbbb4-bbbb-4bbb-8bbb-bbbbbbbbbbb4",
+          operations: [
+            {
+              ...olderButDisjoint.operations[0],
+              content: [{ type: "text" as const, text: "Stale overwrite", styles: {} }],
+            },
+          ],
+        },
+        Date.now() + 60_000,
+      ),
     ).resolves.toMatchObject({ applied: false, conflict: true, revision: 3 });
     connection.socket.close(1000, "done");
+  });
+
+  it("coordinates acquire, renew, exclusive apply, release, and user write blocking", async () => {
+    const documentId = "ccccccc1-cccc-4ccc-8ccc-ccccccccccc1";
+    const stub = env.DocumentParty.getByName(documentId);
+    await stub.initializeIfEmpty(arrayBuffer(encodeStateAsUpdate(blockNoteDocument())));
+    const before = await stub.readForAgent();
+    const userConnection = await connect(connectionState({ documentId }));
+    await expect(nextAgentLeaseStatus(userConnection.socket)).resolves.toEqual({
+      type: "document.agent-lease",
+      active: false,
+      expiresAt: null,
+      serverTime: expect.any(Number),
+    });
+    const userDocument = new YDoc();
+    applyUpdate(userDocument, new Uint8Array(await stub.snapshot()));
+    const userBaseVector = encodeStateVector(userDocument);
+    replaceParagraphText(userDocument, "block-b", "User update after lease");
+    const userUpdate = encodeStateAsUpdate(userDocument, userBaseVector);
+    const runId = "ccccccc2-cccc-4ccc-8ccc-ccccccccccc2";
+    const authorizationExpiresAt = Date.now() + 120_000;
+    const acquire = {
+      action: "acquire_lease" as const,
+      requestId: "ccccccc3-cccc-4ccc-8ccc-ccccccccccc3",
+      runId,
+      operationMode: "exclusive" as const,
+      leaseDurationMs: 5_000,
+    };
+
+    const acquiredStatus = nextAgentLeaseStatus(userConnection.socket);
+    const acquired = await stub.executeAsAgent("agent-1", acquire, authorizationExpiresAt);
+    expect(acquired).toMatchObject({
+      action: "acquire_lease",
+      acquired: true,
+      conflict: false,
+      revision: 1,
+    });
+    if (acquired.action !== "acquire_lease" || !acquired.leaseId) {
+      throw new Error("LEASE_ID_MISSING");
+    }
+    await expect(acquiredStatus).resolves.toMatchObject({
+      type: "document.agent-lease",
+      active: true,
+      expiresAt: acquired.expiresAt,
+      serverTime: expect.any(Number),
+    });
+    await expect(stub.executeAsAgent("agent-1", acquire, authorizationExpiresAt)).resolves.toEqual(
+      acquired,
+    );
+    await expect(
+      stub.executeAsAgent(
+        "agent-2",
+        {
+          ...acquire,
+          requestId: "ccccccc4-cccc-4ccc-8ccc-ccccccccccc4",
+          runId: "ccccccc5-cccc-4ccc-8ccc-ccccccccccc5",
+        },
+        authorizationExpiresAt,
+      ),
+    ).resolves.toMatchObject({ acquired: false, conflict: true, leaseId: null });
+
+    userConnection.socket.send(framedUpdate(userUpdate));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await stub.persistenceStats()).toMatchObject({ revision: 1, updateCount: 1 });
+
+    const exclusiveEdit = {
+      action: "apply" as const,
+      requestId: "ccccccc6-cccc-4ccc-8ccc-ccccccccccc6",
+      runId,
+      baseRevision: before.revision,
+      baseStateVector: before.stateVector,
+      operationMode: "exclusive" as const,
+      leaseId: acquired.leaseId,
+      operations: [
+        {
+          type: "replace_block_content" as const,
+          blockId: "block-a",
+          expectedBlockVersion: before.blocks[0]?.version ?? "missing",
+          content: [{ type: "text" as const, text: "Exclusive Agent update", styles: {} }],
+        },
+      ],
+    };
+    await expect(
+      stub.executeAsAgent("agent-1", exclusiveEdit, authorizationExpiresAt),
+    ).resolves.toMatchObject({
+      action: "apply",
+      applied: true,
+      mode: "exclusive",
+      revision: 2,
+    });
+
+    const blockedCollaborator = await runInDurableObject(stub, async (instance) => {
+      try {
+        const current = await instance.readForAgent();
+        await instance.executeAsAgent(
+          "agent-2",
+          {
+            action: "apply",
+            requestId: "ccccccc7-cccc-4ccc-8ccc-ccccccccccc7",
+            runId: "ccccccc8-cccc-4ccc-8ccc-ccccccccccc8",
+            baseRevision: current.revision,
+            baseStateVector: current.stateVector,
+            operationMode: "collaborate",
+            operations: [
+              {
+                type: "replace_block_content",
+                blockId: "block-b",
+                expectedBlockVersion: current.blocks[1]?.version ?? "missing",
+                content: [{ type: "text", text: "must be blocked", styles: {} }],
+              },
+            ],
+          },
+          authorizationExpiresAt,
+        );
+        return "unexpected-success";
+      } catch (error) {
+        return error instanceof Error ? error.message : "unknown-error";
+      }
+    });
+    expect(blockedCollaborator).toBe("DOCUMENT_AGENT_LEASE_HELD");
+
+    const renewedStatus = nextAgentLeaseStatus(userConnection.socket);
+    const renewed = await stub.executeAsAgent(
+      "agent-1",
+      {
+        action: "renew_lease",
+        requestId: "ccccccc9-cccc-4ccc-8ccc-ccccccccccc9",
+        runId,
+        operationMode: "exclusive",
+        leaseId: acquired.leaseId,
+        leaseDurationMs: 60_000,
+      },
+      authorizationExpiresAt,
+    );
+    expect(renewed).toMatchObject({ action: "renew_lease", acquired: true });
+    if (renewed.action !== "renew_lease") throw new Error("LEASE_RENEWAL_RESULT_INVALID");
+    expect(renewed.expiresAt ?? 0).toBeGreaterThan(acquired.expiresAt ?? 0);
+    await expect(renewedStatus).resolves.toMatchObject({
+      type: "document.agent-lease",
+      active: true,
+      expiresAt: renewed.expiresAt,
+      serverTime: expect.any(Number),
+    });
+
+    const releasedStatus = nextAgentLeaseStatus(userConnection.socket);
+    await expect(
+      stub.executeAsAgent(
+        "agent-1",
+        {
+          action: "release_lease",
+          requestId: "ccccccca-cccc-4ccc-8ccc-ccccccccccca",
+          runId,
+          operationMode: "exclusive",
+          leaseId: acquired.leaseId,
+        },
+        authorizationExpiresAt,
+      ),
+    ).resolves.toMatchObject({ action: "release_lease", released: true });
+    await expect(releasedStatus).resolves.toEqual({
+      type: "document.agent-lease",
+      active: false,
+      expiresAt: null,
+      serverTime: expect.any(Number),
+    });
+
+    userConnection.socket.send(framedUpdate(userUpdate));
+    await waitForUpdates(stub, 3);
+    expect(
+      (await stub.readForAgent()).blocks.map((entry) => JSON.parse(entry.blockJson).content),
+    ).toEqual([
+      [{ type: "text", text: "Exclusive Agent update", styles: {} }],
+      [{ type: "text", text: "User update after lease", styles: {} }],
+    ]);
+    await runInDurableObject(stub, (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec<{ count: number }>("SELECT count(*) AS count FROM paca_document_agent_lease")
+          .one().count,
+      ).toBe(0);
+    });
+    userConnection.socket.close(1000, "done");
+  });
+
+  it("allows expired lease takeover and clears an Agent lease on revocation", async () => {
+    const documentId = "ddddddd1-dddd-4ddd-8ddd-ddddddddddd1";
+    const stub = env.DocumentParty.getByName(documentId);
+    await stub.initializeIfEmpty(arrayBuffer(encodeStateAsUpdate(blockNoteDocument())));
+    const authorizationExpiresAt = Date.now() + 120_000;
+    const first = await stub.executeAsAgent(
+      "agent-1",
+      {
+        action: "acquire_lease",
+        requestId: "ddddddd2-dddd-4ddd-8ddd-ddddddddddd2",
+        runId: "ddddddd3-dddd-4ddd-8ddd-ddddddddddd3",
+        operationMode: "exclusive",
+        leaseDurationMs: 5_000,
+      },
+      authorizationExpiresAt,
+    );
+    expect(first).toMatchObject({ acquired: true });
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE paca_document_agent_lease SET expires_at = ? WHERE singleton = 1",
+        Date.now() - 1,
+      );
+    });
+
+    await expect(
+      stub.executeAsAgent(
+        "agent-2",
+        {
+          action: "acquire_lease",
+          requestId: "ddddddd4-dddd-4ddd-8ddd-ddddddddddd4",
+          runId: "ddddddd5-dddd-4ddd-8ddd-ddddddddddd5",
+          operationMode: "exclusive",
+          leaseDurationMs: 5_000,
+        },
+        authorizationExpiresAt,
+      ),
+    ).resolves.toMatchObject({ acquired: true, conflict: false });
+    expect(await stub.invalidateActor("agent", "agent-2")).toBe(0);
+    await runInDurableObject(stub, (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec<{ count: number }>("SELECT count(*) AS count FROM paca_document_agent_lease")
+          .one().count,
+      ).toBe(0);
+    });
   });
 
   it("persists session invalidation across hibernation and rejects a stale reconnect", async () => {

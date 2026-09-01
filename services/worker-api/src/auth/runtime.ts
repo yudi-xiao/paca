@@ -16,6 +16,7 @@ import { pacaPermission } from "../permission/plugin";
 import { PostgresPacaPermissionStore } from "../permission/postgres-store";
 import { PacaPermissionService } from "../permission/service";
 import {
+  invalidateDocumentActor,
   invalidateProjectActor,
   invalidateProjectSession,
   invalidateUserSession,
@@ -190,10 +191,13 @@ export function createAuth(db: PacaDatabase, env: AppBindings) {
     permissionService: new PacaPermissionService(permissionStore),
     findProjectOrganization: (projectId) => permissionStore.findProjectOrganization(projectId),
     onEvent: (event) => recordAgentAuthEvent(db, event),
-    onCapabilitiesRevoked: async ({ agentId, projectIds }) => {
-      await Promise.all(
-        projectIds.map((projectId) => invalidateProjectActor(env, projectId, "agent", agentId)),
-      );
+    onCapabilitiesRevoked: async ({ agentId, documentIds, projectIds }) => {
+      await Promise.all([
+        ...projectIds.map((projectId) => invalidateProjectActor(env, projectId, "agent", agentId)),
+        ...documentIds.map((documentId) =>
+          invalidateDocumentActor(env, documentId, "agent", agentId),
+        ),
+      ]);
     },
   });
   const secondaryStorage = new PostgresBetterAuthSecondaryStorage(db);

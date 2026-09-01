@@ -11,6 +11,7 @@ import {
 const NOW = new Date("2026-08-28T07:00:00.000Z");
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const TASK_ID = "22222222-2222-4222-8222-222222222222";
+const DOCUMENT_ID = "44444444-4444-4444-8444-444444444444";
 
 function session(
   capability: string,
@@ -167,5 +168,99 @@ describe("Paca Agent Auth capability contract", () => {
         operationMode: "collaborate",
       }),
     ).toBe(false);
+  });
+
+  it("binds exclusive document lease commands to action and operation mode constraints", () => {
+    const constraints = {
+      organizationId: "paca-default",
+      projectId: PROJECT_ID,
+      documentId: DOCUMENT_ID,
+      field: "block.content",
+      operationMode: "exclusive",
+      action: { in: ["acquire_lease", "renew_lease", "apply", "release_lease"] },
+      validUntil: "2026-08-28T07:10:00.000Z",
+    } satisfies CapabilityConstraints;
+    const agentSession = session("document.edit", constraints);
+
+    expect(
+      evaluateAgentCapability(
+        agentSession,
+        "document.edit",
+        {
+          organizationId: "paca-default",
+          projectId: PROJECT_ID,
+          documentId: DOCUMENT_ID,
+          field: "block.content",
+          operationMode: "exclusive",
+          action: "acquire_lease",
+        },
+        NOW,
+      ),
+    ).toEqual({ allowed: true });
+    expect(
+      evaluateAgentCapability(
+        agentSession,
+        "document.edit",
+        {
+          organizationId: "paca-default",
+          projectId: PROJECT_ID,
+          documentId: DOCUMENT_ID,
+          field: "block.content",
+          operationMode: "collaborate",
+          action: "apply",
+        },
+        NOW,
+      ),
+    ).toEqual({ allowed: false, code: "AGENT_GRANT_CONSTRAINT_MISMATCH" });
+    expect(
+      hasValidCapabilityConstraints("document.edit", {
+        organizationId: "paca-default",
+        projectId: PROJECT_ID,
+        documentId: DOCUMENT_ID,
+        field: "block.content",
+        operationMode: "exclusive",
+        validUntil: "2026-08-28T07:10:00.000Z",
+      }),
+    ).toBe(false);
+  });
+
+  it("evaluates every active Grant when one capability has separate action scopes", () => {
+    const collaborate = {
+      organizationId: "paca-default",
+      projectId: PROJECT_ID,
+      documentId: DOCUMENT_ID,
+      field: "block.content",
+      operationMode: "collaborate",
+      action: "apply",
+      validUntil: "2026-08-28T07:10:00.000Z",
+    } satisfies CapabilityConstraints;
+    const exclusive = {
+      ...collaborate,
+      operationMode: "exclusive",
+      action: "acquire_lease",
+    } satisfies CapabilityConstraints;
+    const agentSession = session("document.edit", collaborate);
+    agentSession.agent.capabilityGrants.push({
+      capability: "document.edit",
+      constraints: exclusive,
+      grantedBy: "user-1",
+      status: "active",
+    });
+
+    expect(
+      evaluateAgentCapability(
+        agentSession,
+        "document.edit",
+        {
+          organizationId: "paca-default",
+          projectId: PROJECT_ID,
+          documentId: DOCUMENT_ID,
+          field: "block.content",
+          operationMode: "exclusive",
+          action: "acquire_lease",
+        },
+        NOW,
+      ),
+    ).toEqual({ allowed: true });
   });
 });

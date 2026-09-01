@@ -25,6 +25,7 @@ import {
 	bootstrapDocumentCollaboration,
 	getDocumentCollaborationStatus,
 } from "@/lib/doc-api";
+import { parseDocumentAgentLeaseStatus } from "@/lib/document-agent-lease";
 import { useMentionData } from "@/lib/mention-api";
 
 import { DocEditor, type DocEditorHandle } from "./doc-editor";
@@ -65,10 +66,15 @@ const CollaborativeEditorSession = forwardRef<
 ) {
 	const { resolvedMode } = useThemeMode();
 	const { teamMembers, documents } = useMentionData(projectId);
+	const [leaseStatusKnown, setLeaseStatusKnown] = useState(false);
+	const [agentLeaseExpiresAt, setAgentLeaseExpiresAt] = useState<number | null>(
+		null,
+	);
 	const provider = useMemo(
 		() =>
 			new YProvider(window.location.host, docId, ydoc, {
 				prefix: `/ws/parties/document-party/${encodeURIComponent(docId)}`,
+				connect: false,
 				disableBc: true,
 				maxBackoffTime: 5_000,
 			}),
@@ -76,18 +82,56 @@ const CollaborativeEditorSession = forwardRef<
 	);
 
 	useEffect(() => {
+		let cancelled = false;
 		const handleStatus = (event: {
 			status: "connected" | "connecting" | "disconnected";
-		}) => onConnectionStatusChange?.(event.status);
+		}) => {
+			onConnectionStatusChange?.(event.status);
+			if (event.status !== "connected") setLeaseStatusKnown(false);
+		};
+		const handleLeaseStatus = (message: string) => {
+			const status = parseDocumentAgentLeaseStatus(message);
+			if (!status) return;
+			setLeaseStatusKnown(true);
+			setAgentLeaseExpiresAt(
+				status.active &&
+					status.expiresAt &&
+					status.expiresAt > status.serverTime
+					? Date.now() + (status.expiresAt - status.serverTime) + 250
+					: null,
+			);
+		};
+		setLeaseStatusKnown(false);
+		onConnectionStatusChange?.("connecting");
+		provider.on("custom-message", handleLeaseStatus);
 		provider.on("status", handleStatus);
-		onConnectionStatusChange?.(
-			provider.wsconnected ? "connected" : "connecting",
-		);
+		void provider
+			.connect()
+			.then(() => {
+				if (cancelled) provider.destroy();
+			})
+			.catch(() => {
+				if (!cancelled) onConnectionStatusChange?.("disconnected");
+			});
 		return () => {
+			cancelled = true;
+			provider.off("custom-message", handleLeaseStatus);
 			provider.off("status", handleStatus);
 			provider.destroy();
 		};
 	}, [onConnectionStatusChange, provider]);
+
+	useEffect(() => {
+		if (!agentLeaseExpiresAt) return;
+		const timeout = window.setTimeout(
+			() => setAgentLeaseExpiresAt(null),
+			Math.max(0, agentLeaseExpiresAt - Date.now()),
+		);
+		return () => window.clearTimeout(timeout);
+	}, [agentLeaseExpiresAt]);
+
+	const effectiveEditable =
+		Boolean(editable) && leaseStatusKnown && agentLeaseExpiresAt === null;
 
 	const editor = useCreateBlockNote({
 		schema: customSchema,
@@ -101,26 +145,37 @@ const CollaborativeEditorSession = forwardRef<
 	useImperativeHandle(ref, () => ({ save: () => undefined }), []);
 
 	return (
-		<div
-			data-testid="collaborative-blocknote-editor"
-			className="rounded-xl border border-border/25 bg-card/50 hover:border-border/50 transition-all duration-200 overflow-hidden [&_.bn-editor]:min-h-80 [&_.bn-editor]:py-4 [&_.bn-editor]:px-6 [&_.bn-editor]:text-sm [&_.bn-editor]:leading-relaxed"
-		>
-			<BlockNoteView
-				editor={editor}
-				editable={editable}
-				theme={resolvedMode}
-				sideMenu={false}
+		<div className="space-y-3">
+			{agentLeaseExpiresAt !== null && (
+				<div
+					role="status"
+					data-testid="document-agent-exclusive-lease"
+					className="text-xs text-amber-600 dark:text-amber-400"
+				>
+					Agent 正在独占编辑此文档，租约结束后将自动恢复编辑。
+				</div>
+			)}
+			<div
+				data-testid="collaborative-blocknote-editor"
+				className="rounded-xl border border-border/25 bg-card/50 hover:border-border/50 transition-all duration-200 overflow-hidden [&_.bn-editor]:min-h-80 [&_.bn-editor]:py-4 [&_.bn-editor]:px-6 [&_.bn-editor]:text-sm [&_.bn-editor]:leading-relaxed"
 			>
-				<SideMenuController sideMenu={CustomSideMenu} />
-				{editable && (
-					<MentionSuggestionMenus
-						editor={editor}
-						teamMembers={teamMembers}
-						projectId={projectId}
-						documents={documents}
-					/>
-				)}
-			</BlockNoteView>
+				<BlockNoteView
+					editor={editor}
+					editable={effectiveEditable}
+					theme={resolvedMode}
+					sideMenu={false}
+				>
+					<SideMenuController sideMenu={CustomSideMenu} />
+					{effectiveEditable && (
+						<MentionSuggestionMenus
+							editor={editor}
+							teamMembers={teamMembers}
+							projectId={projectId}
+							documents={documents}
+						/>
+					)}
+				</BlockNoteView>
+			</div>
 		</div>
 	);
 });

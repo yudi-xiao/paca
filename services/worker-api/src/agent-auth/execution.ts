@@ -1,4 +1,4 @@
-import type { AgentAuthOptions, AgentSession } from "@better-auth/agent-auth";
+import type { AgentAuthOptions, AgentCapabilityGrant, AgentSession } from "@better-auth/agent-auth";
 import { and, eq, isNull } from "drizzle-orm";
 import * as z from "zod";
 
@@ -6,10 +6,10 @@ import type { AppBindings } from "../bindings";
 import type { PacaDatabase } from "../database";
 import * as schema from "../db/schema";
 import {
-  type DocumentAgentEditInput,
-  type DocumentAgentEditResult,
+  type DocumentAgentCommand,
+  type DocumentAgentCommandResult,
   type DocumentAgentSnapshot,
-  documentAgentEditInputSchema,
+  documentAgentCommandSchema,
 } from "../document/agent-operations";
 import type { DocumentScope } from "../document/postgres-scope-repository";
 import { PostgresPacaPermissionStore } from "../permission/postgres-store";
@@ -26,7 +26,12 @@ import {
   TaskService,
   type TaskUpdateInput,
 } from "../task/service";
-import { evaluateAgentCapability, type PacaCapabilityName } from "./capabilities";
+import {
+  evaluateAgentCapability,
+  evaluateAgentCapabilityGrant,
+  exactConstraintString,
+  type PacaCapabilityName,
+} from "./capabilities";
 
 type AgentExecuteHandler = NonNullable<AgentAuthOptions["onExecute"]>;
 type AgentExecuteContext = Parameters<AgentExecuteHandler>[0];
@@ -49,11 +54,12 @@ export type PacaAgentExecutionDependencies = {
   ): Promise<Task>;
   findDocumentScope(documentId: string): Promise<DocumentScope | null>;
   readDocument(documentId: string): Promise<DocumentAgentSnapshot>;
-  editDocument(
+  executeDocumentCommand(
     actorId: string,
     documentId: string,
-    input: DocumentAgentEditInput,
-  ): Promise<DocumentAgentEditResult>;
+    input: DocumentAgentCommand,
+    authorizationExpiresAt: number,
+  ): Promise<DocumentAgentCommandResult>;
 };
 
 const scopeSchema = z.object({
@@ -88,11 +94,14 @@ const taskCreateSchema = scopeSchema.extend({
   tags: z.array(z.string().max(100)).max(50).optional(),
 });
 const documentReadSchema = scopeSchema.extend({ documentId: z.uuid() });
-const documentEditSchema = scopeSchema.extend({
-  documentId: z.uuid(),
-  field: z.literal("block.content"),
-  ...documentAgentEditInputSchema.shape,
-});
+const documentCommandEnvelopeSchema = scopeSchema
+  .extend({
+    documentId: z.uuid(),
+    field: z.literal("block.content"),
+    action: z.enum(["acquire_lease", "apply", "release_lease", "renew_lease"]),
+    operationMode: z.enum(["suggest", "collaborate", "exclusive"]),
+  })
+  .passthrough();
 
 function denied(code: string): never {
   throw new Error(code);
@@ -154,7 +163,7 @@ async function requireAgentProjectAccess(
 }
 
 function requireGrant(
-  session: AgentSession,
+  grant: AgentCapabilityGrant,
   capability: PacaCapabilityName,
   input: {
     organizationId: string;
@@ -163,17 +172,27 @@ function requireGrant(
     documentId?: string;
     field?: string;
     operationMode?: string;
+    action?: string;
   },
 ) {
-  const decision = evaluateAgentCapability(session, capability, {
+  const decision = evaluateAgentCapabilityGrant(grant, capability, {
     organizationId: input.organizationId,
     projectId: input.projectId,
     taskId: "taskId" in input ? input.taskId : undefined,
     documentId: "documentId" in input ? input.documentId : undefined,
     field: "field" in input ? input.field : undefined,
     operationMode: "operationMode" in input ? input.operationMode : undefined,
+    action: "action" in input ? input.action : undefined,
   });
   if (!decision.allowed) denied(decision.code);
+}
+
+function agentAuthorizationExpiresAt(grant: AgentCapabilityGrant): number {
+  const constrainedExpiry = Date.parse(exactConstraintString(grant.constraints?.validUntil) ?? "");
+  const persistedExpiry = grant.expiresAt?.getTime() ?? Number.POSITIVE_INFINITY;
+  const expiresAt = Math.min(constrainedExpiry, persistedExpiry);
+  if (!Number.isFinite(expiresAt)) denied("AGENT_GRANT_CONSTRAINTS_INVALID");
+  return expiresAt;
 }
 
 async function requireAgentDocumentAccess(
@@ -204,7 +223,8 @@ export async function readProjectAsAgent(
   session: AgentSession,
   input: AgentProjectScope,
 ): Promise<Project> {
-  requireGrant(session, "project.read", input);
+  const decision = evaluateAgentCapability(session, "project.read", input);
+  if (!decision.allowed) denied(decision.code);
   await requireAgentProjectAccess(dependencies, session, input.organizationId, input.projectId, {
     projects: ["read"],
   });
@@ -218,11 +238,19 @@ export function createPacaAgentExecutor(
     switch (context.capability) {
       case "project.read": {
         const input = scopeSchema.parse(context.arguments);
-        return readProjectAsAgent(dependencies, context.agentSession, input);
+        requireGrant(context.grant, "project.read", input);
+        await requireAgentProjectAccess(
+          dependencies,
+          context.agentSession,
+          input.organizationId,
+          input.projectId,
+          { projects: ["read"] },
+        );
+        return dependencies.getProject(input.projectId);
       }
       case "task.read": {
         const input = taskReadSchema.parse(context.arguments);
-        requireGrant(context.agentSession, "task.read", input);
+        requireGrant(context.grant, "task.read", input);
         await requireAgentProjectAccess(
           dependencies,
           context.agentSession,
@@ -234,7 +262,7 @@ export function createPacaAgentExecutor(
       }
       case "task.write": {
         const input = taskWriteSchema.parse(context.arguments);
-        requireGrant(context.agentSession, "task.write", input);
+        requireGrant(context.grant, "task.write", input);
         const userId = await requireAgentProjectAccess(
           dependencies,
           context.agentSession,
@@ -254,7 +282,7 @@ export function createPacaAgentExecutor(
       }
       case "task.create": {
         const input = taskCreateSchema.parse(context.arguments);
-        requireGrant(context.agentSession, "task.create", input);
+        requireGrant(context.grant, "task.create", input);
         const userId = await requireAgentProjectAccess(
           dependencies,
           context.agentSession,
@@ -283,26 +311,40 @@ export function createPacaAgentExecutor(
       }
       case "document.read": {
         const input = documentReadSchema.parse(context.arguments);
-        requireGrant(context.agentSession, "document.read", input);
+        requireGrant(context.grant, "document.read", input);
         await requireAgentDocumentAccess(dependencies, context.agentSession, input, {
           docs: ["read"],
         });
         return dependencies.readDocument(input.documentId);
       }
       case "document.edit": {
-        const input = documentEditSchema.parse(context.arguments);
-        requireGrant(context.agentSession, "document.edit", input);
-        await requireAgentDocumentAccess(dependencies, context.agentSession, input, {
+        const envelope = documentCommandEnvelopeSchema.parse(context.arguments);
+        const {
+          organizationId,
+          projectId,
+          validUntil: _validUntil,
+          documentId,
+          field,
+          ...commandValue
+        } = envelope;
+        const command = documentAgentCommandSchema.parse(commandValue);
+        requireGrant(context.grant, "document.edit", {
+          organizationId,
+          projectId,
+          documentId,
+          field,
+          operationMode: command.operationMode,
+          action: command.action,
+        });
+        await requireAgentDocumentAccess(dependencies, context.agentSession, envelope, {
           docs: ["write"],
         });
-        return dependencies.editDocument(context.agentSession.agentId, input.documentId, {
-          requestId: input.requestId,
-          runId: input.runId,
-          baseRevision: input.baseRevision,
-          baseStateVector: input.baseStateVector,
-          operationMode: input.operationMode,
-          operations: input.operations,
-        });
+        return dependencies.executeDocumentCommand(
+          context.agentSession.agentId,
+          documentId,
+          command,
+          agentAuthorizationExpiresAt(context.grant),
+        );
       }
       default:
         denied("AGENT_CAPABILITY_NOT_EXECUTABLE");
@@ -359,9 +401,13 @@ function postgresPacaAgentExecutionDependencies(
       if (!env) denied("AGENT_DOCUMENT_RUNTIME_UNAVAILABLE");
       return env.DocumentParty.getByName(documentId).readForAgent();
     },
-    editDocument: (actorId, documentId, input) => {
+    executeDocumentCommand: (actorId, documentId, input, authorizationExpiresAt) => {
       if (!env) denied("AGENT_DOCUMENT_RUNTIME_UNAVAILABLE");
-      return env.DocumentParty.getByName(documentId).editAsAgent(actorId, input);
+      return env.DocumentParty.getByName(documentId).executeAsAgent(
+        actorId,
+        input,
+        authorizationExpiresAt,
+      );
     },
   };
 }

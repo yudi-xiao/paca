@@ -3,6 +3,7 @@ import { Doc as YDoc, XmlElement as YXmlElement, XmlText as YXmlText } from "yjs
 
 import {
   applyDocumentAgentOperations,
+  documentAgentCommandSchema,
   documentAgentEditInputSchema,
   evaluateDocumentAgentEdit,
   inspectDocumentForAgent,
@@ -35,6 +36,7 @@ function blockNoteDocument(): YDoc {
 function editInput(document: YDoc) {
   const snapshot = inspectDocumentForAgent(document, DOCUMENT_ID, 3);
   return documentAgentEditInputSchema.parse({
+    action: "apply",
     requestId: REQUEST_ID,
     runId: RUN_ID,
     baseRevision: snapshot.revision,
@@ -149,6 +151,42 @@ describe("structured Agent document operations", () => {
             ],
           },
         ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires a bounded lease for exclusive edits and validates lease commands", () => {
+    const document = blockNoteDocument();
+    const input = editInput(document);
+    expect(
+      documentAgentCommandSchema.safeParse({
+        ...input,
+        operationMode: "exclusive",
+      }).success,
+    ).toBe(false);
+    expect(
+      documentAgentCommandSchema.safeParse({
+        ...input,
+        operationMode: "exclusive",
+        leaseId: "88888888-8888-4888-8888-888888888888",
+      }).success,
+    ).toBe(true);
+    expect(
+      documentAgentCommandSchema.safeParse({
+        action: "acquire_lease",
+        requestId: REQUEST_ID,
+        runId: RUN_ID,
+        operationMode: "exclusive",
+        leaseDurationMs: 5_000,
+      }).success,
+    ).toBe(true);
+    expect(
+      documentAgentCommandSchema.safeParse({
+        action: "acquire_lease",
+        requestId: REQUEST_ID,
+        runId: RUN_ID,
+        operationMode: "exclusive",
+        leaseDurationMs: 60_001,
       }).success,
     ).toBe(false);
   });

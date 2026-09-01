@@ -109,6 +109,56 @@ const documentInlineContentInput = {
   ],
 } as const;
 
+const documentOperationInput = {
+  type: "array",
+  minItems: 1,
+  maxItems: 10,
+  items: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      type: { const: "replace_block_content" },
+      blockId: { type: "string", minLength: 1, maxLength: 255 },
+      expectedBlockVersion: {
+        type: "string",
+        minLength: 1,
+        maxLength: 400_000,
+        pattern: "^[A-Za-z0-9_-]+$",
+      },
+      content: {
+        type: "array",
+        maxItems: 500,
+        items: documentInlineContentInput,
+      },
+    },
+    required: ["type", "blockId", "expectedBlockVersion", "content"],
+  },
+} as const;
+
+const documentCommandProperties = {
+  documentId: { type: "string", format: "uuid" },
+  field: { const: "block.content" },
+  requestId: { type: "string", format: "uuid" },
+  runId: { type: "string", format: "uuid" },
+} as const;
+
+const documentApplyProperties = {
+  ...documentCommandProperties,
+  action: { const: "apply" },
+  baseRevision: {
+    type: "integer",
+    minimum: 0,
+    maximum: Number.MAX_SAFE_INTEGER,
+  },
+  baseStateVector: {
+    type: "string",
+    minLength: 1,
+    maxLength: 400_000,
+    pattern: "^[A-Za-z0-9_-]+$",
+  },
+  operations: documentOperationInput,
+} as const;
+
 export const pacaCapabilities = [
   {
     name: "project.read",
@@ -189,64 +239,95 @@ export const pacaCapabilities = [
       "documentId",
       "field",
       "operationMode",
+      "action",
       "validUntil",
     ],
     grantTTL: PACA_AGENT_GRANT_TTL_SECONDS,
-    input: scopedInput(
-      {
-        documentId: { type: "string", format: "uuid" },
-        field: { const: "block.content" },
-        requestId: { type: "string", format: "uuid" },
-        runId: { type: "string", format: "uuid" },
-        baseRevision: {
-          type: "integer",
-          minimum: 0,
-          maximum: Number.MAX_SAFE_INTEGER,
-        },
-        baseStateVector: {
-          type: "string",
-          minLength: 1,
-          maxLength: 400_000,
-          pattern: "^[A-Za-z0-9_-]+$",
-        },
-        operationMode: { type: "string", enum: ["suggest", "collaborate"] },
-        operations: {
-          type: "array",
-          minItems: 1,
-          maxItems: 10,
-          items: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              type: { const: "replace_block_content" },
-              blockId: { type: "string", minLength: 1, maxLength: 255 },
-              expectedBlockVersion: {
-                type: "string",
-                minLength: 1,
-                maxLength: 400_000,
-                pattern: "^[A-Za-z0-9_-]+$",
-              },
-              content: {
-                type: "array",
-                maxItems: 500,
-                items: documentInlineContentInput,
-              },
-            },
-            required: ["type", "blockId", "expectedBlockVersion", "content"],
+    input: {
+      oneOf: [
+        scopedInput(
+          {
+            ...documentApplyProperties,
+            operationMode: { type: "string", enum: ["suggest", "collaborate"] },
           },
-        },
-      },
-      [
-        "documentId",
-        "field",
-        "requestId",
-        "runId",
-        "baseRevision",
-        "baseStateVector",
-        "operationMode",
-        "operations",
+          [
+            "documentId",
+            "field",
+            "action",
+            "requestId",
+            "runId",
+            "baseRevision",
+            "baseStateVector",
+            "operationMode",
+            "operations",
+          ],
+        ),
+        scopedInput(
+          {
+            ...documentApplyProperties,
+            operationMode: { const: "exclusive" },
+            leaseId: { type: "string", format: "uuid" },
+          },
+          [
+            "documentId",
+            "field",
+            "action",
+            "requestId",
+            "runId",
+            "baseRevision",
+            "baseStateVector",
+            "operationMode",
+            "leaseId",
+            "operations",
+          ],
+        ),
+        scopedInput(
+          {
+            ...documentCommandProperties,
+            action: { const: "acquire_lease" },
+            operationMode: { const: "exclusive" },
+            leaseDurationMs: { type: "integer", minimum: 5_000, maximum: 60_000 },
+          },
+          [
+            "documentId",
+            "field",
+            "action",
+            "requestId",
+            "runId",
+            "operationMode",
+            "leaseDurationMs",
+          ],
+        ),
+        scopedInput(
+          {
+            ...documentCommandProperties,
+            action: { const: "renew_lease" },
+            operationMode: { const: "exclusive" },
+            leaseId: { type: "string", format: "uuid" },
+            leaseDurationMs: { type: "integer", minimum: 5_000, maximum: 60_000 },
+          },
+          [
+            "documentId",
+            "field",
+            "action",
+            "requestId",
+            "runId",
+            "operationMode",
+            "leaseId",
+            "leaseDurationMs",
+          ],
+        ),
+        scopedInput(
+          {
+            ...documentCommandProperties,
+            action: { const: "release_lease" },
+            operationMode: { const: "exclusive" },
+            leaseId: { type: "string", format: "uuid" },
+          },
+          ["documentId", "field", "action", "requestId", "runId", "operationMode", "leaseId"],
+        ),
       ],
-    ),
+    },
   },
   {
     name: "environment.connect",
@@ -305,6 +386,7 @@ export type AgentConstraintContext = {
   workflowId?: string;
   field?: string;
   operationMode?: string;
+  action?: string;
 };
 
 export type AgentCapabilityDecision =
@@ -343,6 +425,7 @@ const requiredConstraints = {
     "documentId",
     "field",
     "operationMode",
+    "action",
     "validUntil",
   ],
   "environment.connect": [
@@ -377,10 +460,40 @@ export function evaluateAgentCapability(
   context: AgentConstraintContext,
   now = new Date(),
 ): AgentCapabilityDecision {
-  const grant = session.agent.capabilityGrants.find(
+  const grants = session.agent.capabilityGrants.filter(
     (candidate) => candidate.capability === capability && candidate.status === "active",
   );
-  if (!grant) return { allowed: false, code: "AGENT_CAPABILITY_NOT_GRANTED" };
+  if (grants.length === 0) return { allowed: false, code: "AGENT_CAPABILITY_NOT_GRANTED" };
+
+  const decisions = grants.map((grant) =>
+    evaluateAgentCapabilityGrant(grant, capability, context, now),
+  );
+  if (decisions.some((decision) => decision.allowed)) return { allowed: true };
+  for (const code of [
+    "AGENT_GRANT_CONSTRAINT_MISMATCH",
+    "AGENT_GRANT_EXPIRED",
+    "AGENT_GRANT_CONSTRAINTS_INVALID",
+  ] as const) {
+    if (decisions.some((decision) => !decision.allowed && decision.code === code)) {
+      return { allowed: false, code };
+    }
+  }
+  return { allowed: false, code: "AGENT_GRANT_CONSTRAINTS_INVALID" };
+}
+
+export function evaluateAgentCapabilityGrant(
+  grant: {
+    capability: string;
+    constraints: CapabilityConstraints | null;
+    status: string;
+  },
+  capability: PacaCapabilityName,
+  context: AgentConstraintContext,
+  now = new Date(),
+): AgentCapabilityDecision {
+  if (grant.capability !== capability || grant.status !== "active") {
+    return { allowed: false, code: "AGENT_CAPABILITY_NOT_GRANTED" };
+  }
 
   const constraints = grant.constraints;
   if (!constraints) return { allowed: false, code: "AGENT_GRANT_CONSTRAINTS_INVALID" };
