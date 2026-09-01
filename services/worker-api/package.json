@@ -23,6 +23,7 @@
     "test:watch": "vitest",
     "smoke:internal": "bun run scripts/smoke-internal.ts",
     "smoke:permission:internal": "bun run scripts/smoke-permission-internal.ts",
+    "smoke:realtime:internal": "bun run scripts/smoke-realtime-internal.ts",
     "smoke:attachment:internal": "bun run scripts/smoke-attachment-internal.ts",
     "smoke:agent-audit:internal": "bun run scripts/smoke-agent-audit-internal.ts",
     "smoke:task:database": "bun run scripts/smoke-task-database.ts",

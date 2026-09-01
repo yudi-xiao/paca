@@ -15,7 +15,7 @@
 
 更新时间：2026-09-01
 
-当前里程碑：**M7 PartyServer 可靠实时事件已形成并部署首个完整闭环。PostgreSQL 0015 outbox 与 7 个事务触发器捕获 Task/Sprint/View 写入，request `waitUntil` 和每分钟 Cron 负责恢复性投递，Cloudflare Queue/DLQ 采用至少一次交付，ProjectParty/UserParty 用 DO SQLite outbox ID 幂等，浏览器以有界 ID 集合去重。真实 DEMO-1 无可见值变化 PATCH 已得到 `delivered/attempts=1`；M7 仍需已登录远端 WebSocket 休眠重连和滚动发布专项验收。**
+当前里程碑：**M7 PartyServer 可靠实时事件已闭环，下一阶段进入 M8 Yjs DocumentParty。PostgreSQL 0015 outbox 与 7 个事务触发器捕获 Task/Sprint/View 写入，request `waitUntil` 和每分钟 Cron 负责恢复性投递，Cloudflare Queue/DLQ 采用至少一次交付，ProjectParty/UserParty 用 DO SQLite outbox ID 幂等，浏览器以有界 ID 集合去重。真实已登录 WebSocket 已通过在线事件、12 秒空闲 pong、显式重连、同 ID stale recovery 重投抑制和滚动发布后重新鉴权/收取新事件；临时 Project、outbox 与遗留 Bun Session 已精确清零。**
 
 已确认前置条件：
 
@@ -237,9 +237,9 @@
 - [x] Worker 在路由到 PartyServer 前验证用户 Session 或 Agent Auth：浏览器必须同源且按 `pacaPermission` 计算可读 namespace；Agent 必须持有仍有效、精确到 Project+Task/Document 的 active read Grant，UserParty 不接受 Agent。
 - [x] 设计绑定 actor、scope、action、expiry、nonce 和权限版本的短期连接 capability；可信 attachment 现已绑定 actor、Session、room scope、namespace/object action、5 分钟上限、JWT/Session expiry、nonce 和规范化权限摘要。项目角色/成员变更、项目归档、Agent Grant 撤销与用户 sign-out 会通过 DO RPC 写入持久失效时间并关闭匹配连接，新连接必须重新经过 Better Auth/Paca Permission/Agent Auth 判定。
 - [x] 已迁移写入的 Task/Sprint/View 可靠事件先由 PostgreSQL 事务触发器写入 outbox，再由 request `waitUntil`/每分钟恢复 Cron 批量发送到 Cloudflare Queue；Queue consumer 按消息调用 ProjectParty/UserParty，成功后标记 delivered，失败指数退避并在超过重试上限后进入独立 DLQ。广播本身不作为持久队列，outbox claim 支持 lease/stale recovery，DO SQLite 与浏览器均按 outbox ID 去重。尚未迁移的 Document/Workflow 事件随 M8/M9 接入相同契约。
-- [ ] 完成重连、休眠恢复、权限撤销、重复消息和滚动发布测试；Workers Runtime 已覆盖 WebSocket attachment 休眠恢复、休眠后的 actor 撤销、连接关闭和旧 capability 重连拒绝，纯协议/鉴权单测覆盖 project/user/Agent 作用域、过期、事件大小和伪造 header，PartySocket 客户端覆盖同源 UserParty、按项目引用计数、事件分发、重连和登出清理。远端已验证 public health、无凭据 WebSocket Upgrade 为 401；仍需已登录远端休眠恢复、重复消息和滚动发布验证。
+- [x] 已完成重连、休眠恢复、权限撤销、重复消息和滚动发布测试：Workers Runtime 强制 eviction 后验证 attachment 恢复、actor 撤销、连接关闭和旧 capability 重连拒绝；纯协议/鉴权单测覆盖 project/user/Agent 作用域、过期、事件大小和伪造 header；PartySocket 客户端覆盖同源 UserParty、按项目引用计数、事件分发、重连、重复 ID 去重和登出清理。真实已登录 internal smoke 收到可靠 `task.updated`，空闲 12 秒后同一连接 pong，显式重连后取得新 capability/事件；同一 outbox ID 以 stale recovery 重投后 `attempts=2/delivered=true` 且客户端未收到第二次；滚动部署关闭旧连接后重新鉴权连接、pong 和新事件均成功。无凭据完整 WebSocket Upgrade 保持 401。
 
-当前可靠实时事件切片已部署到 internal Worker 版本 `040997b7-0d32-4505-80a8-f96ea46cac35`。React 59 个测试文件、624 项测试，Worker 38 个测试文件、203 项测试，以及 Workers Runtime 1 个文件、3 项 DO/WebSocket 测试全部通过；完整 check/dry-run/真实部署识别 `REALTIME_EVENTS`、ProjectParty/UserParty、独立 internal Hyperdrive/R2。真实账号对 DEMO-1 的同值 PATCH 生成 `task.updated`，随后经 outbox→Queue→ProjectParty 成功标记 `delivered`，首次尝试完成。已登录浏览器的远端消息接收、休眠重连与滚动发布专项仍未完成，因此上一项测试保持未勾选。
+当前 M7 验收版本为 internal Worker `785a98ac-bf37-49d9-b3bd-b86bd379f101`。React 59 个测试文件、624 项测试，Worker 38 个测试文件、203 项测试，以及 Workers Runtime 1 个文件、3 项 DO/WebSocket 测试全部通过；完整 check/dry-run/真实部署识别 `REALTIME_EVENTS`、ProjectParty/UserParty、独立 internal Hyperdrive/R2。`smoke:realtime:internal` 固化真实 Session、临时 Project/Task、可靠事件、空闲 pong、重连和滚动发布验收；重复投递由受控 stale outbox 重投验证。两轮临时 Project、20 条关联 outbox 和 1 个异常路径遗留 Bun Session 已精确删除。
 
 ## M8：Yjs DocumentParty
 

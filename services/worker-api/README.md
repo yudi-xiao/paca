@@ -242,6 +242,18 @@ The script refuses a non-HTTPS or non-`internal` target, does not print credenti
 public health, Hyperdrive health, sign-up or existing-user sign-in, session lookup, sign-out, and
 server-side rejection of the old session cookie.
 
+`bun run smoke:realtime:internal` creates an isolated Project and Task using an existing internal
+project administrator, opens an authenticated Bun WebSocket to ProjectParty, waits for a real
+outbox/Queue `task.updated` event, idles for 12 seconds before checking pong, reconnects with a new
+capability and verifies another event. Required variables are `PACA_INTERNAL_BASE_URL`,
+`PACA_REALTIME_SMOKE_EMAIL` and `PACA_REALTIME_SMOKE_PASSWORD`. Optional bounded durations
+`PACA_REALTIME_DUPLICATE_WINDOW_MS` and `PACA_REALTIME_ROLLING_WINDOW_MS` keep the client observing
+while an operator deliberately requeues the reported smoke outbox ID or deploys a new Worker
+version. The duplicate window fails if the same event ID reaches the client twice; after a rolling
+deployment the script reconnects if needed, then requires pong and a fresh reliable event. It
+archives the temporary Project and revokes its Session in `finally`, while printing exact IDs for
+reviewed hard cleanup of the archived fixture and its outbox rows.
+
 `bun run smoke:attachment:internal` verifies the real same-origin attachment path. Set
 `PACA_ATTACHMENT_SMOKE_PASSWORD` and optionally `PACA_ATTACHMENT_SMOKE_EMAIL` to reuse an existing
 internal project administrator; without an email it creates a dedicated smoke user. The default
