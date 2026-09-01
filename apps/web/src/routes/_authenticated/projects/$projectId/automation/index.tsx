@@ -1,9 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-	createFileRoute,
-	redirect,
-	useNavigate,
-} from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import {
 	Workflow as AutomationIcon,
 	Clock,

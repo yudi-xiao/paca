@@ -26,6 +26,7 @@ export interface Document {
 	folder_id?: string | null;
 	title: string;
 	content: unknown[] | null;
+	content_version?: number;
 	position: number;
 	created_by?: string | null;
 	updated_by?: string | null;
@@ -35,6 +36,13 @@ export interface Document {
 
 export interface DocumentListResult {
 	items: Document[];
+}
+
+export interface DocumentCollaborationStatus {
+	initialized: boolean;
+	update_count: number;
+	update_bytes: number;
+	checkpoint_bytes: number;
 }
 
 export interface DocSnapshot {
@@ -288,6 +296,37 @@ export async function deleteDocument(
 	docId: string,
 ): Promise<void> {
 	await apiClient.instance.delete(`/projects/${projectId}/docs/${docId}`);
+}
+
+export async function getDocumentCollaborationStatus(
+	projectId: string,
+	docId: string,
+): Promise<DocumentCollaborationStatus> {
+	const { data } = await apiClient.instance.get<
+		SuccessEnvelope<DocumentCollaborationStatus>
+	>(`/projects/${projectId}/docs/${docId}/collaboration`);
+	return data.data;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+	let binary = "";
+	for (let offset = 0; offset < bytes.byteLength; offset += 0x8000) {
+		binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+	}
+	return btoa(binary);
+}
+
+export async function bootstrapDocumentCollaboration(
+	projectId: string,
+	docId: string,
+	update: Uint8Array,
+): Promise<{ initialized: boolean }> {
+	const { data } = await apiClient.instance.post<
+		SuccessEnvelope<{ initialized: boolean }>
+	>(`/projects/${projectId}/docs/${docId}/collaboration/bootstrap`, {
+		update_base64: bytesToBase64(update),
+	});
+	return data.data;
 }
 
 // ── Snapshot API ──────────────────────────────────────────────────────────────

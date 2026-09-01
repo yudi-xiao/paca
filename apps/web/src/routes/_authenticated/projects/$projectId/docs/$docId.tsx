@@ -1,17 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { AlertCircle, Check, ChevronRight, MessageSquare } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-
+import { CollaborativeDocEditor } from "@/components/projects/docs/collaborative-doc-editor";
 import { DocActivityPane } from "@/components/projects/docs/doc-activity-pane";
-import {
-	DocEditor,
-	type DocEditorHandle,
-} from "@/components/projects/docs/doc-editor";
+import type { DocEditorHandle } from "@/components/projects/docs/doc-editor";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
+import { currentUserQueryOptions } from "@/lib/auth-api";
 import {
 	docFoldersQueryOptions,
 	docQueryKeys,
@@ -23,28 +21,43 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/docs/$docId",
 )({
-	beforeLoad: ({ params: { projectId } }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
-			throw redirect({
-				to: "/projects/$projectId",
-				params: { projectId },
-			});
-		}
-	},
 	component: DocEditorPage,
 });
 
 type RightPanel = "activity" | null;
+
+const COLLABORATION_COLORS = [
+	"#2563eb",
+	"#7c3aed",
+	"#db2777",
+	"#dc2626",
+	"#d97706",
+	"#059669",
+	"#0891b2",
+] as const;
+
+function collaborationColor(actorId: string): string {
+	let hash = 0;
+	for (const character of actorId) {
+		hash = (hash * 31 + (character.codePointAt(0) ?? 0)) >>> 0;
+	}
+	return COLLABORATION_COLORS[hash % COLLABORATION_COLORS.length];
+}
 
 function DocEditorPage() {
 	const { t } = useTranslation("projects");
 	const { projectId, docId } = Route.useParams();
 	const { hasProjectPermission } = useProjectPermissions(projectId);
 	const canWrite = hasProjectPermission("docs.write");
+	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 	const qc = useQueryClient();
 
+	const { data: currentUser } = useQuery(currentUserQueryOptions);
 	const { data: doc, isError } = useQuery(docQueryOptions(projectId, docId));
-	const { data: allFolders = [] } = useQuery(docFoldersQueryOptions(projectId));
+	const { data: allFolders = [] } = useQuery({
+		...docFoldersQueryOptions(projectId),
+		enabled: !isInternalPreview,
+	});
 
 	const [rightPanel, setRightPanel] = useState<RightPanel>(null);
 	const [dirty, setDirty] = useState(false);
@@ -165,18 +178,20 @@ function DocEditorPage() {
 						</span>
 					)}
 
-					<Button
-						variant="ghost"
-						size="icon"
-						className={cn(
-							"size-7 text-muted-foreground/60 hover:text-foreground hover:bg-muted/60 transition-all duration-150",
-							rightPanel === "activity" && "bg-muted/40 text-foreground",
-						)}
-						title={t("docs.editorPage.commentsAndActivity")}
-						onClick={() => togglePanel("activity")}
-					>
-						<MessageSquare className="size-3.5" />
-					</Button>
+					{!isInternalPreview && (
+						<Button
+							variant="ghost"
+							size="icon"
+							className={cn(
+								"size-7 text-muted-foreground/60 hover:text-foreground hover:bg-muted/60 transition-all duration-150",
+								rightPanel === "activity" && "bg-muted/40 text-foreground",
+							)}
+							title={t("docs.editorPage.commentsAndActivity")}
+							onClick={() => togglePanel("activity")}
+						>
+							<MessageSquare className="size-3.5" />
+						</Button>
+					)}
 				</div>
 			</div>
 
@@ -186,9 +201,17 @@ function DocEditorPage() {
 				<div className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
 					<div className="max-w-7xl mx-auto px-8 py-7">
 						{doc && (
-							<DocEditor
+							<CollaborativeDocEditor
+								key={docId}
 								ref={editorRef}
 								content={doc.content}
+								user={{
+									name:
+										currentUser?.full_name ||
+										currentUser?.username ||
+										t("docs.editorPage.anonymous", { defaultValue: "访客" }),
+									color: collaborationColor(currentUser?.id ?? "anonymous"),
+								}}
 								editable={canWrite}
 								onSave={handleContentSave}
 								onDirtyChange={handleEditorDirtyChange}
@@ -223,7 +246,7 @@ function DocEditorPage() {
 				</div>
 
 				{/* Right panel: activity */}
-				{rightPanel === "activity" && doc && (
+				{!isInternalPreview && rightPanel === "activity" && doc && (
 					<div className="w-80 shrink-0 h-full overflow-hidden">
 						<DocActivityPane
 							projectId={projectId}

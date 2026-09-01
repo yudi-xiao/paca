@@ -15,7 +15,7 @@
 
 更新时间：2026-09-01
 
-当前里程碑：**M8 Yjs DocumentParty 后端基础切片已在本地完成：锁定 `y-partyserver@2.2.0`/`yjs@13.6.30`，一篇文档一个稳定 `documentId` 房间，启用 WebSocket Hibernation，DO SQLite 同步持久化增量并支持 checkpoint、压缩和驱逐恢复。连接由 Worker 注入短期可信上下文；用户按 `docs.read/docs.write` 区分只读/可写，Agent 的原始 Yjs 连接只允许精确 `document.read` Grant，编辑继续走后续结构化操作。PostgreSQL 0016 文档业务投影、实时 outbox 触发器和第 39 张 runtime 表权限已生成但尚未应用或部署；BlockNote provider、长期物化和 Agent 三种编辑模式仍待完成。**
+当前里程碑：**M8 Yjs 文档纵向切片已形成未部署候选：锁定 `y-partyserver@2.2.0`/`yjs@13.6.30`，一篇文档一个稳定 `documentId` 房间，启用 WebSocket Hibernation，DO SQLite 同步持久化增量并支持 checkpoint、压缩和驱逐恢复。Worker 已增加受 `docs.read/docs.write` 保护的 PostgreSQL 文档 CRUD、协作状态和原子 bootstrap；React/BlockNote 已接入同源 `y-partyserver/provider`，旧 JSON 首次打开时只允许写用户原子初始化，初始化竞态以 DO 首个写入为准，实时失败时降级为只读以避免双写分叉。Agent 的原始 Yjs 连接仍只允许精确 `document.read` Grant，编辑继续走后续结构化操作。PostgreSQL 0016 文档业务投影、实时 outbox 触发器和第 39 张 runtime 表权限已生成但尚未应用或部署；长期物化/R2 快照和 Agent 三种编辑模式仍待完成。**
 
 已确认前置条件：
 
@@ -243,6 +243,8 @@
 
 ## M8：Yjs DocumentParty
 
+本地候选验收：React 59 个测试文件/626 项、Worker 41 个测试文件/216 项、Workers Runtime 2 个测试文件/9 项全部通过；internal production build、Drizzle check、Wrangler types 和 deploy dry-run 均通过。0016 尚未应用且 internal 尚未部署，因此下列纵向切片任务继续保持未勾选。
+
 - [x] 盘点 `services/api/internal/repository/postgres/document_repository.go` 的文档结构和快照语义；旧实现保存当前 BlockNote JSONB 和整份 JSON snapshot，不保存 Yjs state vector/update，因此不能直接作为协作恢复源。
 - [ ] 为 BlockNote 接入 Yjs 和 `y-partyserver/provider`。
 - [x] 实现一篇文档一个 DocumentParty/YServer，使用稳定 `documentId` 寻址；Wrangler 已声明独立 DO binding 和 `v2-document-party` SQLite class migration。
@@ -315,11 +317,11 @@
 - `services/api/internal/platform/authz/permissions.go`：现有稳定权限词汇迁移基线。
 - `services/api/internal/platform/authz/authorizer.go`：旧权限聚合与 wildcard 行为，供 shadow comparison 使用，切换后删除。
 - `services/api/internal/repository/postgres/document_repository.go`：现有文档 JSON 与快照语义基线。
-- `services/worker-api/src/document`：DocumentParty/YServer、DO SQLite 增量/checkpoint、短期连接上下文、PostgreSQL 文档作用域查询与用户/Agent 实时鉴权。
+- `services/worker-api/src/document`：DocumentParty/YServer、DO SQLite 增量/checkpoint、原子 bootstrap、短期连接上下文、PostgreSQL 文档 CRUD/作用域查询与用户/Agent 实时鉴权。
 - `services/worker-api/drizzle/0016_busy_changeling.sql`：待应用的 PostgreSQL 文档业务投影、项目实时 outbox 触发器与版本化 checksum。
 - `services/realtime/src/server.ts`：现有 Socket.IO 鉴权、Project/User room 行为基线。
 - `services/realtime/src/subscriber.ts`：现有 Valkey Pub/Sub 事件路由基线。
-- `apps/web`：现有 React 与 TanStack Router/Query/Form 前端。
+- `apps/web`：现有 React 与 TanStack Router/Query/Form 前端；文档编辑器已加入 BlockNote + `y-partyserver/provider` 的本地候选实现。
 - `services/worker-api`：Hono Worker、Hyperdrive runtime 数据访问、Drizzle schema/migration 与 Better Auth 的目标代码路径。
 - `services/worker-api/src/realtime`：ProjectParty/UserParty、Hibernation、可信连接 attachment、事件过滤、PostgreSQL outbox、Queue consumer、DO 幂等投递和 Worker 路由。
-- Yjs DocumentParty 的目标代码路径：待 M8 实现时确定。
+- `apps/web/src/components/projects/docs/collaborative-doc-editor.tsx`：旧 BlockNote JSON → Yjs 原子初始化、同源 PartySocket 连接、Awareness 和只读失败降级。

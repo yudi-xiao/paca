@@ -6,8 +6,8 @@ import { ShortcutHelpDialog } from "@/components/shortcuts/shortcut-help-dialog"
 import { usePermissions } from "@/hooks/use-permissions";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { currentUserQueryOptions } from "@/lib/auth-api";
-import { internalPreviewNavigationTarget } from "@/lib/internal-preview";
 import { sprintsQueryOptions } from "@/lib/interaction-api";
+import { internalPreviewNavigationTarget } from "@/lib/internal-preview";
 import { useShortcutHelpStore } from "./help-dialog-store";
 import { useHoveredTaskStore } from "./hovered-task-store";
 import { matchShortcut, type ShortcutActionId } from "./keymap";

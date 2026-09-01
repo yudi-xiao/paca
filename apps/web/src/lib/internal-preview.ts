@@ -15,7 +15,7 @@ function normalizePathname(pathname: string): string {
 }
 
 const INTERNAL_PREVIEW_PROJECT_ROUTE =
-	/^\/projects\/[^/]+(?:\/(?:team|settings|tasks(?:\/[^/]+)?|interactions\/(?:backlog|timeline|sprints\/[^/]+)))?$/;
+	/^\/projects\/[^/]+(?:\/(?:team|settings|docs\/[^/]+|tasks(?:\/[^/]+)?|interactions\/(?:backlog|timeline|sprints\/[^/]+)))?$/;
 
 /**
  * The Cloudflare internal preview exposes only routes whose backing APIs have

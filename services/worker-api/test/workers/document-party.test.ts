@@ -44,6 +44,13 @@ function framedUpdate(update: Uint8Array): Uint8Array {
   return encoding.toUint8Array(encoder);
 }
 
+function arrayBuffer(update: Uint8Array): ArrayBuffer {
+  return update.buffer.slice(
+    update.byteOffset,
+    update.byteOffset + update.byteLength,
+  ) as ArrayBuffer;
+}
+
 async function connect(state: DocumentConnectionState) {
   const stub = env.DocumentParty.getByName(state.documentId);
   const response = await stub.fetch(
@@ -138,6 +145,42 @@ describe("DocumentParty Durable Object runtime", () => {
     applyUpdate(restored, new Uint8Array(await stub.snapshot()));
     expect(restored.getMap("document").get("title")).toBe("M8 checkpoint");
     socket.close(1000, "done");
+  });
+
+  it("atomically bootstraps an empty document and keeps the first writer's state", async () => {
+    const documentId = "88888888-8888-4888-8888-888888888888";
+    const stub = env.DocumentParty.getByName(documentId);
+    const first = new YDoc();
+    first.getText("content").insert(0, "first writer");
+    const second = new YDoc();
+    second.getText("content").insert(0, "second writer");
+
+    await expect(
+      stub.initializeIfEmpty(arrayBuffer(encodeStateAsUpdate(first))),
+    ).resolves.toMatchObject({
+      initialized: true,
+    });
+    await expect(
+      stub.initializeIfEmpty(arrayBuffer(encodeStateAsUpdate(second))),
+    ).resolves.toMatchObject({
+      initialized: false,
+    });
+    await evictDurableObject(stub);
+
+    const restored = new YDoc();
+    applyUpdate(restored, new Uint8Array(await stub.snapshot()));
+    expect(restored.getText("content").toString()).toBe("first writer");
+  });
+
+  it("rejects malformed bootstrap updates without initializing persistence", async () => {
+    const documentId = "99999999-9999-4999-8999-999999999999";
+    const stub = env.DocumentParty.getByName(documentId);
+
+    await expect(stub.initializeIfEmpty(new Uint8Array([255]).buffer)).resolves.toMatchObject({
+      initialized: false,
+      invalid: true,
+    });
+    expect(await stub.persistenceStats()).toMatchObject({ initialized: false, updateCount: 0 });
   });
 
   it("persists session invalidation across hibernation and rejects a stale reconnect", async () => {

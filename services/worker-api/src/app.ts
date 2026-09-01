@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import type { AgentSession } from "@better-auth/agent-auth";
 import { type Context, Hono, type Next } from "hono";
 import * as z from "zod";
@@ -28,6 +29,8 @@ import {
   customFieldErrorCodes,
 } from "./custom-field/service";
 import { checkDatabaseHealth, type DatabaseHealth, withDatabase } from "./database";
+import { type DocumentRuntime, documentRuntime } from "./document/runtime";
+import { DocumentError, documentErrorCodes, type PacaDocument } from "./document/service";
 import { type IterationRuntime, iterationRuntime } from "./iteration/runtime";
 import {
   IterationError,
@@ -126,6 +129,7 @@ type AppDependencies = {
   databaseHealth: (env: AppBindings) => Promise<DatabaseHealth>;
   customFields: CustomFieldRuntime;
   iterations: IterationRuntime;
+  documents: DocumentRuntime;
   loadSystemPermissions: LoadSystemPermissions;
   log: (event: LogEvent) => void;
   organizationAccess: OrganizationAccessRuntime;
@@ -300,6 +304,24 @@ const taskUpdateBodySchema = taskCreateBodySchema
   .omit({ title: true })
   .extend({ title: z.string().optional() })
   .refine((body) => Object.keys(body).length > 0);
+
+const documentCreateBodySchema = z
+  .object({
+    title: z.string().optional(),
+    content: z.array(z.unknown()).nullable().optional(),
+    position: z.number().int().optional(),
+  })
+  .strict();
+
+const documentUpdateBodySchema = documentCreateBodySchema.refine(
+  (body) => Object.keys(body).length > 0,
+);
+
+const documentBootstrapBodySchema = z
+  .object({
+    update_base64: z.string().min(1).max(350_000),
+  })
+  .strict();
 
 const taskCommentBodySchema = z.object({
   content: z.array(z.unknown()).min(1),
@@ -526,6 +548,47 @@ function taskResponse(task: Task) {
     created_at: task.createdAt.toISOString(),
     updated_at: task.updatedAt.toISOString(),
   };
+}
+
+function documentResponse(document: PacaDocument) {
+  return {
+    id: document.id,
+    project_id: document.projectId,
+    folder_id: null,
+    title: document.title,
+    content: document.content,
+    content_version: document.contentVersion,
+    position: document.position,
+    created_by: document.createdBy,
+    updated_by: document.updatedBy,
+    created_at: document.createdAt.toISOString(),
+    updated_at: document.updatedAt.toISOString(),
+  };
+}
+
+function documentFailure(context: AppContext, error: unknown) {
+  if (!(error instanceof DocumentError)) throw error;
+  switch (error.code) {
+    case documentErrorCodes.contentInvalid:
+    case documentErrorCodes.positionInvalid:
+    case documentErrorCodes.titleInvalid:
+      return legacyFailure(context, 400, error.code, error.message);
+    case documentErrorCodes.notFound:
+      return legacyFailure(context, 404, error.code, error.message);
+  }
+}
+
+function decodeDocumentBootstrapUpdate(value: string): ArrayBuffer | null {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    return null;
+  }
+  try {
+    const bytes = Buffer.from(value, "base64");
+    if (bytes.byteLength === 0 || bytes.byteLength > 256 * 1024) return null;
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  } catch {
+    return null;
+  }
 }
 
 function taskLinkResponse(link: TaskLink) {
@@ -961,6 +1024,7 @@ const defaultDependencies: AppDependencies = {
   currentAgentSession: readCurrentAgentSession,
   customFields: customFieldRuntime,
   databaseHealth: checkDatabaseHealth,
+  documents: documentRuntime,
   iterations: iterationRuntime,
   loadSystemPermissions,
   log(event) {
@@ -2153,6 +2217,167 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
         return context.body(null, 204);
       } catch (error) {
         return iterationFailure(context, error);
+      }
+    },
+  );
+  app.get(
+    "/api/v1/projects/:projectId/docs",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, { docs: ["read"] }),
+    async (context) => {
+      try {
+        const documents = await dependencies.documents.list(
+          context.env,
+          context.req.param("projectId"),
+        );
+        return legacySuccess(context, { items: documents.map(documentResponse) });
+      } catch (error) {
+        return documentFailure(context, error);
+      }
+    },
+  );
+  app.post(
+    "/api/v1/projects/:projectId/docs",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, { docs: ["write"] }),
+    async (context) => {
+      const parsed = documentCreateBodySchema.safeParse(await context.req.json().catch(() => null));
+      if (!parsed.success) return legacyFailure(context, 400, "BAD_REQUEST", "Invalid document");
+      try {
+        const document = await dependencies.documents.create(
+          context.env,
+          context.req.param("projectId"),
+          context.get("permissionActorId"),
+          parsed.data,
+        );
+        return context.json(
+          {
+            success: true as const,
+            data: documentResponse(document),
+            request_id: context.get("requestId"),
+          },
+          201,
+        );
+      } catch (error) {
+        return documentFailure(context, error);
+      }
+    },
+  );
+  app.get(
+    "/api/v1/projects/:projectId/docs/:docId",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, { docs: ["read"] }),
+    async (context) => {
+      const documentId = context.req.param("docId");
+      if (!z.uuid().safeParse(documentId).success) {
+        return legacyFailure(context, 400, "BAD_REQUEST", "Invalid document id");
+      }
+      try {
+        const document = await dependencies.documents.get(
+          context.env,
+          context.req.param("projectId"),
+          documentId,
+        );
+        return legacySuccess(context, documentResponse(document));
+      } catch (error) {
+        return documentFailure(context, error);
+      }
+    },
+  );
+  app.patch(
+    "/api/v1/projects/:projectId/docs/:docId",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, { docs: ["write"] }),
+    async (context) => {
+      const documentId = context.req.param("docId");
+      const parsed = documentUpdateBodySchema.safeParse(await context.req.json().catch(() => null));
+      if (!z.uuid().safeParse(documentId).success || !parsed.success) {
+        return legacyFailure(context, 400, "BAD_REQUEST", "Invalid document update");
+      }
+      try {
+        const document = await dependencies.documents.update(
+          context.env,
+          context.req.param("projectId"),
+          documentId,
+          context.get("permissionActorId"),
+          parsed.data,
+        );
+        return legacySuccess(context, documentResponse(document));
+      } catch (error) {
+        return documentFailure(context, error);
+      }
+    },
+  );
+  app.delete(
+    "/api/v1/projects/:projectId/docs/:docId",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, { docs: ["write"] }),
+    async (context) => {
+      const documentId = context.req.param("docId");
+      if (!z.uuid().safeParse(documentId).success) {
+        return legacyFailure(context, 400, "BAD_REQUEST", "Invalid document id");
+      }
+      try {
+        await dependencies.documents.archive(
+          context.env,
+          context.req.param("projectId"),
+          documentId,
+          context.get("permissionActorId"),
+        );
+        return context.body(null, 204);
+      } catch (error) {
+        return documentFailure(context, error);
+      }
+    },
+  );
+  app.get(
+    "/api/v1/projects/:projectId/docs/:docId/collaboration",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, { docs: ["read"] }),
+    async (context) => {
+      const documentId = context.req.param("docId");
+      if (!z.uuid().safeParse(documentId).success) {
+        return legacyFailure(context, 400, "BAD_REQUEST", "Invalid document id");
+      }
+      try {
+        await dependencies.documents.get(context.env, context.req.param("projectId"), documentId);
+        const status = await dependencies.documents.collaborationStatus(context.env, documentId);
+        return legacySuccess(context, {
+          initialized: status.initialized,
+          update_count: status.updateCount,
+          update_bytes: status.updateBytes,
+          checkpoint_bytes: status.checkpointBytes,
+        });
+      } catch (error) {
+        return documentFailure(context, error);
+      }
+    },
+  );
+  app.post(
+    "/api/v1/projects/:projectId/docs/:docId/collaboration/bootstrap",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, { docs: ["write"] }),
+    async (context) => {
+      const documentId = context.req.param("docId");
+      const parsed = documentBootstrapBodySchema.safeParse(
+        await context.req.json().catch(() => null),
+      );
+      const update = parsed.success
+        ? decodeDocumentBootstrapUpdate(parsed.data.update_base64)
+        : null;
+      if (!z.uuid().safeParse(documentId).success || !update) {
+        return legacyFailure(context, 400, "BAD_REQUEST", "Invalid collaboration bootstrap");
+      }
+      try {
+        await dependencies.documents.get(context.env, context.req.param("projectId"), documentId);
+        const result = await dependencies.documents.bootstrapCollaboration(
+          context.env,
+          documentId,
+          update,
+        );
+        return legacySuccess(context, result);
+      } catch (error) {
+        return documentFailure(context, error);
       }
     },
   );

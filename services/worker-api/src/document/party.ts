@@ -215,11 +215,28 @@ export class DocumentParty extends YServer {
 
   async initializeIfEmpty(update: ArrayBuffer): Promise<{
     initialized: boolean;
+    invalid?: boolean;
     snapshot: ArrayBuffer;
   }> {
     await this.setName(this.name);
     if (update.byteLength === 0 || update.byteLength > MAX_UPDATE_BYTES) {
-      throw new Error("DOCUMENT_INITIAL_UPDATE_INVALID");
+      return {
+        initialized: false,
+        invalid: true,
+        snapshot: cloneArrayBuffer(encodeStateAsUpdate(this.document)),
+      };
+    }
+    const probe = new YDoc();
+    try {
+      applyUpdate(probe, new Uint8Array(update));
+    } catch {
+      return {
+        initialized: false,
+        invalid: true,
+        snapshot: cloneArrayBuffer(encodeStateAsUpdate(this.document)),
+      };
+    } finally {
+      probe.destroy();
     }
     const stats = this.persistenceStats();
     if (stats.initialized) {

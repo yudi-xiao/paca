@@ -512,7 +512,13 @@ function DocsFolderNode({
 }
 
 /** The full docs tree sidebar section — shown when in project context */
-function DocsSidebarSection({ projectId }: { projectId: string }) {
+function DocsSidebarSection({
+	projectId,
+	foldersEnabled = true,
+}: {
+	projectId: string;
+	foldersEnabled?: boolean;
+}) {
 	const { t } = useTranslation("appShell");
 	const qc = useQueryClient();
 	const navigate = useNavigate();
@@ -581,7 +587,10 @@ function DocsSidebarSection({ projectId }: { projectId: string }) {
 		[projectId],
 	);
 
-	const { data: allFolders = [] } = useQuery(docFoldersQueryOptions(projectId));
+	const { data: allFolders = [] } = useQuery({
+		...docFoldersQueryOptions(projectId),
+		enabled: foldersEnabled,
+	});
 	const { data: rootDocs = [] } = useQuery(docListQueryOptions(projectId));
 
 	// Use loose null check — backend omits parent_id for root folders (omitempty)
@@ -707,15 +716,19 @@ function DocsSidebarSection({ projectId }: { projectId: string }) {
 											<File className="size-3.5 mr-2" />
 											{t("docs.newDocument")}
 										</DropdownMenuItem>
-										<DropdownMenuItem
-											onClick={() =>
-												newFolderMutation.mutate(t("docs.newFolderDefaultName"))
-											}
-											disabled={newFolderMutation.isPending}
-										>
-											<FolderOpen className="size-3.5 mr-2" />
-											{t("docs.newFolder")}
-										</DropdownMenuItem>
+										{foldersEnabled && (
+											<DropdownMenuItem
+												onClick={() =>
+													newFolderMutation.mutate(
+														t("docs.newFolderDefaultName"),
+													)
+												}
+												disabled={newFolderMutation.isPending}
+											>
+												<FolderOpen className="size-3.5 mr-2" />
+												{t("docs.newFolder")}
+											</DropdownMenuItem>
+										)}
 									</DropdownMenuContent>
 								</DropdownMenu>
 							</div>
@@ -1579,6 +1592,11 @@ export function AppSidebar() {
 							<ProjectInteractionsSection
 								projectId={projectId}
 								isAnonymous={isAnonymous}
+							/>
+							<SidebarSeparator />
+							<DocsSidebarSection
+								projectId={projectId}
+								foldersEnabled={false}
 							/>
 							<SidebarSeparator />
 							<SidebarGroup>
