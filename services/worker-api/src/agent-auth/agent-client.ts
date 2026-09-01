@@ -40,6 +40,16 @@ export type DelegatedAgentRegistration = {
   };
 };
 
+export type DelegatedAgentRegistrationInput = {
+  hostConfig: AgentHostConfig;
+  agentName: string;
+  capabilityRequests: DelegatedAgentGrantRequest[];
+  reason: string;
+  bindingMessage: string;
+  fetch?: typeof fetch;
+  now?: () => Date;
+};
+
 function asRecord(value: unknown): JsonRecord | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonRecord)
@@ -120,59 +130,29 @@ export async function readAgentHostConfig(path: string): Promise<AgentHostConfig
   return value as AgentHostConfig;
 }
 
-export async function registerDelegatedAgent(input: {
-  hostConfig: AgentHostConfig;
-  agentName: string;
-  organizationId: string;
-  projectId: string;
-  taskId: string;
-  fetch?: typeof fetch;
-  now?: () => Date;
-}): Promise<DelegatedAgentRegistration> {
+export async function registerDelegatedAgentWithCapabilities(
+  input: DelegatedAgentRegistrationInput,
+): Promise<DelegatedAgentRegistration> {
+  if (
+    input.capabilityRequests.length === 0 ||
+    new Set(input.capabilityRequests.map(({ capability }) => capability)).size !==
+      input.capabilityRequests.length ||
+    input.capabilityRequests.some(
+      ({ capability, constraints }) =>
+        !capability ||
+        !constraints ||
+        typeof constraints !== "object" ||
+        Array.isArray(constraints),
+    )
+  ) {
+    throw new AgentHostEnrollmentError("DELEGATED_AGENT_CAPABILITIES_INVALID");
+  }
   const request = input.fetch ?? fetch;
   const identity = await generateAgentHostIdentity();
-  const validUntil = new Date(
-    (input.now ?? (() => new Date()))().getTime() + 14 * 60_000,
-  ).toISOString();
-  const requestedCapabilities = [
-    {
-      name: "project.read",
-      constraints: {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        validUntil,
-      },
-    },
-    {
-      name: "task.read",
-      constraints: {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        taskId: input.taskId,
-        validUntil,
-      },
-    },
-    {
-      name: "task.write",
-      constraints: {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        taskId: input.taskId,
-        field: "description",
-        operationMode: "collaborate",
-        validUntil,
-      },
-    },
-    {
-      name: "task.create",
-      constraints: {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        operationMode: "collaborate",
-        validUntil,
-      },
-    },
-  ];
+  const requestedCapabilities = input.capabilityRequests.map(({ capability, constraints }) => ({
+    name: capability,
+    constraints,
+  }));
   const hostJwt = await signJwt({
     privateKey: input.hostConfig.privateKey,
     type: "host+jwt",
@@ -191,9 +171,9 @@ export async function registerDelegatedAgent(input: {
       name: input.agentName,
       mode: "delegated",
       capabilities: requestedCapabilities,
-      reason: "完善 DEMO-1 描述，并把当前开发待办拆分为 Demo Backlog 测试数据。",
+      reason: input.reason,
       preferred_method: "device_authorization",
-      binding_message: "仅限 Demo 项目的短时工作项读取、描述修改和 Backlog 创建测试。",
+      binding_message: input.bindingMessage,
       force_approval: true,
     }),
     redirect: "error",
@@ -249,6 +229,67 @@ export async function registerDelegatedAgent(input: {
       expiresIn: typeof approval?.expires_in === "number" ? approval.expires_in : null,
     },
   };
+}
+
+export async function registerDelegatedAgent(input: {
+  hostConfig: AgentHostConfig;
+  agentName: string;
+  organizationId: string;
+  projectId: string;
+  taskId: string;
+  fetch?: typeof fetch;
+  now?: () => Date;
+}): Promise<DelegatedAgentRegistration> {
+  const validUntil = new Date(
+    (input.now ?? (() => new Date()))().getTime() + 14 * 60_000,
+  ).toISOString();
+  return registerDelegatedAgentWithCapabilities({
+    hostConfig: input.hostConfig,
+    agentName: input.agentName,
+    capabilityRequests: [
+      {
+        capability: "project.read",
+        constraints: {
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          validUntil,
+        },
+      },
+      {
+        capability: "task.read",
+        constraints: {
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          taskId: input.taskId,
+          validUntil,
+        },
+      },
+      {
+        capability: "task.write",
+        constraints: {
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          taskId: input.taskId,
+          field: "description",
+          operationMode: "collaborate",
+          validUntil,
+        },
+      },
+      {
+        capability: "task.create",
+        constraints: {
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          operationMode: "collaborate",
+          validUntil,
+        },
+      },
+    ],
+    reason: "完善 DEMO-1 描述，并把当前开发待办拆分为 Demo Backlog 测试数据。",
+    bindingMessage: "仅限 Demo 项目的短时工作项读取、描述修改和 Backlog 创建测试。",
+    fetch: input.fetch,
+    now: input.now,
+  });
 }
 
 export async function writeDelegatedAgentConfig(

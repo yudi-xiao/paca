@@ -2,6 +2,7 @@
 
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
 import { describe, expect, it } from "vitest";
 import * as syncProtocol from "y-protocols/sync";
@@ -109,6 +110,7 @@ async function connect(state: DocumentConnectionState) {
   );
   const socket = response.webSocket;
   if (!socket) throw new Error("WEBSOCKET_RESPONSE_MISSING");
+  socket.binaryType = "arraybuffer";
   socket.accept();
   return { socket, stub };
 }
@@ -160,6 +162,44 @@ function nextAgentLeaseStatus(socket: WebSocket): Promise<AgentLeaseStatusMessag
   });
 }
 
+function syncDocumentFromSocket(
+  socket: WebSocket,
+  accepted: (document: YDoc) => boolean,
+): Promise<YDoc> {
+  const document = new YDoc();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.removeEventListener("message", handleMessage);
+      document.destroy();
+      reject(new Error("DOCUMENT_RECONNECT_SYNC_TIMEOUT"));
+    }, 5_000);
+    const handleMessage = (event: MessageEvent) => {
+      const bytes =
+        event.data instanceof ArrayBuffer
+          ? new Uint8Array(event.data)
+          : ArrayBuffer.isView(event.data)
+            ? new Uint8Array(event.data.buffer, event.data.byteOffset, event.data.byteLength)
+            : null;
+      if (!bytes) return;
+      const decoder = decoding.createDecoder(bytes);
+      if (decoding.readVarUint(decoder) !== MESSAGE_SYNC) return;
+      const encoder = encoding.createEncoder();
+      encoding.writeVarUint(encoder, MESSAGE_SYNC);
+      syncProtocol.readSyncMessage(decoder, encoder, document, socket);
+      if (encoding.length(encoder) > 1) socket.send(encoding.toUint8Array(encoder));
+      if (!accepted(document)) return;
+      clearTimeout(timeout);
+      socket.removeEventListener("message", handleMessage);
+      resolve(document);
+    };
+    socket.addEventListener("message", handleMessage);
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, MESSAGE_SYNC);
+    syncProtocol.writeSyncStep1(encoder, document);
+    socket.send(encoding.toUint8Array(encoder));
+  });
+}
+
 describe("DocumentParty Durable Object runtime", () => {
   it("persists a user Yjs update before hibernation and restores the exact state", async () => {
     const { socket, stub } = await connect(connectionState());
@@ -182,6 +222,29 @@ describe("DocumentParty Durable Object runtime", () => {
     expect(restored.getText("content").toString()).toBe("Paca collaboration");
     socket.close(1000, "done");
   });
+
+  it("resynchronizes the authoritative Yjs state after a disconnect and hibernation", async () => {
+    const documentId = "44444444-4444-4444-8444-444444444445";
+    const first = await connect(connectionState({ documentId }));
+    const source = new YDoc();
+    source.getText("content").insert(0, "persisted before reconnect");
+    first.socket.send(framedUpdate(encodeStateAsUpdate(source)));
+    await waitForUpdates(first.stub, 1);
+
+    const closed = nextClose(first.socket);
+    first.socket.close(1000, "simulate network disconnect");
+    await closed;
+    await evictDurableObject(first.stub);
+
+    const second = await connect(connectionState({ documentId, nonce: crypto.randomUUID() }));
+    const restored = await syncDocumentFromSocket(
+      second.socket,
+      (document) => document.getText("content").toString() === "persisted before reconnect",
+    );
+    expect(restored.getText("content").toString()).toBe("persisted before reconnect");
+    restored.destroy();
+    second.socket.close(1000, "done");
+  }, 15_000);
 
   it("rejects raw Agent/user read-only Yjs updates", async () => {
     const documentId = "55555555-5555-4555-8555-555555555555";

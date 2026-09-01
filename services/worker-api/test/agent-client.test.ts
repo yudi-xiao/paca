@@ -1,12 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { executeAgentCapability, registerDelegatedAgent } from "../src/agent-auth/agent-client";
+import {
+  executeAgentCapability,
+  registerDelegatedAgent,
+  registerDelegatedAgentWithCapabilities,
+} from "../src/agent-auth/agent-client";
 import { generateAgentHostIdentity } from "../src/agent-auth/host-enrollment";
 
 const origin = "https://paca.howlearnwood.com";
 const hostId = "host-1";
 const projectId = "11111111-1111-4111-8111-111111111111";
 const taskId = "22222222-2222-4222-8222-222222222222";
+const documentId = "44444444-4444-4444-8444-444444444444";
 
 async function verifyJwt(jwt: string, publicJwk: JsonWebKey) {
   const [header, payload, signature] = jwt.split(".");
@@ -144,5 +149,138 @@ describe("delegated Agent client", () => {
       fetch: fetchMock as typeof fetch,
     });
     expect(seenJti.size).toBe(2);
+  });
+
+  it("registers a dedicated document Agent with reviewed action-scoped constraints", async () => {
+    const hostIdentity = await generateAgentHostIdentity();
+    const validUntil = "2026-08-31T00:10:00.000Z";
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        name: "Document smoke Agent",
+        mode: "delegated",
+        reason: "Document smoke",
+        binding_message: "One temporary document",
+        force_approval: true,
+      });
+      expect(body.capabilities).toEqual([
+        {
+          name: "document.read",
+          constraints: {
+            organizationId: "paca-default",
+            projectId,
+            documentId,
+            validUntil,
+          },
+        },
+        {
+          name: "document.edit",
+          constraints: {
+            organizationId: "paca-default",
+            projectId,
+            documentId,
+            field: "block.content",
+            operationMode: { in: ["suggest", "collaborate", "exclusive"] },
+            action: { in: ["apply", "acquire_lease", "renew_lease", "release_lease"] },
+            validUntil,
+          },
+        },
+      ]);
+      return Response.json({
+        agent_id: "document-agent-1",
+        host_id: hostId,
+        status: "pending",
+        approval: {
+          user_code: "DOCS-TEST",
+          verification_uri: `${origin}/device/capabilities`,
+          verification_uri_complete: `${origin}/device/capabilities?agent_id=document-agent-1&code=DOCS-TEST`,
+          expires_in: 300,
+        },
+      });
+    });
+
+    const registration = await registerDelegatedAgentWithCapabilities({
+      hostConfig: {
+        version: 1,
+        providerOrigin: origin,
+        issuer: `${origin}/api/auth`,
+        defaultLocation: `${origin}/api/auth/capability/execute`,
+        hostId,
+        hostName: "Host",
+        keyAlgorithm: "Ed25519",
+        publicKey: hostIdentity.publicKey,
+        privateKey: hostIdentity.privateKey,
+        enrolledAt: "2026-08-31T00:00:00.000Z",
+      },
+      agentName: "Document smoke Agent",
+      capabilityRequests: [
+        {
+          capability: "document.read",
+          constraints: {
+            organizationId: "paca-default",
+            projectId,
+            documentId,
+            validUntil,
+          },
+        },
+        {
+          capability: "document.edit",
+          constraints: {
+            organizationId: "paca-default",
+            projectId,
+            documentId,
+            field: "block.content",
+            operationMode: { in: ["suggest", "collaborate", "exclusive"] },
+            action: { in: ["apply", "acquire_lease", "renew_lease", "release_lease"] },
+            validUntil,
+          },
+        },
+      ],
+      reason: "Document smoke",
+      bindingMessage: "One temporary document",
+      fetch: fetchMock as typeof fetch,
+      now: () => new Date("2026-08-31T00:00:00.000Z"),
+    });
+
+    expect(registration.config.capabilities).toEqual(["document.read", "document.edit"]);
+    expect(registration.config.grantRequests).toHaveLength(2);
+    expect(registration.approval.userCode).toBe("DOCS-TEST");
+  });
+
+  it("rejects empty or duplicate capability registration requests before network access", async () => {
+    const hostIdentity = await generateAgentHostIdentity();
+    const fetchMock = vi.fn();
+    const hostConfig = {
+      version: 1 as const,
+      providerOrigin: origin,
+      issuer: `${origin}/api/auth`,
+      defaultLocation: `${origin}/api/auth/capability/execute`,
+      hostId,
+      hostName: "Host",
+      keyAlgorithm: "Ed25519" as const,
+      publicKey: hostIdentity.publicKey,
+      privateKey: hostIdentity.privateKey,
+      enrolledAt: "2026-08-31T00:00:00.000Z",
+    };
+
+    for (const capabilityRequests of [
+      [],
+      [
+        { capability: "document.read", constraints: { documentId } },
+        { capability: "document.read", constraints: { documentId } },
+      ],
+    ]) {
+      await expect(
+        registerDelegatedAgentWithCapabilities({
+          hostConfig,
+          agentName: "Invalid Agent",
+          capabilityRequests,
+          reason: "invalid",
+          bindingMessage: "invalid",
+          fetch: fetchMock as typeof fetch,
+        }),
+      ).rejects.toMatchObject({ code: "DELEGATED_AGENT_CAPABILITIES_INVALID" });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

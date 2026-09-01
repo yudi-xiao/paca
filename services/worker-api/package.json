@@ -26,6 +26,7 @@
     "smoke:realtime:internal": "bun run scripts/smoke-realtime-internal.ts",
     "smoke:attachment:internal": "bun run scripts/smoke-attachment-internal.ts",
     "smoke:agent-audit:internal": "bun run scripts/smoke-agent-audit-internal.ts",
+    "smoke:document:internal": "bun run scripts/smoke-document-internal.ts",
     "smoke:task:database": "bun run scripts/smoke-task-database.ts",
     "agent-host:enroll": "bun run scripts/enroll-agent-host.ts",
     "agent:register:demo": "bun run scripts/register-demo-agent.ts",
