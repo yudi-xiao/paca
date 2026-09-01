@@ -15,7 +15,7 @@
 
 更新时间：2026-09-01
 
-当前里程碑：**M8 Yjs 文档纵向切片已部署到 internal Worker `1e7d9965-6a35-4701-a656-f0e96306e970`：PlanetScale `paca/internal` 已应用并核验 0016/0017，现有最小权限 runtime role 已扩为 39 张业务表 CRUD；Cloudflare 已创建并绑定隔离的 Document Materialization Queue、DLQ 和 APAC/Standard R2 快照 bucket。真实 `smoke:document:internal` 以临时 Project/Document/Agent 完成 Session 登录、Better Auth Agent Auth 注册审批、read、suggest、collaborate、用户 WebSocket 断线重连、exclusive acquire/renew/release/超时接管、独占期用户写入阻断、Grant 撤销释放、用户写入恢复和 PostgreSQL 物化追平；最终 Yjs revision 4 的 309 字节 R2 快照可按精确 key 远端读取，SHA-256 与 PostgreSQL 元数据一致，临时 Agent/Grant/Session 已撤销且项目已归档。受控远端故障注入又验证了重复/乱序 revision 4/3/4 的幂等处理、未就绪 revision 5 的 6 次重试和 DLQ 接收；PostgreSQL 与 R2 均保持 revision 4 不变，临时 Worker 删除后正式队列恢复为唯一 internal Worker 的 1 个 producer/consumer，DLQ 为 0/0。真实 BlockNote 浏览器编辑仍因浏览器控制层加载超时未取得可靠证据。**
+当前里程碑：**M9 Agent 编排已开始，internal Worker `179810a9-12b0-48d2-8287-26af41c6a4d1` 新增 `AgentCoordinator` SQLite Durable Object，并以 `v3-agent-coordinator` migration 部署。每个稳定 Agent ID 对应一个协调对象；对象只保存有界的 run scope、状态、版本、幂等键和不含正文/凭据的错误码，不运行推理、工具调用或长时间文档修改。状态机支持 queued/running/waiting/cancelling 与终态，创建和 transition idempotency 在 DO eviction 后仍可恢复，终态不可重新打开。完整 Worker/Web 质量门通过，公开 health 保持 internal/200；回滚代码基线为 `1e7d9965-6a35-4701-a656-f0e96306e970`。M8 的 Queue/DLQ/R2/PostgreSQL 远端恢复验收已完成，真实 BlockNote 浏览器编辑仍因浏览器控制层加载超时未取得可靠证据。**
 
 已确认前置条件：
 
@@ -258,7 +258,9 @@
 
 ## M9：Agent 编排与执行环境
 
-- [ ] 明确 AgentDO 只保存会话状态，不在 DO 内执行长时间推理。
+当前 M9 基础版本为 internal Worker `179810a9-12b0-48d2-8287-26af41c6a4d1`（Git `8c10a637`）。`AgentCoordinator` 以稳定 Agent ID 寻址并持久化最小 run 状态；纯领域测试 2 项、Workers Runtime 3 项覆盖状态转换、重试键冲突、单 Agent 身份固定和 eviction 恢复。完整质量门为 Worker 45 个文件/245 项、Workers Runtime 3 个文件/17 项，并通过 Web internal build、Drizzle、TypeScript、Biome、Wrangler types/dry-run、真实部署和公开 health。当前没有公开 AgentCoordinator 路由；下一步由受 Better Auth Agent Auth 保护的 Hono endpoint 创建 Cloudflare Workflow，再由 Workflow RPC 更新该 DO。
+
+- [x] 明确 AgentDO 只保存会话状态，不在 DO 内执行长时间推理。已部署 `AgentCoordinator`，SQLite 仅保存 Agent 绑定、run scope、状态/版本、幂等 transition 和安全错误码；不保存正文、JWT、Grant 内容、推理上下文或执行结果，不暴露公开 fetch/WebSocket 路由。
 - [ ] 用 Workflows 编排可恢复的长任务、重试、超时、取消和补偿。
 - [ ] 评估并选择 Computer、Sandbox 或 Containers 作为各类任务的执行环境。
 - [ ] AgentDO/Workflow 调用 DocumentParty 前验证 Agent Auth Grant 和 constraints。

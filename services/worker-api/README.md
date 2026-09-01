@@ -290,6 +290,21 @@ consumer were then removed, and the production Queue bindings were rechecked. Re
 only with a newly created smoke Document and a transient, narrowly scoped producer/consumer; never
 inject synthetic revisions for a user-owned Document.
 
+## Agent run coordination
+
+`AgentCoordinator` is a server-only SQLite Durable Object addressed by the stable Better Auth Agent
+ID. It stores only bounded run scope, lifecycle status, monotonic version, idempotency keys and safe
+error codes. It deliberately does not run model inference, tools or long document operations, and it
+does not persist JWTs, Grant payloads, document content or execution output. Cloudflare Workflows
+will own durable execution; authenticated Hono routes and Workflow steps will call the coordinator
+by RPC as later M9 slices are enabled. The coordinator currently has no public HTTP or WebSocket
+route.
+
+Run creation and transitions are independently idempotent. A retry key cannot be reused with a
+different run scope, each coordinator permanently pins its first Better Auth Agent ID, and terminal
+runs cannot be reopened. Workers Runtime tests force Durable Object eviction to verify that these
+properties come from SQLite rather than process memory.
+
 ## Deployment and rollback
 
 ```bash
