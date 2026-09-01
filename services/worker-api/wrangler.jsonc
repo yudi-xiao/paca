@@ -36,6 +36,10 @@
     {
       "binding": "TASK_ATTACHMENTS",
       "bucket_name": "paca-attachments-development"
+    },
+    {
+      "binding": "DOCUMENT_SNAPSHOTS",
+      "bucket_name": "paca-document-snapshots-development"
     }
   ],
   "queues": {
@@ -43,6 +47,10 @@
       {
         "binding": "REALTIME_EVENTS",
         "queue": "paca-realtime-events-development"
+      },
+      {
+        "binding": "DOCUMENT_MATERIALIZATION",
+        "queue": "paca-document-materialization-development"
       }
     ],
     "consumers": [
@@ -53,6 +61,14 @@
         "max_retries": 5,
         "retry_delay": 5,
         "dead_letter_queue": "paca-realtime-events-development-dlq"
+      },
+      {
+        "queue": "paca-document-materialization-development",
+        "max_batch_size": 5,
+        "max_batch_timeout": 2,
+        "max_retries": 5,
+        "retry_delay": 5,
+        "dead_letter_queue": "paca-document-materialization-development-dlq"
       }
     ]
   },
@@ -111,6 +127,10 @@
         {
           "binding": "TASK_ATTACHMENTS",
           "bucket_name": "paca-attachments-internal"
+        },
+        {
+          "binding": "DOCUMENT_SNAPSHOTS",
+          "bucket_name": "paca-document-snapshots-internal"
         }
       ],
       "queues": {
@@ -118,6 +138,10 @@
           {
             "binding": "REALTIME_EVENTS",
             "queue": "paca-realtime-events-internal"
+          },
+          {
+            "binding": "DOCUMENT_MATERIALIZATION",
+            "queue": "paca-document-materialization-internal"
           }
         ],
         "consumers": [
@@ -128,6 +152,14 @@
             "max_retries": 5,
             "retry_delay": 5,
             "dead_letter_queue": "paca-realtime-events-internal-dlq"
+          },
+          {
+            "queue": "paca-document-materialization-internal",
+            "max_batch_size": 5,
+            "max_batch_timeout": 2,
+            "max_retries": 5,
+            "retry_delay": 5,
+            "dead_letter_queue": "paca-document-materialization-internal-dlq"
           }
         ]
       },

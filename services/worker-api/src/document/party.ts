@@ -26,6 +26,15 @@ export type DocumentPersistenceStats = {
   updateCount: number;
   updateBytes: number;
   checkpointBytes: number;
+  revision: number;
+  queuedRevision: number;
+  acknowledgedRevision: number;
+};
+
+export type DocumentMaterializationSnapshot = {
+  documentId: string;
+  revision: number;
+  snapshot: ArrayBuffer;
 };
 
 const AUTHORIZATION_CLOSE_CODE = 4003;
@@ -65,11 +74,13 @@ export class DocumentParty extends YServer {
   };
 
   private readonly durableState: DurableObjectState;
+  private readonly environment: Env;
   private loading = true;
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
     this.durableState = state;
+    this.environment = env;
     state.blockConcurrencyWhile(async () => {
       state.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS paca_document_sql_migration (
@@ -102,8 +113,27 @@ export class DocumentParty extends YServer {
           invalidated_at INTEGER NOT NULL,
           PRIMARY KEY (scope, subject)
         );
+        CREATE TABLE IF NOT EXISTS paca_document_materialization_state (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          revision INTEGER NOT NULL CHECK (revision >= 0),
+          queued_revision INTEGER NOT NULL CHECK (queued_revision >= 0),
+          acknowledged_revision INTEGER NOT NULL CHECK (acknowledged_revision >= 0),
+          updated_at INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO paca_document_materialization_state
+          (singleton, revision, queued_revision, acknowledged_revision, updated_at)
+        SELECT 1,
+          CASE WHEN
+            EXISTS (SELECT 1 FROM paca_document_yjs_checkpoint WHERE singleton = 1) OR
+            EXISTS (SELECT 1 FROM paca_document_yjs_update LIMIT 1)
+          THEN 1 ELSE 0 END,
+          0,
+          0,
+          unixepoch('subsec') * 1000;
         INSERT OR IGNORE INTO paca_document_sql_migration (version, applied_at)
         VALUES (1, unixepoch('subsec') * 1000);
+        INSERT OR IGNORE INTO paca_document_sql_migration (version, applied_at)
+        VALUES (2, unixepoch('subsec') * 1000);
       `);
     });
   }
@@ -154,6 +184,11 @@ export class DocumentParty extends YServer {
     ) {
       await this.compact();
     }
+    await this.enqueueMaterialization();
+  }
+
+  override async onAlarm(): Promise<void> {
+    await this.enqueueMaterialization();
   }
 
   override getConnectionTags(_connection: Connection, context: ConnectionContext): string[] {
@@ -243,12 +278,43 @@ export class DocumentParty extends YServer {
       return { initialized: false, snapshot: cloneArrayBuffer(encodeStateAsUpdate(this.document)) };
     }
     applyUpdate(this.document, new Uint8Array(update), "bootstrap");
+    await this.enqueueMaterialization();
     return { initialized: true, snapshot: cloneArrayBuffer(encodeStateAsUpdate(this.document)) };
   }
 
   async snapshot(): Promise<ArrayBuffer> {
     await this.setName(this.name);
     return cloneArrayBuffer(encodeStateAsUpdate(this.document));
+  }
+
+  async materializationSnapshot(minimumRevision: number): Promise<DocumentMaterializationSnapshot> {
+    await this.setName(this.name);
+    if (!Number.isSafeInteger(minimumRevision) || minimumRevision <= 0) {
+      throw new Error("DOCUMENT_MATERIALIZATION_REVISION_INVALID");
+    }
+    const state = this.materializationState();
+    if (state.revision < minimumRevision) {
+      throw new Error("DOCUMENT_MATERIALIZATION_REVISION_NOT_READY");
+    }
+    return {
+      documentId: this.name,
+      revision: state.revision,
+      snapshot: cloneArrayBuffer(encodeStateAsUpdate(this.document)),
+    };
+  }
+
+  async acknowledgeMaterialization(revision: number): Promise<void> {
+    if (!Number.isSafeInteger(revision) || revision <= 0) {
+      throw new Error("DOCUMENT_MATERIALIZATION_REVISION_INVALID");
+    }
+    this.durableState.storage.sql.exec(
+      `UPDATE paca_document_materialization_state
+          SET acknowledged_revision = max(acknowledged_revision, min(revision, ?)),
+              updated_at = ?
+        WHERE singleton = 1`,
+      revision,
+      Date.now(),
+    );
   }
 
   async compact(): Promise<DocumentPersistenceStats> {
@@ -287,12 +353,14 @@ export class DocumentParty extends YServer {
     const updateCount = updates?.updateCount ?? 0;
     const updateBytes = updates?.updateBytes ?? 0;
     const checkpointBytes = checkpoint?.checkpointBytes ?? 0;
+    const materialization = this.materializationState();
     return {
       documentId: this.name,
       initialized: updateCount > 0 || checkpointBytes > 0,
       updateCount,
       updateBytes,
       checkpointBytes,
+      ...materialization,
     };
   }
 
@@ -356,16 +424,82 @@ export class DocumentParty extends YServer {
       throw new Error("DOCUMENT_UPDATE_TOO_LARGE");
     }
     const actor = actorFromOrigin(origin);
-    this.durableState.storage.sql.exec(
-      `INSERT INTO paca_document_yjs_update
-         (update_blob, byte_size, actor_type, actor_id, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      cloneArrayBuffer(update),
-      update.byteLength,
-      actor.actorType,
-      actor.actorId,
-      Date.now(),
-    );
+    const now = Date.now();
+    this.durableState.storage.transactionSync(() => {
+      this.durableState.storage.sql.exec(
+        `INSERT INTO paca_document_yjs_update
+           (update_blob, byte_size, actor_type, actor_id, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        cloneArrayBuffer(update),
+        update.byteLength,
+        actor.actorType,
+        actor.actorId,
+        now,
+      );
+      this.durableState.storage.sql.exec(
+        `UPDATE paca_document_materialization_state
+            SET revision = revision + 1, updated_at = ?
+          WHERE singleton = 1`,
+        now,
+      );
+    });
+  }
+
+  private materializationState(): {
+    revision: number;
+    queuedRevision: number;
+    acknowledgedRevision: number;
+  } {
+    const [row] = this.durableState.storage.sql
+      .exec<{ revision: number; queuedRevision: number; acknowledgedRevision: number }>(
+        `SELECT revision,
+                queued_revision AS queuedRevision,
+                acknowledged_revision AS acknowledgedRevision
+           FROM paca_document_materialization_state
+          WHERE singleton = 1`,
+      )
+      .toArray();
+    if (!row) throw new Error("DOCUMENT_MATERIALIZATION_STATE_MISSING");
+    return row;
+  }
+
+  private async enqueueMaterialization(): Promise<void> {
+    await this.setName(this.name);
+    const state = this.materializationState();
+    if (
+      state.revision <= 0 ||
+      state.revision <= state.acknowledgedRevision ||
+      state.revision <= state.queuedRevision
+    ) {
+      return;
+    }
+    try {
+      await this.environment.DOCUMENT_MATERIALIZATION.send({
+        kind: "document.materialize",
+        version: 1,
+        documentId: this.name,
+        revision: state.revision,
+        createdAt: new Date().toISOString(),
+      });
+      this.durableState.storage.sql.exec(
+        `UPDATE paca_document_materialization_state
+            SET queued_revision = max(queued_revision, ?), updated_at = ?
+          WHERE singleton = 1`,
+        state.revision,
+        Date.now(),
+      );
+      await this.durableState.storage.deleteAlarm();
+    } catch (error) {
+      await this.durableState.storage.setAlarm(Date.now() + 30_000);
+      console.error(
+        JSON.stringify({
+          event: "document.materialization.enqueue_failed",
+          documentId: this.name,
+          revision: state.revision,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        }),
+      );
+    }
   }
 
   private closeConnections(predicate: (state: DocumentConnectionState) => boolean): number {

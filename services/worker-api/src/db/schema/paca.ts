@@ -748,6 +748,11 @@ export const pacaDocuments = pgTable(
     title: text("title").default("Untitled").notNull(),
     content: jsonb("content").$type<unknown[] | null>(),
     contentVersion: bigint("content_version", { mode: "number" }).default(0).notNull(),
+    yjsRevision: bigint("yjs_revision", { mode: "number" }).default(0).notNull(),
+    yjsSnapshotKey: text("yjs_snapshot_key"),
+    yjsSnapshotSha256: text("yjs_snapshot_sha256"),
+    yjsSnapshotBytes: bigint("yjs_snapshot_bytes", { mode: "number" }),
+    yjsSnapshotAt: timestamp("yjs_snapshot_at", { withTimezone: true }),
     position: integer("position").default(0).notNull(),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
@@ -761,6 +766,11 @@ export const pacaDocuments = pgTable(
       .on(table.deletedAt)
       .where(sql`${table.deletedAt} is not null`),
     check("paca_document_content_version_check", sql`${table.contentVersion} >= 0`),
+    check("paca_document_yjs_revision_check", sql`${table.yjsRevision} >= 0`),
+    check(
+      "paca_document_yjs_snapshot_bytes_check",
+      sql`${table.yjsSnapshotBytes} is null or ${table.yjsSnapshotBytes} >= 0`,
+    ),
   ],
 );
 

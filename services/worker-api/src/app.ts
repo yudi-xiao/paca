@@ -313,9 +313,13 @@ const documentCreateBodySchema = z
   })
   .strict();
 
-const documentUpdateBodySchema = documentCreateBodySchema.refine(
-  (body) => Object.keys(body).length > 0,
-);
+const documentUpdateBodySchema = z
+  .object({
+    title: z.string().optional(),
+    position: z.number().int().optional(),
+  })
+  .strict()
+  .refine((body) => Object.keys(body).length > 0);
 
 const documentBootstrapBodySchema = z
   .object({

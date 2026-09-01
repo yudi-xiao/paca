@@ -9,6 +9,10 @@
       {
         "binding": "REALTIME_EVENTS",
         "queue": "paca-realtime-events-test"
+      },
+      {
+        "binding": "DOCUMENT_MATERIALIZATION",
+        "queue": "paca-document-materialization-test"
       }
     ],
     "consumers": [
@@ -16,9 +20,20 @@
         "queue": "paca-realtime-events-test",
         "max_batch_size": 10,
         "max_batch_timeout": 1
+      },
+      {
+        "queue": "paca-document-materialization-test",
+        "max_batch_size": 5,
+        "max_batch_timeout": 2
       }
     ]
   },
+  "r2_buckets": [
+    {
+      "binding": "DOCUMENT_SNAPSHOTS",
+      "bucket_name": "paca-document-snapshots-test"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {

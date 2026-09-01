@@ -74,7 +74,7 @@ describe("document service", () => {
     );
   });
 
-  it("keeps explicit null content and skips empty updates", async () => {
+  it("normalizes metadata and skips empty updates", async () => {
     const update = vi.fn(
       async (
         _projectId: string,
@@ -86,8 +86,8 @@ describe("document service", () => {
     const findById = vi.fn(async () => document);
     const service = new DocumentService(repository({ update, findById }));
 
-    await service.update(projectId, documentId, "user-1", { content: null });
-    expect(update).toHaveBeenCalledWith(projectId, documentId, "user-1", { content: null });
+    await service.update(projectId, documentId, "user-1", { title: "  Updated  " });
+    expect(update).toHaveBeenCalledWith(projectId, documentId, "user-1", { title: "Updated" });
 
     await service.update(projectId, documentId, "user-1", {});
     expect(findById).toHaveBeenCalledWith(projectId, documentId);

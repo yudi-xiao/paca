@@ -33,6 +33,8 @@ const attachmentRunGuardSnapshotURL = new URL(
 );
 const documentMigrationURL = new URL("../drizzle/0016_busy_changeling.sql", import.meta.url);
 const documentSnapshotURL = new URL("../drizzle/meta/0016_snapshot.json", import.meta.url);
+const documentSnapshotMigrationURL = new URL("../drizzle/0017_last_toro.sql", import.meta.url);
+const documentSnapshotSnapshotURL = new URL("../drizzle/meta/0017_snapshot.json", import.meta.url);
 
 const applicationTables = [
   "user",
@@ -233,6 +235,21 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain('CREATE TABLE "paca_document"');
     expect(migration).toContain("CREATE TRIGGER paca_document_realtime_outbox");
     expect(migration).toContain("'document_id', row_value.id::text");
+  });
+
+  it("adds versioned Yjs snapshot metadata transactionally", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(documentSnapshotMigrationURL, "utf8"),
+      readFile(documentSnapshotSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0017_last_toro', '${checksum}')`);
+    expect(migration).toContain('ADD COLUMN "yjs_revision" bigint DEFAULT 0 NOT NULL');
+    expect(migration).toContain('ADD COLUMN "yjs_snapshot_key" text');
+    expect(migration).toContain('CONSTRAINT "paca_document_yjs_revision_check"');
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

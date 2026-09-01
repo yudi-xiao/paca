@@ -1,21 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { AlertCircle, Check, ChevronRight, MessageSquare } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CollaborativeDocEditor } from "@/components/projects/docs/collaborative-doc-editor";
 import { DocActivityPane } from "@/components/projects/docs/doc-activity-pane";
-import type { DocEditorHandle } from "@/components/projects/docs/doc-editor";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { currentUserQueryOptions } from "@/lib/auth-api";
-import {
-	docFoldersQueryOptions,
-	docQueryKeys,
-	docQueryOptions,
-	updateDocument,
-} from "@/lib/doc-api";
+import { docFoldersQueryOptions, docQueryOptions } from "@/lib/doc-api";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute(
@@ -50,7 +44,6 @@ function DocEditorPage() {
 	const { hasProjectPermission } = useProjectPermissions(projectId);
 	const canWrite = hasProjectPermission("docs.write");
 	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
-	const qc = useQueryClient();
 
 	const { data: currentUser } = useQuery(currentUserQueryOptions);
 	const { data: doc, isError } = useQuery(docQueryOptions(projectId, docId));
@@ -60,45 +53,9 @@ function DocEditorPage() {
 	});
 
 	const [rightPanel, setRightPanel] = useState<RightPanel>(null);
-	const [dirty, setDirty] = useState(false);
-	const editorRef = useRef<DocEditorHandle>(null);
-
-	const updateMutation = useMutation({
-		mutationFn: (payload: { content?: unknown[] | null }) =>
-			updateDocument(projectId, docId, payload),
-		onSuccess: (updated) => {
-			qc.setQueryData(docQueryKeys.detail(projectId, docId), updated);
-			qc.invalidateQueries({ queryKey: docQueryKeys.list(projectId) });
-			if (updated.folder_id) {
-				qc.invalidateQueries({
-					queryKey: docQueryKeys.list(projectId, updated.folder_id),
-				});
-			}
-		},
-	});
-
-	useEffect(() => {
-		const handler = (e: KeyboardEvent) => {
-			if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-				e.preventDefault();
-				editorRef.current?.save();
-			}
-		};
-		window.addEventListener("keydown", handler);
-		return () => window.removeEventListener("keydown", handler);
-	}, []);
-
-	const handleContentSave = useCallback(
-		(blocks: unknown[] | null) => {
-			setDirty(false);
-			updateMutation.mutate({ content: blocks });
-		},
-		[updateMutation],
-	);
-
-	const handleEditorDirtyChange = useCallback((isDirty: boolean) => {
-		setDirty(isDirty);
-	}, []);
+	const [collaborationStatus, setCollaborationStatus] = useState<
+		"connected" | "connecting" | "disconnected"
+	>("connecting");
 
 	const togglePanel = (panel: RightPanel) => {
 		setRightPanel((prev) => (prev === panel ? null : panel));
@@ -161,20 +118,20 @@ function DocEditorPage() {
 
 				{/* Right: save status + panel toggle */}
 				<div className="flex items-center gap-2 shrink-0">
-					{dirty && !updateMutation.isPending && (
+					{collaborationStatus === "connecting" && (
 						<span className="text-xs text-muted-foreground/50">
-							{t("docs.editorPage.unsaved")}
+							正在连接实时协作…
 						</span>
 					)}
-					{updateMutation.isPending && (
-						<span className="text-xs text-muted-foreground/60">
-							{t("docs.editorPage.saving")}
+					{collaborationStatus === "disconnected" && (
+						<span className="text-xs text-amber-600 dark:text-amber-400">
+							实时协作已断开，正在重连
 						</span>
 					)}
-					{!dirty && updateMutation.isSuccess && !updateMutation.isPending && (
+					{collaborationStatus === "connected" && (
 						<span className="text-xs text-muted-foreground/60 flex items-center gap-1">
 							<Check className="size-3 text-emerald-500" />
-							{t("docs.editorPage.saved")}
+							实时同步
 						</span>
 					)}
 
@@ -203,7 +160,6 @@ function DocEditorPage() {
 						{doc && (
 							<CollaborativeDocEditor
 								key={docId}
-								ref={editorRef}
 								content={doc.content}
 								user={{
 									name:
@@ -213,8 +169,7 @@ function DocEditorPage() {
 									color: collaborationColor(currentUser?.id ?? "anonymous"),
 								}}
 								editable={canWrite}
-								onSave={handleContentSave}
-								onDirtyChange={handleEditorDirtyChange}
+								onConnectionStatusChange={setCollaborationStatus}
 								projectId={projectId}
 								docId={docId}
 							/>

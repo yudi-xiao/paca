@@ -101,6 +101,13 @@ describe("DocumentParty Durable Object runtime", () => {
 
     socket.send(framedUpdate(encodeStateAsUpdate(source)));
     await waitForUpdates(stub, 1);
+    expect(await stub.persistenceStats()).toMatchObject({ revision: 1 });
+    await expect(stub.materializationSnapshot(1)).resolves.toMatchObject({
+      documentId: DOCUMENT_ID,
+      revision: 1,
+    });
+    await stub.acknowledgeMaterialization(1);
+    expect(await stub.persistenceStats()).toMatchObject({ acknowledgedRevision: 1 });
     await evictDurableObject(stub, { webSockets: "hibernate" });
 
     const restored = new YDoc();
@@ -160,6 +167,7 @@ describe("DocumentParty Durable Object runtime", () => {
     ).resolves.toMatchObject({
       initialized: true,
     });
+    expect(await stub.persistenceStats()).toMatchObject({ revision: 1 });
     await expect(
       stub.initializeIfEmpty(arrayBuffer(encodeStateAsUpdate(second))),
     ).resolves.toMatchObject({

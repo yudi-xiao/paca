@@ -7,7 +7,6 @@ import { SideMenuController, useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
 import {
 	forwardRef,
-	useCallback,
 	useEffect,
 	useImperativeHandle,
 	useMemo,
@@ -21,14 +20,12 @@ import { CustomSideMenu } from "@/components/shared/blocknote-custom-side-menu";
 import { customSchema } from "@/components/shared/blocknote-schema";
 import { normalizeBlockContent } from "@/components/shared/comment-blocknote";
 import { MentionSuggestionMenus } from "@/components/shared/mention-suggestion-menus";
-import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import { useThemeMode } from "@/hooks/use-theme-mode";
 import {
 	bootstrapDocumentCollaboration,
 	getDocumentCollaborationStatus,
 } from "@/lib/doc-api";
 import { useMentionData } from "@/lib/mention-api";
-import { cleanBlocks } from "@/lib/utils";
 
 import { DocEditor, type DocEditorHandle } from "./doc-editor";
 
@@ -42,8 +39,9 @@ interface CollaborativeDocEditorProps {
 	content?: unknown[] | null;
 	user: { name: string; color: string };
 	editable?: boolean;
-	onDirtyChange?: (dirty: boolean) => void;
-	onSave?: (blocks: unknown[] | null) => void;
+	onConnectionStatusChange?: (
+		status: "connected" | "connecting" | "disconnected",
+	) => void;
 	projectId: string;
 	docId: string;
 }
@@ -62,15 +60,11 @@ const CollaborativeEditorSession = forwardRef<
 	DocEditorHandle,
 	CollaborativeDocEditorProps & { ydoc: YDoc }
 >(function CollaborativeEditorSession(
-	{ ydoc, user, content, editable, onDirtyChange, onSave, projectId, docId },
+	{ ydoc, user, editable, onConnectionStatusChange, projectId, docId },
 	ref,
 ) {
 	const { resolvedMode } = useThemeMode();
 	const { teamMembers, documents } = useMentionData(projectId);
-	const dirtyRef = useRef(false);
-	const lastMaterializedRef = useRef(
-		JSON.stringify(cleanBlocks(normalizeBlockContent(content ?? null))),
-	);
 	const provider = useMemo(
 		() =>
 			new YProvider(window.location.host, docId, ydoc, {
@@ -81,7 +75,19 @@ const CollaborativeEditorSession = forwardRef<
 		[docId, ydoc],
 	);
 
-	useEffect(() => () => provider.destroy(), [provider]);
+	useEffect(() => {
+		const handleStatus = (event: {
+			status: "connected" | "connecting" | "disconnected";
+		}) => onConnectionStatusChange?.(event.status);
+		provider.on("status", handleStatus);
+		onConnectionStatusChange?.(
+			provider.wsconnected ? "connected" : "connecting",
+		);
+		return () => {
+			provider.off("status", handleStatus);
+			provider.destroy();
+		};
+	}, [onConnectionStatusChange, provider]);
 
 	const editor = useCreateBlockNote({
 		schema: customSchema,
@@ -92,56 +98,17 @@ const CollaborativeEditorSession = forwardRef<
 		},
 	});
 
-	const save = useCallback(() => {
-		if (!editable || !dirtyRef.current) return;
-		const blocks = editor.document;
-		const isEmpty =
-			blocks.length === 1 &&
-			blocks[0].type === "paragraph" &&
-			Array.isArray(blocks[0].content) &&
-			blocks[0].content.length === 0;
-		const cleaned = cleanBlocks(isEmpty ? null : (blocks as unknown[]));
-		const serialized = JSON.stringify(cleaned);
-		dirtyRef.current = false;
-		onDirtyChange?.(false);
-		if (serialized === lastMaterializedRef.current) return;
-		lastMaterializedRef.current = serialized;
-		onSave?.(cleaned);
-	}, [editable, editor, onDirtyChange, onSave]);
-
-	useImperativeHandle(ref, () => ({ save }), [save]);
-	const debouncedSave = useDebouncedCallback(save, 3_000);
-
-	const handleChange = useCallback(() => {
-		if (!editable) return;
-		dirtyRef.current = true;
-		onDirtyChange?.(true);
-		debouncedSave();
-	}, [debouncedSave, editable, onDirtyChange]);
-
-	const handleKeyDown = useCallback(
-		(event: React.KeyboardEvent<HTMLDivElement>) => {
-			if ((event.ctrlKey || event.metaKey) && event.key === "s") {
-				event.preventDefault();
-				save();
-			}
-		},
-		[save],
-	);
+	useImperativeHandle(ref, () => ({ save: () => undefined }), []);
 
 	return (
-		// biome-ignore lint/a11y/noStaticElementInteractions: wrapper captures editor shortcuts
 		<div
 			data-testid="collaborative-blocknote-editor"
 			className="rounded-xl border border-border/25 bg-card/50 hover:border-border/50 transition-all duration-200 overflow-hidden [&_.bn-editor]:min-h-80 [&_.bn-editor]:py-4 [&_.bn-editor]:px-6 [&_.bn-editor]:text-sm [&_.bn-editor]:leading-relaxed"
-			onBlur={save}
-			onKeyDown={handleKeyDown}
 		>
 			<BlockNoteView
 				editor={editor}
 				editable={editable}
 				theme={resolvedMode}
-				onChange={handleChange}
 				sideMenu={false}
 			>
 				<SideMenuController sideMenu={CustomSideMenu} />
@@ -162,7 +129,14 @@ export const CollaborativeDocEditor = forwardRef<
 	DocEditorHandle,
 	CollaborativeDocEditorProps
 >(function CollaborativeDocEditor(
-	{ content, user, editable = true, onDirtyChange, onSave, projectId, docId },
+	{
+		content,
+		user,
+		editable = true,
+		onConnectionStatusChange,
+		projectId,
+		docId,
+	},
 	ref,
 ) {
 	const initialContentRef = useRef(content);
@@ -208,8 +182,10 @@ export const CollaborativeDocEditor = forwardRef<
 				}
 				setPrepared({ mode: "collaboration", ydoc: ownedDocument });
 			} catch {
-				if (!cancelled)
+				if (!cancelled) {
+					onConnectionStatusChange?.("disconnected");
 					setPrepared({ mode: "read-only-fallback", reason: "error" });
+				}
 			}
 		})();
 
@@ -217,7 +193,7 @@ export const CollaborativeDocEditor = forwardRef<
 			cancelled = true;
 			ownedDocument?.destroy();
 		};
-	}, [docId, editable, projectId]);
+	}, [docId, editable, onConnectionStatusChange, projectId]);
 
 	if (!prepared) {
 		return (
@@ -254,11 +230,9 @@ export const CollaborativeDocEditor = forwardRef<
 		<CollaborativeEditorSession
 			ref={ref}
 			ydoc={prepared.ydoc}
-			content={content}
 			user={user}
 			editable={editable}
-			onDirtyChange={onDirtyChange}
-			onSave={onSave}
+			onConnectionStatusChange={onConnectionStatusChange}
 			projectId={projectId}
 			docId={docId}
 		/>

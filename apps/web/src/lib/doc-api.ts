@@ -279,7 +279,6 @@ export async function updateDocument(
 	docId: string,
 	payload: {
 		title?: string;
-		content?: unknown[] | null;
 		folder_id?: string | null;
 		position?: number;
 	},

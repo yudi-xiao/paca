@@ -1,5 +1,6 @@
 import { createApp } from "./app";
 import { ATTACHMENT_CLEANUP_CRON, runScheduledAttachmentCleanup } from "./attachment/scheduled";
+import { consumeDocumentMaterializationQueue } from "./document/materialization";
 import { consumeRealtimeQueue } from "./realtime/consumer";
 import { dispatchRealtimeOutbox } from "./realtime/outbox";
 import { routeRealtimeRequest } from "./realtime/router";
@@ -45,6 +46,10 @@ export default {
     console.warn(JSON.stringify({ event: "scheduled.unknown_cron", cron: controller.cron }));
   },
   async queue(batch, env) {
+    if (batch.queue.startsWith("paca-document-materialization-")) {
+      await consumeDocumentMaterializationQueue(batch, env);
+      return;
+    }
     await consumeRealtimeQueue(batch, env);
   },
 } satisfies ExportedHandler<Env>;

@@ -15,7 +15,7 @@
 
 更新时间：2026-09-01
 
-当前里程碑：**M8 Yjs 文档纵向切片已形成未部署候选：锁定 `y-partyserver@2.2.0`/`yjs@13.6.30`，一篇文档一个稳定 `documentId` 房间，启用 WebSocket Hibernation，DO SQLite 同步持久化增量并支持 checkpoint、压缩和驱逐恢复。Worker 已增加受 `docs.read/docs.write` 保护的 PostgreSQL 文档 CRUD、协作状态和原子 bootstrap；React/BlockNote 已接入同源 `y-partyserver/provider`，旧 JSON 首次打开时只允许写用户原子初始化，初始化竞态以 DO 首个写入为准，实时失败时降级为只读以避免双写分叉。Agent 的原始 Yjs 连接仍只允许精确 `document.read` Grant，编辑继续走后续结构化操作。PostgreSQL 0016 文档业务投影、实时 outbox 触发器和第 39 张 runtime 表权限已生成但尚未应用或部署；长期物化/R2 快照和 Agent 三种编辑模式仍待完成。**
+当前里程碑：**M8 Yjs 文档纵向切片已形成第二版未部署候选：锁定 `y-partyserver@2.2.0`/`yjs@13.6.30`，一篇文档一个稳定 `documentId` 房间，启用 WebSocket Hibernation，DO SQLite 同步持久化增量并支持 checkpoint、压缩和驱逐恢复。每次持久化更新同步递增修订号，独立 Document Materialization Queue 从 DO 获取不低于请求修订的权威快照，以不可变修订 key 条件写入隔离 R2 bucket，再由轻量服务端解析器物化 BlockNote JSON；PostgreSQL 只接受更高 Yjs 修订，重复/乱序消息不会覆盖新投影，Queue 发送失败由 DO Alarm 补投，消费失败按队列重试/DLQ 边界处理。React 不再直接 PATCH 文档内容，只显示真实协作连接状态；旧 JSON 仍仅在首次打开时原子 bootstrap，失败时降级为只读。Agent 的原始 Yjs 连接仍只允许精确 `document.read` Grant，编辑继续走后续结构化操作。PostgreSQL 0016/0017、Document Queue/R2 资源和 internal 部署尚未执行，Agent 三种编辑模式仍待完成。**
 
 已确认前置条件：
 
@@ -243,13 +243,13 @@
 
 ## M8：Yjs DocumentParty
 
-本地候选验收：React 59 个测试文件/626 项、Worker 41 个测试文件/216 项、Workers Runtime 2 个测试文件/9 项全部通过；internal production build、Drizzle check、Wrangler types 和 deploy dry-run 均通过。0016 尚未应用且 internal 尚未部署，因此下列纵向切片任务继续保持未勾选。
+本地候选验收：React 59 个测试文件/626 项、Worker 43 个测试文件/228 项、Workers Runtime 2 个测试文件/9 项全部通过；internal production build、Drizzle check、Wrangler types 和 deploy dry-run 均通过。第二版候选新增按文档修订的 Queue/R2 幂等物化、PostgreSQL 新旧修订保护、DO Alarm 发送失败补投、服务端 BlockNote 投影解析和前端单写路径；0016/0017 尚未应用，Document Queue/R2 尚未创建且 internal 尚未部署，因此下列纵向切片任务继续保持未勾选。
 
 - [x] 盘点 `services/api/internal/repository/postgres/document_repository.go` 的文档结构和快照语义；旧实现保存当前 BlockNote JSONB 和整份 JSON snapshot，不保存 Yjs state vector/update，因此不能直接作为协作恢复源。
 - [ ] 为 BlockNote 接入 Yjs 和 `y-partyserver/provider`。
 - [x] 实现一篇文档一个 DocumentParty/YServer，使用稳定 `documentId` 寻址；Wrangler 已声明独立 DO binding 和 `v2-document-party` SQLite class migration。
 - [x] 实现 `onLoad`、`onSave`、增量 update、checkpoint、恢复与压缩清理；更新先同步写入 DO SQLite 再广播，阈值 checkpoint 清理已覆盖真实 Workers Runtime 驱逐恢复测试。
-- [ ] DO SQLite 保存实时增量；R2/业务数据库保存长期快照和可查询业务视图。
+- [ ] DO SQLite 保存实时增量；R2/业务数据库保存长期快照和可查询业务视图。代码候选已完成独立 Queue、不可变 R2 修订对象、SHA-256/大小元数据、服务端 BlockNote JSON 物化、PostgreSQL 只增修订更新、孤儿清理和 Queue 发送失败 Alarm 补投；待创建隔离 Queue/R2、应用 0016/0017 并完成真实远端重试/乱序/死信恢复验收后勾选。
 - [ ] 用户连接检查 `docs.read`/`docs.write`；Agent 连接检查 `document.read`/`document.edit` Grant 与 constraints。
 - [ ] Agent 只提交细粒度、带 base state vector/版本的操作，不提交无条件整篇覆盖。
 - [ ] 实现建议、协作和独占三种 Agent 编辑模式。
@@ -317,8 +317,8 @@
 - `services/api/internal/platform/authz/permissions.go`：现有稳定权限词汇迁移基线。
 - `services/api/internal/platform/authz/authorizer.go`：旧权限聚合与 wildcard 行为，供 shadow comparison 使用，切换后删除。
 - `services/api/internal/repository/postgres/document_repository.go`：现有文档 JSON 与快照语义基线。
-- `services/worker-api/src/document`：DocumentParty/YServer、DO SQLite 增量/checkpoint、原子 bootstrap、短期连接上下文、PostgreSQL 文档 CRUD/作用域查询与用户/Agent 实时鉴权。
-- `services/worker-api/drizzle/0016_busy_changeling.sql`：待应用的 PostgreSQL 文档业务投影、项目实时 outbox 触发器与版本化 checksum。
+- `services/worker-api/src/document`：DocumentParty/YServer、DO SQLite 增量/checkpoint、原子 bootstrap、修订/Queue/Alarm、R2 快照与 BlockNote 业务投影物化、短期连接上下文、PostgreSQL 文档 CRUD/作用域查询与用户/Agent 实时鉴权。
+- `services/worker-api/drizzle/0016_busy_changeling.sql` 与 `0017_last_toro.sql`：待应用的 PostgreSQL 文档业务投影、项目实时 outbox 触发器、Yjs 修订/R2 快照元数据与版本化 checksum。
 - `services/realtime/src/server.ts`：现有 Socket.IO 鉴权、Project/User room 行为基线。
 - `services/realtime/src/subscriber.ts`：现有 Valkey Pub/Sub 事件路由基线。
 - `apps/web`：现有 React 与 TanStack Router/Query/Form 前端；文档编辑器已加入 BlockNote + `y-partyserver/provider` 的本地候选实现。

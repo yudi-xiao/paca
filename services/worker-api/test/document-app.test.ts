@@ -90,7 +90,7 @@ describe("document HTTP contract", () => {
     });
   });
 
-  it("creates and updates documents with the authenticated permission actor", async () => {
+  it("creates and updates document metadata with the authenticated permission actor", async () => {
     const create = vi.fn(documents().create);
     const update = vi.fn(documents().update);
     const app = createApp({
@@ -113,7 +113,7 @@ describe("document HTTP contract", () => {
       {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content: [{ type: "paragraph", content: [] }] }),
+        body: JSON.stringify({ title: "Updated architecture" }),
       },
       bindings(),
     );
@@ -125,8 +125,30 @@ describe("document HTTP contract", () => {
     });
     expect(updateResponse.status).toBe(200);
     expect(update).toHaveBeenCalledWith(expect.anything(), projectId, documentId, "user-1", {
-      content: [{ type: "paragraph", content: [] }],
+      title: "Updated architecture",
     });
+  });
+
+  it("rejects direct content projection writes after Yjs collaboration is enabled", async () => {
+    const update = vi.fn(documents().update);
+    const app = createApp({
+      authorizeProjectPermission: authorize(),
+      documents: documents({ update }),
+      log: vi.fn(),
+    });
+
+    const response = await app.request(
+      `/api/v1/projects/${projectId}/docs/${documentId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: [{ type: "paragraph", content: [] }] }),
+      },
+      bindings(),
+    );
+
+    expect(response.status).toBe(400);
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("reports collaboration persistence and bootstraps only validated binary updates", async () => {

@@ -38,7 +38,6 @@ export type DocumentCreateInput = {
 
 export type DocumentUpdateInput = {
   title?: string;
-  content?: unknown;
   position?: number;
 };
 
@@ -53,7 +52,6 @@ export type PersistedDocumentCreate = {
 
 export type PersistedDocumentUpdate = {
   title?: string;
-  content?: unknown[] | null;
   position?: number;
 };
 
@@ -133,7 +131,6 @@ export class DocumentService {
   ): Promise<PacaDocument> {
     const normalized: PersistedDocumentUpdate = {};
     if (input.title !== undefined) normalized.title = normalizeTitle(input.title);
-    if (input.content !== undefined) normalized.content = normalizeContent(input.content);
     if (input.position !== undefined) normalized.position = normalizePosition(input.position);
     if (Object.keys(normalized).length === 0) {
       return this.repository.findById(projectId, documentId);

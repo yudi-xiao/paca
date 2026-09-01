@@ -106,13 +106,6 @@ export function DocActivityPane({
 					case "title":
 						if (typeof ch.old === "string") payload.title = ch.old;
 						break;
-					case "content":
-						if (ch.old !== undefined) {
-							payload.content = Array.isArray(ch.old)
-								? (ch.old as unknown[])
-								: null;
-						}
-						break;
 				}
 			}
 
@@ -147,9 +140,7 @@ export function DocActivityPane({
 		const c = entry.content as Record<string, unknown> | null;
 		const changes = c?.changes as DocActivityChange[] | undefined;
 		if (!changes?.length) return false;
-		return changes.some(
-			(ch) => (ch.field === "title" || ch.field === "content") && "old" in ch,
-		);
+		return changes.some((ch) => ch.field === "title" && "old" in ch);
 	}, []);
 
 	return (

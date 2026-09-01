@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 
 import type { PacaDatabase } from "../database";
 import { pacaDocuments } from "../db/schema";
@@ -86,12 +86,6 @@ export class PostgresDocumentRepository implements DocumentRepository {
         updatedAt: new Date(),
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.position !== undefined ? { position: input.position } : {}),
-        ...(input.content !== undefined
-          ? {
-              content: input.content,
-              contentVersion: sql`${pacaDocuments.contentVersion} + 1`,
-            }
-          : {}),
       })
       .where(
         and(
