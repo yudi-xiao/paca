@@ -15,7 +15,7 @@
 
 更新时间：2026-09-01
 
-当前里程碑：**M7 PartyServer 可靠实时事件已闭环，下一阶段进入 M8 Yjs DocumentParty。PostgreSQL 0015 outbox 与 7 个事务触发器捕获 Task/Sprint/View 写入，request `waitUntil` 和每分钟 Cron 负责恢复性投递，Cloudflare Queue/DLQ 采用至少一次交付，ProjectParty/UserParty 用 DO SQLite outbox ID 幂等，浏览器以有界 ID 集合去重。真实已登录 WebSocket 已通过在线事件、12 秒空闲 pong、显式重连、同 ID stale recovery 重投抑制和滚动发布后重新鉴权/收取新事件；临时 Project、outbox 与遗留 Bun Session 已精确清零。**
+当前里程碑：**M8 Yjs DocumentParty 后端基础切片已在本地完成：锁定 `y-partyserver@2.2.0`/`yjs@13.6.30`，一篇文档一个稳定 `documentId` 房间，启用 WebSocket Hibernation，DO SQLite 同步持久化增量并支持 checkpoint、压缩和驱逐恢复。连接由 Worker 注入短期可信上下文；用户按 `docs.read/docs.write` 区分只读/可写，Agent 的原始 Yjs 连接只允许精确 `document.read` Grant，编辑继续走后续结构化操作。PostgreSQL 0016 文档业务投影、实时 outbox 触发器和第 39 张 runtime 表权限已生成但尚未应用或部署；BlockNote provider、长期物化和 Agent 三种编辑模式仍待完成。**
 
 已确认前置条件：
 
@@ -243,10 +243,10 @@
 
 ## M8：Yjs DocumentParty
 
-- [ ] 盘点 `services/api/internal/repository/postgres/document_repository.go` 的文档结构和快照语义。
+- [x] 盘点 `services/api/internal/repository/postgres/document_repository.go` 的文档结构和快照语义；旧实现保存当前 BlockNote JSONB 和整份 JSON snapshot，不保存 Yjs state vector/update，因此不能直接作为协作恢复源。
 - [ ] 为 BlockNote 接入 Yjs 和 `y-partyserver/provider`。
-- [ ] 实现一篇文档一个 DocumentParty/YServer，使用稳定 `documentId` 寻址。
-- [ ] 实现 `onLoad`、`onSave`、增量 update、checkpoint、恢复与压缩清理。
+- [x] 实现一篇文档一个 DocumentParty/YServer，使用稳定 `documentId` 寻址；Wrangler 已声明独立 DO binding 和 `v2-document-party` SQLite class migration。
+- [x] 实现 `onLoad`、`onSave`、增量 update、checkpoint、恢复与压缩清理；更新先同步写入 DO SQLite 再广播，阈值 checkpoint 清理已覆盖真实 Workers Runtime 驱逐恢复测试。
 - [ ] DO SQLite 保存实时增量；R2/业务数据库保存长期快照和可查询业务视图。
 - [ ] 用户连接检查 `docs.read`/`docs.write`；Agent 连接检查 `document.read`/`document.edit` Grant 与 constraints。
 - [ ] Agent 只提交细粒度、带 base state vector/版本的操作，不提交无条件整篇覆盖。
@@ -315,6 +315,8 @@
 - `services/api/internal/platform/authz/permissions.go`：现有稳定权限词汇迁移基线。
 - `services/api/internal/platform/authz/authorizer.go`：旧权限聚合与 wildcard 行为，供 shadow comparison 使用，切换后删除。
 - `services/api/internal/repository/postgres/document_repository.go`：现有文档 JSON 与快照语义基线。
+- `services/worker-api/src/document`：DocumentParty/YServer、DO SQLite 增量/checkpoint、短期连接上下文、PostgreSQL 文档作用域查询与用户/Agent 实时鉴权。
+- `services/worker-api/drizzle/0016_busy_changeling.sql`：待应用的 PostgreSQL 文档业务投影、项目实时 outbox 触发器与版本化 checksum。
 - `services/realtime/src/server.ts`：现有 Socket.IO 鉴权、Project/User room 行为基线。
 - `services/realtime/src/subscriber.ts`：现有 Valkey Pub/Sub 事件路由基线。
 - `apps/web`：现有 React 与 TanStack Router/Query/Form 前端。

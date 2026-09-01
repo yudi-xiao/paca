@@ -42,6 +42,8 @@
     "hono": "4.13.5",
     "partyserver": "0.5.10",
     "pg": "8.23.0",
+    "y-partyserver": "2.2.0",
+    "yjs": "13.6.30",
     "zod": "4.4.3"
   },
   "devDependencies": {

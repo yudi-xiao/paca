@@ -28,6 +28,10 @@
       {
         "name": "UserParty",
         "class_name": "UserParty"
+      },
+      {
+        "name": "DocumentParty",
+        "class_name": "DocumentParty"
       }
     ]
   },
@@ -35,6 +39,10 @@
     {
       "tag": "v1-realtime-parties",
       "new_sqlite_classes": ["ProjectParty", "UserParty"]
+    },
+    {
+      "tag": "v2-document-party",
+      "new_sqlite_classes": ["DocumentParty"]
     }
   ]
 }

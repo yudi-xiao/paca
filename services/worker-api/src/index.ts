@@ -4,6 +4,7 @@ import { consumeRealtimeQueue } from "./realtime/consumer";
 import { dispatchRealtimeOutbox } from "./realtime/outbox";
 import { routeRealtimeRequest } from "./realtime/router";
 
+export { DocumentParty } from "./document/party";
 export { ProjectParty, UserParty } from "./realtime/party";
 
 const app = createApp();

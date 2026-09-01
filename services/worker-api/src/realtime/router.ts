@@ -1,12 +1,16 @@
 import { routePartykitRequest } from "partyserver";
 
+import { authorizeDocumentConnection } from "../document/realtime-auth";
 import { authorizeRealtimeConnection } from "./auth";
 
 export async function routeRealtimeRequest(request: Request, env: Env): Promise<Response | null> {
   return routePartykitRequest(request, env, {
     prefix: "ws/parties",
     cors: false,
-    onBeforeConnect: (candidate, lobby) => authorizeRealtimeConnection(candidate, lobby, env),
+    onBeforeConnect: (candidate, lobby) =>
+      lobby.className === "DocumentParty"
+        ? authorizeDocumentConnection(candidate, lobby, env)
+        : authorizeRealtimeConnection(candidate, lobby, env),
     onBeforeRequest: () =>
       Response.json(
         { status: "error", code: "REALTIME_WEBSOCKET_REQUIRED" },

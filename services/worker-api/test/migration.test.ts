@@ -31,6 +31,8 @@ const attachmentRunGuardSnapshotURL = new URL(
   "../drizzle/meta/0014_snapshot.json",
   import.meta.url,
 );
+const documentMigrationURL = new URL("../drizzle/0016_busy_changeling.sql", import.meta.url);
+const documentSnapshotURL = new URL("../drizzle/meta/0016_snapshot.json", import.meta.url);
 
 const applicationTables = [
   "user",
@@ -62,6 +64,7 @@ const applicationTables = [
   "paca_task_assignee",
   "paca_task_activity",
   "paca_task_link",
+  "paca_document",
 ] as const;
 
 describe("reviewed permission migration", () => {
@@ -215,6 +218,21 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain(
       'WHERE "paca_attachment_migration_item"."status" <> \'rolled_back\'',
     );
+  });
+
+  it("adds the document projection and its project realtime outbox trigger transactionally", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(documentMigrationURL, "utf8"),
+      readFile(documentSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0016_busy_changeling', '${checksum}')`);
+    expect(migration).toContain('CREATE TABLE "paca_document"');
+    expect(migration).toContain("CREATE TRIGGER paca_document_realtime_outbox");
+    expect(migration).toContain("'document_id', row_value.id::text");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

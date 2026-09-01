@@ -60,6 +60,7 @@ const applicationTables = [
   "paca_task_link",
   "paca_file",
   "paca_task_attachment",
+  "paca_document",
   "paca_realtime_outbox",
 ] as const;
 
@@ -96,6 +97,7 @@ const targetInitiallyEmptyTables = [
   "paca_task_link",
   "paca_file",
   "paca_task_attachment",
+  "paca_document",
   "paca_realtime_outbox",
 ] as const;
 

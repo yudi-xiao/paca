@@ -1,3 +1,4 @@
+export { DocumentParty } from "../../src/document/party";
 export { ProjectParty, UserParty } from "../../src/realtime/party";
 
 export default {

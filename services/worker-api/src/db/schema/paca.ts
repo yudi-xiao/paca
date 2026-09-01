@@ -733,6 +733,37 @@ export const pacaTaskActivities = pgTable(
   ],
 );
 
+/**
+ * Queryable document projection. The canonical collaborative Yjs state lives in
+ * DocumentParty; `content` is the materialized BlockNote JSON view used by list,
+ * search, exports, history and non-collaborative compatibility reads.
+ */
+export const pacaDocuments = pgTable(
+  "paca_document",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => pacaProjects.id, { onDelete: "cascade" }),
+    title: text("title").default("Untitled").notNull(),
+    content: jsonb("content").$type<unknown[] | null>(),
+    contentVersion: bigint("content_version", { mode: "number" }).default(0).notNull(),
+    position: integer("position").default(0).notNull(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("paca_document_project_position_idx").on(table.projectId, table.position, table.title),
+    index("paca_document_deleted_idx")
+      .on(table.deletedAt)
+      .where(sql`${table.deletedAt} is not null`),
+    check("paca_document_content_version_check", sql`${table.contentVersion} >= 0`),
+  ],
+);
+
 export type RealtimeOutboxStatus = "pending" | "enqueuing" | "enqueued" | "delivered";
 
 export const pacaRealtimeOutbox = pgTable(
@@ -776,6 +807,24 @@ export const pacaProjectsRelations = relations(pacaProjects, ({ one, many }) => 
   }),
   roles: many(pacaProjectRoles),
   members: many(pacaProjectMembers),
+  documents: many(pacaDocuments),
+}));
+
+export const pacaDocumentsRelations = relations(pacaDocuments, ({ one }) => ({
+  project: one(pacaProjects, {
+    fields: [pacaDocuments.projectId],
+    references: [pacaProjects.id],
+  }),
+  creator: one(user, {
+    fields: [pacaDocuments.createdBy],
+    references: [user.id],
+    relationName: "paca_document_creator",
+  }),
+  updater: one(user, {
+    fields: [pacaDocuments.updatedBy],
+    references: [user.id],
+    relationName: "paca_document_updater",
+  }),
 }));
 
 export const pacaProjectRolesRelations = relations(pacaProjectRoles, ({ one, many }) => ({
