@@ -12,6 +12,7 @@ function runInput(overrides: Record<string, unknown> = {}) {
   return {
     runId: RUN_ID,
     idempotencyKey: IDEMPOTENCY_KEY,
+    requestHash: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     agentId: AGENT_ID,
     workflowId: "33333333-3333-4333-8333-333333333333",
     organizationId: "organization-1",

@@ -400,6 +400,10 @@ export type AgentCapabilityDecision =
         | "AGENT_GRANT_EXPIRED";
     };
 
+export type AgentCapabilityMatch<TGrant> =
+  | { allowed: true; grant: TGrant }
+  | Exclude<AgentCapabilityDecision, { allowed: true }>;
+
 const primitiveSchema = z.union([z.string(), z.number(), z.boolean()]);
 const operatorSchema = z
   .object({
@@ -460,21 +464,44 @@ export function evaluateAgentCapability(
   context: AgentConstraintContext,
   now = new Date(),
 ): AgentCapabilityDecision {
-  const grants = session.agent.capabilityGrants.filter(
+  const match = findMatchingAgentCapabilityGrant(
+    session.agent.capabilityGrants,
+    capability,
+    context,
+    now,
+  );
+  return match.allowed ? { allowed: true } : match;
+}
+
+export function findMatchingAgentCapabilityGrant<
+  TGrant extends {
+    capability: string;
+    constraints: CapabilityConstraints | null;
+    status: string;
+  },
+>(
+  candidates: readonly TGrant[],
+  capability: PacaCapabilityName,
+  context: AgentConstraintContext,
+  now = new Date(),
+): AgentCapabilityMatch<TGrant> {
+  const grants = candidates.filter(
     (candidate) => candidate.capability === capability && candidate.status === "active",
   );
   if (grants.length === 0) return { allowed: false, code: "AGENT_CAPABILITY_NOT_GRANTED" };
 
-  const decisions = grants.map((grant) =>
-    evaluateAgentCapabilityGrant(grant, capability, context, now),
-  );
-  if (decisions.some((decision) => decision.allowed)) return { allowed: true };
+  const decisions = grants.map((grant) => ({
+    grant,
+    decision: evaluateAgentCapabilityGrant(grant, capability, context, now),
+  }));
+  const match = decisions.find(({ decision }) => decision.allowed);
+  if (match) return { allowed: true, grant: match.grant };
   for (const code of [
     "AGENT_GRANT_CONSTRAINT_MISMATCH",
     "AGENT_GRANT_EXPIRED",
     "AGENT_GRANT_CONSTRAINTS_INVALID",
   ] as const) {
-    if (decisions.some((decision) => !decision.allowed && decision.code === code)) {
+    if (decisions.some(({ decision }) => !decision.allowed && decision.code === code)) {
       return { allowed: false, code };
     }
   }

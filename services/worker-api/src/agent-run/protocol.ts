@@ -16,6 +16,7 @@ export const agentRunCreateSchema = z
   .object({
     runId: z.uuid(),
     idempotencyKey: z.uuid(),
+    requestHash: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
     agentId: z.string().min(1).max(255),
     workflowId: z.uuid(),
     organizationId: z.string().min(1).max(255),
@@ -76,6 +77,7 @@ export function isTerminalAgentRunStatus(status: AgentRunStatus): boolean {
 export function agentRunCreateFingerprint(input: AgentRunCreate): string {
   return JSON.stringify([
     input.runId,
+    input.requestHash,
     input.agentId,
     input.workflowId,
     input.organizationId,

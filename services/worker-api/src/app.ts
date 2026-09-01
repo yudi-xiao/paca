@@ -6,6 +6,12 @@ import * as z from "zod";
 import { exactConstraintString } from "./agent-auth/capabilities";
 import { readPostgresProjectAsAgent } from "./agent-auth/execution";
 import { type ReadAgentSession, requireAgentCapability } from "./agent-auth/http";
+import {
+  DOCUMENT_AGENT_WORKFLOW_ID,
+  documentAgentWorkflowStartSchema,
+} from "./agent-run/document-workflow-protocol";
+import type { AgentRunRecord } from "./agent-run/protocol";
+import { AgentRunError, type AgentRunRuntime, agentRunRuntime } from "./agent-run/runtime";
 import { type AttachmentRuntime, attachmentRuntime } from "./attachment/runtime";
 import {
   AttachmentError,
@@ -119,6 +125,7 @@ type AppDependencies = {
     session: AgentSession,
     scope: { organizationId: string; projectId: string; validUntil: string },
   ) => Promise<Project>;
+  agentRuns: AgentRunRuntime;
   agentConfigurationHandler: (request: Request, env: AppBindings) => Promise<Response>;
   authHandler: (request: Request, env: AppBindings) => Promise<Response>;
   authorizeOrganizationPermission: AuthorizeOrganizationPermission;
@@ -1015,10 +1022,37 @@ function agentProjectScope(session: AgentSession, projectId: string) {
   return { organizationId, projectId, validUntil };
 }
 
+function agentRunResponse(run: AgentRunRecord) {
+  return {
+    id: run.runId,
+    idempotency_key: run.idempotencyKey,
+    agent_id: run.agentId,
+    workflow_id: run.workflowId,
+    organization_id: run.organizationId,
+    project_id: run.projectId,
+    document_id: run.documentId,
+    kind: run.kind,
+    status: run.status,
+    version: run.version,
+    created_at: new Date(run.createdAt).toISOString(),
+    updated_at: new Date(run.updatedAt).toISOString(),
+    finished_at: run.finishedAt ? new Date(run.finishedAt).toISOString() : null,
+    error_code: run.errorCode,
+  };
+}
+
+function agentRunFailure(context: AppContext, error: unknown) {
+  if (error instanceof AgentRunError) {
+    return legacyFailure(context, error.status, error.code, "Agent run request failed");
+  }
+  throw error;
+}
+
 const defaultDependencies: AppDependencies = {
   attachments: attachmentRuntime,
   agentProject: (env, session, scope) =>
     withDatabase(env, (database) => readPostgresProjectAsAgent(database, session, scope)),
+  agentRuns: agentRunRuntime,
   agentConfigurationHandler: handleAgentConfigurationRequest,
   authHandler: handleAuthRequest,
   authorizeOrganizationPermission,
@@ -1120,6 +1154,94 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
           return legacyFailure(context, 403, error.message, "Agent capability denied");
         }
         return projectFailure(context, error);
+      }
+    },
+  );
+
+  const requireAgentWorkflowExecution = requireAgentCapability(
+    dependencies.currentAgentSession,
+    "workflow.execute",
+    (request) => ({
+      projectId: request.param("projectId"),
+      workflowId: request.param("workflowId"),
+      operationMode: "execute",
+    }),
+  );
+
+  app.post(
+    "/api/v1/agent/projects/:projectId/workflows/:workflowId/runs",
+    requireValidProjectId,
+    requireAgentWorkflowExecution,
+    async (context) => {
+      if (context.req.param("workflowId") !== DOCUMENT_AGENT_WORKFLOW_ID) {
+        return legacyFailure(context, 404, "AGENT_WORKFLOW_NOT_FOUND", "Agent workflow not found");
+      }
+      const parsed = documentAgentWorkflowStartSchema.safeParse(
+        await context.req.json().catch(() => null),
+      );
+      if (!parsed.success) {
+        return legacyFailure(context, 400, "AGENT_RUN_INPUT_INVALID", "Invalid Agent run input");
+      }
+      try {
+        const run = await dependencies.agentRuns.startDocumentWorkflow(
+          context.env,
+          context.get("agentSession"),
+          context.req.param("projectId"),
+          parsed.data,
+        );
+        return legacySuccess(context, agentRunResponse(run));
+      } catch (error) {
+        return agentRunFailure(context, error);
+      }
+    },
+  );
+
+  app.get(
+    "/api/v1/agent/projects/:projectId/workflows/:workflowId/runs/:runId",
+    requireValidProjectId,
+    requireAgentWorkflowExecution,
+    async (context) => {
+      if (context.req.param("workflowId") !== DOCUMENT_AGENT_WORKFLOW_ID) {
+        return legacyFailure(context, 404, "AGENT_WORKFLOW_NOT_FOUND", "Agent workflow not found");
+      }
+      if (!z.uuid().safeParse(context.req.param("runId")).success) {
+        return legacyFailure(context, 400, "AGENT_RUN_ID_INVALID", "Invalid Agent run id");
+      }
+      try {
+        const run = await dependencies.agentRuns.getRun(
+          context.env,
+          context.get("agentSession"),
+          context.req.param("projectId"),
+          context.req.param("runId"),
+        );
+        return legacySuccess(context, agentRunResponse(run));
+      } catch (error) {
+        return agentRunFailure(context, error);
+      }
+    },
+  );
+
+  app.delete(
+    "/api/v1/agent/projects/:projectId/workflows/:workflowId/runs/:runId",
+    requireValidProjectId,
+    requireAgentWorkflowExecution,
+    async (context) => {
+      if (context.req.param("workflowId") !== DOCUMENT_AGENT_WORKFLOW_ID) {
+        return legacyFailure(context, 404, "AGENT_WORKFLOW_NOT_FOUND", "Agent workflow not found");
+      }
+      if (!z.uuid().safeParse(context.req.param("runId")).success) {
+        return legacyFailure(context, 400, "AGENT_RUN_ID_INVALID", "Invalid Agent run id");
+      }
+      try {
+        const run = await dependencies.agentRuns.cancelRun(
+          context.env,
+          context.get("agentSession"),
+          context.req.param("projectId"),
+          context.req.param("runId"),
+        );
+        return legacySuccess(context, agentRunResponse(run));
+      } catch (error) {
+        return agentRunFailure(context, error);
       }
     },
   );

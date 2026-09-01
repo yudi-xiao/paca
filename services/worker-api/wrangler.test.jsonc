@@ -54,6 +54,13 @@
       }
     ]
   },
+  "workflows": [
+    {
+      "binding": "DOCUMENT_AGENT_WORKFLOW",
+      "name": "paca-document-agent-test",
+      "class_name": "TestDocumentAgentWorkflow"
+    }
+  ],
   "migrations": [
     {
       "tag": "v1-realtime-parties",

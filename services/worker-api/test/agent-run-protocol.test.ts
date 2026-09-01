@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-
+import { documentAgentWorkflowRequestHash } from "../src/agent-run/document-workflow-protocol";
 import {
   agentRunCreateFingerprint,
   agentRunCreateSchema,
@@ -10,6 +10,7 @@ import {
 const input = {
   runId: "11111111-1111-4111-8111-111111111111",
   idempotencyKey: "22222222-2222-4222-8222-222222222222",
+  requestHash: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   agentId: "agent-1",
   workflowId: "33333333-3333-4333-8333-333333333333",
   organizationId: "organization-1",
@@ -30,6 +31,27 @@ describe("agent run protocol", () => {
     expect(agentRunCreateSchema.safeParse({ ...input, projectId: "not-a-uuid" }).success).toBe(
       false,
     );
+  });
+
+  it("hashes the full operation envelope without retaining document content in the coordinator", async () => {
+    const request = {
+      organizationId: "organization-1",
+      documentId: input.documentId,
+      command: {
+        action: "acquire_lease" as const,
+        requestId: input.idempotencyKey,
+        runId: input.runId,
+        operationMode: "exclusive" as const,
+        leaseDurationMs: 10_000,
+      },
+    };
+    const first = await documentAgentWorkflowRequestHash(request);
+    const second = await documentAgentWorkflowRequestHash({
+      ...request,
+      command: { ...request.command, leaseDurationMs: 20_000 },
+    });
+    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(second).not.toBe(first);
   });
 
   it("allows cancellation and retry-oriented waiting without reopening terminal runs", () => {

@@ -92,6 +92,13 @@
       }
     ]
   },
+  "workflows": [
+    {
+      "binding": "DOCUMENT_AGENT_WORKFLOW",
+      "name": "paca-document-agent-development",
+      "class_name": "DocumentAgentWorkflow"
+    }
+  ],
   "migrations": [
     {
       "tag": "v1-realtime-parties",
@@ -190,7 +197,14 @@
             "class_name": "AgentCoordinator"
           }
         ]
-      }
+      },
+      "workflows": [
+        {
+          "binding": "DOCUMENT_AGENT_WORKFLOW",
+          "name": "paca-document-agent-internal",
+          "class_name": "DocumentAgentWorkflow"
+        }
+      ]
     }
   }
 }

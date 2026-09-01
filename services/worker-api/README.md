@@ -296,14 +296,37 @@ inject synthetic revisions for a user-owned Document.
 ID. It stores only bounded run scope, lifecycle status, monotonic version, idempotency keys and safe
 error codes. It deliberately does not run model inference, tools or long document operations, and it
 does not persist JWTs, Grant payloads, document content or execution output. Cloudflare Workflows
-will own durable execution; authenticated Hono routes and Workflow steps will call the coordinator
-by RPC as later M9 slices are enabled. The coordinator currently has no public HTTP or WebSocket
-route.
+own durable execution; authenticated Hono routes and Workflow steps call the coordinator by RPC.
+The coordinator itself has no public HTTP or WebSocket route.
 
 Run creation and transitions are independently idempotent. A retry key cannot be reused with a
-different run scope, each coordinator permanently pins its first Better Auth Agent ID, and terminal
-runs cannot be reopened. Workers Runtime tests force Durable Object eviction to verify that these
-properties come from SQLite rather than process memory.
+different run scope or SHA-256 operation fingerprint, each coordinator permanently pins its first
+Better Auth Agent ID, and terminal runs cannot be reopened. The hash detects a changed retry payload
+without retaining the document operation in the DO. Workers Runtime tests force Durable Object
+eviction to verify that these properties come from SQLite rather than process memory.
+
+The first durable definition is the fixed document-edit Workflow
+`00000000-0000-4000-8000-000000000201`. An Agent starts, reads or cancels a run through:
+
+```text
+POST   /api/v1/agent/projects/:projectId/workflows/:workflowId/runs
+GET    /api/v1/agent/projects/:projectId/workflows/:workflowId/runs/:runId
+DELETE /api/v1/agent/projects/:projectId/workflows/:workflowId/runs/:runId
+```
+
+All three routes require a Better Auth Agent session and a constrained `workflow.execute` Grant.
+Starting a document run additionally requires a separately constrained `document.edit` Grant. The
+API selects the persisted Grant IDs but never stores the Agent JWT in Workflow parameters. Before
+each actual DocumentParty write, the Workflow reloads the Agent and both Grants from PostgreSQL,
+checks their current status/expiry/constraints, verifies the active Document scope, and intersects a
+delegated Agent with the user's current `docs.write` permission. The write still uses the command's
+`requestId` inside DocumentParty, so a retried Workflow step is idempotent.
+
+Cancellation calls Workflow `terminate()` and prevents later steps; it intentionally does not ask
+Cloudflare to run a compensating rollback because an already committed Yjs/CRDT edit is not safely
+reversible. Applied content remains auditable and a later product-level revert must be represented as
+a new document operation. Execution audit rows contain the trusted Agent/run/Grant/scope, action,
+mode and bounded outcome only, never document content, JWTs or private keys.
 
 ## Deployment and rollback
 
