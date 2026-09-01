@@ -281,6 +281,15 @@ user recovery and PostgreSQL materialization. The temporary Agent and Session ar
 Project is archived in independent cleanup steps. The script logs only IDs, revisions and status
 codes, never credentials, private keys or document text.
 
+The internal deployment has also passed a controlled remote Queue recovery exercise. A temporary
+Worker scoped to the smoke Document submitted duplicate/out-of-order revisions followed by one
+revision that was deliberately not present in DocumentParty. The consumer ignored the stale work,
+retried the not-ready revision through the configured limit, and delivered it to the isolated DLQ;
+the PostgreSQL projection and immutable R2 object remained unchanged. The temporary Worker and DLQ
+consumer were then removed, and the production Queue bindings were rechecked. Repeat this exercise
+only with a newly created smoke Document and a transient, narrowly scoped producer/consumer; never
+inject synthetic revisions for a user-owned Document.
+
 ## Deployment and rollback
 
 ```bash

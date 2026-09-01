@@ -15,7 +15,7 @@
 
 更新时间：2026-09-01
 
-当前里程碑：**M8 Yjs 文档纵向切片已部署到 internal Worker `1e7d9965-6a35-4701-a656-f0e96306e970`：PlanetScale `paca/internal` 已应用并核验 0016/0017，现有最小权限 runtime role 已扩为 39 张业务表 CRUD；Cloudflare 已创建并绑定隔离的 Document Materialization Queue、DLQ 和 APAC/Standard R2 快照 bucket。真实 `smoke:document:internal` 以临时 Project/Document/Agent 完成 Session 登录、Better Auth Agent Auth 注册审批、read、suggest、collaborate、用户 WebSocket 断线重连、exclusive acquire/renew/release/超时接管、独占期用户写入阻断、Grant 撤销释放、用户写入恢复和 PostgreSQL 物化追平；最终 Yjs revision 4 的 309 字节 R2 快照可按精确 key 远端读取，SHA-256 与 PostgreSQL 元数据一致，临时 Agent/Grant/Session 已撤销且项目已归档。真实 BlockNote 浏览器编辑仍因浏览器控制层加载超时未取得可靠证据；Queue 消费失败、乱序和 DLQ 恢复的远端故障注入也仍待完成。**
+当前里程碑：**M8 Yjs 文档纵向切片已部署到 internal Worker `1e7d9965-6a35-4701-a656-f0e96306e970`：PlanetScale `paca/internal` 已应用并核验 0016/0017，现有最小权限 runtime role 已扩为 39 张业务表 CRUD；Cloudflare 已创建并绑定隔离的 Document Materialization Queue、DLQ 和 APAC/Standard R2 快照 bucket。真实 `smoke:document:internal` 以临时 Project/Document/Agent 完成 Session 登录、Better Auth Agent Auth 注册审批、read、suggest、collaborate、用户 WebSocket 断线重连、exclusive acquire/renew/release/超时接管、独占期用户写入阻断、Grant 撤销释放、用户写入恢复和 PostgreSQL 物化追平；最终 Yjs revision 4 的 309 字节 R2 快照可按精确 key 远端读取，SHA-256 与 PostgreSQL 元数据一致，临时 Agent/Grant/Session 已撤销且项目已归档。受控远端故障注入又验证了重复/乱序 revision 4/3/4 的幂等处理、未就绪 revision 5 的 6 次重试和 DLQ 接收；PostgreSQL 与 R2 均保持 revision 4 不变，临时 Worker 删除后正式队列恢复为唯一 internal Worker 的 1 个 producer/consumer，DLQ 为 0/0。真实 BlockNote 浏览器编辑仍因浏览器控制层加载超时未取得可靠证据。**
 
 已确认前置条件：
 
@@ -244,13 +244,13 @@
 
 ## M8：Yjs DocumentParty
 
-当前 M8 验收版本为 internal Worker `1e7d9965-6a35-4701-a656-f0e96306e970`。React 60 个测试文件/628 项（前端本轮未改）、Worker 44 个测试文件/243 项、Workers Runtime 2 个测试文件/14 项全部通过；internal production build、Drizzle check、Wrangler types、Biome、deploy dry-run、真实部署和 public health/SPA 200 均通过。Document Queue 部署后显示 1 个 producer 和 1 个 consumer，DLQ 保持独立；真实 smoke 最终 revision 4 已物化到 PostgreSQL，精确 R2 对象为 309 字节且 SHA-256 与数据库一致。Agent 最终为 revoked，两个 Document Grant 均为 revoked，临时 Project 为 archived，Session 已注销。首页在既有登录浏览器中真实渲染，但 Documents 深链的浏览器自动化两次在等待加载时超时，因此不把 BlockNote UI 视为已验收。
+当前 M8 验收版本为 internal Worker `1e7d9965-6a35-4701-a656-f0e96306e970`。React 60 个测试文件/628 项（前端本轮未改）、Worker 44 个测试文件/243 项、Workers Runtime 2 个测试文件/14 项全部通过；internal production build、Drizzle check、Wrangler types、Biome、deploy dry-run、真实部署和 public health/SPA 200 均通过。Document Queue 部署后显示 1 个 producer 和 1 个 consumer，DLQ 保持独立；真实 smoke 最终 revision 4 已物化到 PostgreSQL，精确 R2 对象为 309 字节且 SHA-256 与数据库一致。随后用一次性、固定文档范围的临时 Worker 向正式 Queue 投递 revision 4/3/4 和尚未生成的 revision 5：重复与乱序消息未回退投影，revision 5 从 attempt 1 重试到 6 后进入 DLQ；PostgreSQL 与 R2 的 revision、对象大小和 SHA-256 均未变化。故障注入完成后已移除临时 DLQ consumer 和 Worker，正式 Queue 重新核验为 `paca-worker-api-internal` 的 1/1 producer/consumer，DLQ 为 0/0。Agent 最终为 revoked，两个 Document Grant 均为 revoked，临时 Project 为 archived，Session 已注销。首页在既有登录浏览器中真实渲染，但 Documents 深链的浏览器自动化两次在等待加载时超时，因此不把 BlockNote UI 视为已验收。
 
 - [x] 盘点 `services/api/internal/repository/postgres/document_repository.go` 的文档结构和快照语义；旧实现保存当前 BlockNote JSONB 和整份 JSON snapshot，不保存 Yjs state vector/update，因此不能直接作为协作恢复源。
 - [ ] 为 BlockNote 接入 Yjs 和 `y-partyserver/provider`。代码、迁移、资源和部署均已完成，原始用户 WebSocket 远端重连已通过；仍需取得真实浏览器中 BlockNote 编辑、刷新恢复和独占只读提示的可靠证据后勾选。
 - [x] 实现一篇文档一个 DocumentParty/YServer，使用稳定 `documentId` 寻址；Wrangler 已声明独立 DO binding 和 `v2-document-party` SQLite class migration。
 - [x] 实现 `onLoad`、`onSave`、增量 update、checkpoint、恢复与压缩清理；更新先同步写入 DO SQLite 再广播，阈值 checkpoint 清理已覆盖真实 Workers Runtime 驱逐恢复测试。
-- [ ] DO SQLite 保存实时增量；R2/业务数据库保存长期快照和可查询业务视图。隔离 Queue/R2、0016/0017、不可变 R2 修订对象、SHA-256/大小元数据、服务端 BlockNote JSON 和 PostgreSQL 高修订保护已真实验收；最终 revision 4 的精确远端对象与数据库元数据一致。仍需真实故障注入验证消费重试、乱序、DLQ 和恢复后才能勾选。
+- [x] DO SQLite 保存实时增量；R2/业务数据库保存长期快照和可查询业务视图。隔离 Queue/R2、0016/0017、不可变 R2 修订对象、SHA-256/大小元数据、服务端 BlockNote JSON 和 PostgreSQL 高修订保护均已真实验收；最终 revision 4 的精确远端对象与数据库元数据一致。受控远端故障注入验证重复/乱序 revision 4/3/4 不回退投影、未就绪 revision 5 连续 6 次失败后进入 DLQ，并确认故障前后 PostgreSQL/R2 的 revision、大小和 SHA-256 不变；临时 Worker 已删除且正式 Queue/DLQ 绑定已恢复。
 - [x] 用户连接检查 `docs.read`/`docs.write`；Agent 连接检查 `document.read`/`document.edit` Grant 与 constraints。真实 smoke 使用项目管理员 Session 建立用户连接，并以临时 delegated Agent 的精确 Organization/Project/Document/字段/模式/action/有效期 Grant 完成读写；撤销 `document.edit` 会同步释放租约、恢复用户写入且拒绝 Agent 后续编辑，最终两个 Grant 与 Agent 均撤销。
 - [x] Agent 只提交细粒度、带 base state vector/版本的操作，不提交无条件整篇覆盖。实现仅接受最多 10 个 `replace_block_content`，绑定当前 block opaque version、base revision/state vector、run ID 和 request ID；本地测试覆盖同块陈旧冲突和不同块合并，真实 smoke 通过该协议依次完成 collaborate/exclusive 并物化 revision 4，正文不进入审计。
 - [x] 实现建议、协作和独占三种 Agent 编辑模式。真实 Agent Auth E2E 已验证 suggest 不写入、collaborate 写入，以及 exclusive acquire/renew/apply/release、5 秒超时接管、授权撤销释放、独占期用户写入阻断和撤销后恢复。
