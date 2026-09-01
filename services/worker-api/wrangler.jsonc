@@ -85,6 +85,10 @@
       {
         "name": "DocumentParty",
         "class_name": "DocumentParty"
+      },
+      {
+        "name": "AgentCoordinator",
+        "class_name": "AgentCoordinator"
       }
     ]
   },
@@ -96,6 +100,10 @@
     {
       "tag": "v2-document-party",
       "new_sqlite_classes": ["DocumentParty"]
+    },
+    {
+      "tag": "v3-agent-coordinator",
+      "new_sqlite_classes": ["AgentCoordinator"]
     }
   ],
   "env": {
@@ -176,6 +184,10 @@
           {
             "name": "DocumentParty",
             "class_name": "DocumentParty"
+          },
+          {
+            "name": "AgentCoordinator",
+            "class_name": "AgentCoordinator"
           }
         ]
       }
