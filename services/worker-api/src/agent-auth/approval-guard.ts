@@ -49,6 +49,10 @@ export type PacaAgentApprovalGuardOptions = {
   permissionService?: PacaPermissionService;
   findProjectOrganization?: (projectId: string) => Promise<string | null>;
   onEvent?: (event: AgentAuthEvent) => void | Promise<void>;
+  onCapabilitiesRevoked?: (change: {
+    agentId: string;
+    projectIds: string[];
+  }) => void | Promise<void>;
 };
 
 type ScopedGrant = Pick<AgentCapabilityGrant, "capability" | "constraints">;
@@ -153,6 +157,18 @@ export function pacaAgentApprovalGuard(options: PacaAgentApprovalGuardOptions = 
               capabilities: revocable.map((grant) => grant.capability),
               grantIds: revocable.map((grant) => grant.id),
             },
+          });
+
+          const projectIds = [
+            ...new Set(
+              revocable
+                .map((grant) => exactConstraintString(grant.constraints?.projectId))
+                .filter((projectId): projectId is string => Boolean(projectId)),
+            ),
+          ];
+          await options.onCapabilitiesRevoked?.({
+            agentId: context.body.agent_id,
+            projectIds,
           });
 
           return context.json({

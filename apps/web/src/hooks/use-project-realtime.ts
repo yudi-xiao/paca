@@ -64,7 +64,6 @@ import {
 	joinProject,
 	leaveProject,
 	type RealtimeEvent,
-	rejoinProject,
 } from "@/lib/socket-client";
 
 // projectId may be undefined for a component that's reused at both project
@@ -208,21 +207,8 @@ export function useProjectRealtime(projectId: string | undefined): void {
 
 		socket.on("event", handleEvent);
 
-		// Socket.IO's "connect" event fires on every automatic reconnect, not
-		// just the initial connection. A reconnect starts a new server-side
-		// session with no room membership until we "join" again — without
-		// this, a network blip silently stops delivering invalidations while
-		// the socket still reports connected. Uses `rejoinProject` (not
-		// `joinProject`) since this isn't a new subscriber — it must not bump
-		// the reference count that `leaveProject` decrements on unmount.
-		function handleConnect() {
-			rejoinProject(currentProjectId);
-		}
-		socket.on("connect", handleConnect);
-
 		return () => {
 			socket.off("event", handleEvent);
-			socket.off("connect", handleConnect);
 			leaveProject(currentProjectId);
 		};
 	}, [projectId, queryClient]);

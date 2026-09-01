@@ -21,13 +21,16 @@ function state(overrides: Partial<RealtimeConnectionState> = {}): RealtimeConnec
     version: 1,
     actorType: "user",
     actorId: "user-1",
+    sessionId: "session-1",
     roomType: "project",
     roomId: PROJECT_ID,
     namespaces: ["tasks", "docs", "workflows", "sprints"],
     taskIds: [],
     documentIds: [],
+    issuedAt: NOW - 1_000,
     expiresAt: NOW + 60_000,
     nonce: "44444444-4444-4444-8444-444444444444",
+    permissionVersion: "a".repeat(64),
     ...overrides,
   };
 }
@@ -77,6 +80,7 @@ describe("realtime protocol", () => {
     const agentState = state({
       actorType: "agent",
       actorId: "agent-1",
+      sessionId: null,
       namespaces: ["tasks", "docs"],
       taskIds: [TASK_ID],
       documentIds: [DOCUMENT_ID],

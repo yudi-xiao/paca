@@ -1,30 +1,43 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Build a minimal mock socket that tracks calls.
-function createMockSocket() {
-	return {
-		connected: false,
-		connect: vi.fn(),
-		disconnect: vi.fn(),
-		emit: vi.fn(),
-		on: vi.fn(),
-		off: vi.fn(),
-	};
-}
+type MockPartySocket = {
+	options: Record<string, unknown>;
+	readyState: number;
+	reconnect: ReturnType<typeof vi.fn>;
+	close: ReturnType<typeof vi.fn>;
+	addEventListener: ReturnType<typeof vi.fn>;
+	listeners: Map<string, (event: unknown) => void>;
+};
 
-const { mockSocketFactory, mockSocket } = vi.hoisted(() => {
-	const socket = createMockSocket();
+const { mockPartySocketConstructor, partySockets } = vi.hoisted(() => {
+	const sockets: MockPartySocket[] = [];
+	const partySocketFactory = vi.fn(
+		class implements MockPartySocket {
+			readonly options: Record<string, unknown>;
+			readyState = 0;
+			readonly reconnect = vi.fn();
+			readonly close = vi.fn();
+			readonly listeners = new Map<string, (event: unknown) => void>();
+			readonly addEventListener = vi.fn(
+				(event: string, listener: (value: unknown) => void) => {
+					this.listeners.set(event, listener);
+				},
+			);
+
+			constructor(options: Record<string, unknown>) {
+				this.options = options;
+				sockets.push(this);
+			}
+		},
+	);
 	return {
-		mockSocketFactory: vi.fn(() => socket),
-		mockSocket: socket,
+		mockPartySocketConstructor: partySocketFactory,
+		partySockets: sockets,
 	};
 });
 
-vi.mock("socket.io-client", () => ({
-	io: mockSocketFactory,
-}));
+vi.mock("partysocket", () => ({ default: mockPartySocketConstructor }));
 
-// Import after mocking so the module-level `io` call uses our mock.
 import {
 	connectSocket,
 	disconnectSocket,
@@ -34,173 +47,109 @@ import {
 	rejoinProject,
 } from "./socket-client";
 
-describe("socket-client", () => {
+describe("PartySocket realtime client", () => {
 	beforeEach(() => {
-		// Reset mock state before each test.
+		disconnectSocket();
+		partySockets.length = 0;
 		vi.clearAllMocks();
-		mockSocket.connected = false;
-		// Ensure internal singleton is cleared between tests.
+	});
+
+	afterEach(() => disconnectSocket());
+
+	it("opens a same-origin UserParty for the authenticated user", () => {
+		connectSocket("user-1");
+
+		expect(mockPartySocketConstructor).toHaveBeenCalledWith(
+			expect.objectContaining({
+				host: window.location.host,
+				party: "user-party",
+				room: "user-1",
+				prefix: "ws/parties",
+			}),
+		);
+		expect(connectSocket("user-1")).toBe(getSocket());
+		expect(mockPartySocketConstructor).toHaveBeenCalledTimes(1);
+	});
+
+	it("opens one ProjectParty per subscribed project and reference-counts subscribers", () => {
+		connectSocket();
+		joinProject("project-1");
+		joinProject("project-1");
+
+		expect(mockPartySocketConstructor).toHaveBeenCalledTimes(1);
+		expect(partySockets[0]?.options).toMatchObject({
+			party: "project-party",
+			room: "project-1",
+		});
+
+		leaveProject("project-1");
+		expect(partySockets[0]?.close).not.toHaveBeenCalled();
+		leaveProject("project-1");
+		expect(partySockets[0]?.close).toHaveBeenCalledWith(
+			1000,
+			"project unsubscribed",
+		);
+	});
+
+	it("routes validated Party messages to event and notification listeners", () => {
+		const client = connectSocket("user-1");
+		const onEvent = vi.fn();
+		const onNotification = vi.fn();
+		client.on("event", onEvent).on("notification", onNotification);
+		const message = partySockets[0]?.listeners.get("message");
+
+		message?.({
+			data: JSON.stringify({
+				kind: "event",
+				type: "agent.updated",
+				payload: { id: "1" },
+			}),
+		});
+		message?.({
+			data: JSON.stringify({
+				kind: "notification",
+				type: "notification.created",
+				payload: { id: "2" },
+			}),
+		});
+		message?.({ data: JSON.stringify({ kind: "event", payload: [] }) });
+
+		expect(onEvent).toHaveBeenCalledWith({
+			type: "agent.updated",
+			payload: { id: "1" },
+		});
+		expect(onNotification).toHaveBeenCalledWith({
+			type: "notification.created",
+			payload: { id: "2" },
+		});
+		expect(onEvent).toHaveBeenCalledTimes(1);
+	});
+
+	it("reconnects active parties without changing project subscriber counts", () => {
+		connectSocket("user-1");
+		joinProject("project-1");
+		rejoinProject("project-1");
+		connectSocket().connect();
+
+		expect(partySockets[1]?.reconnect).toHaveBeenCalledTimes(2);
+		expect(partySockets[0]?.reconnect).toHaveBeenCalledTimes(1);
+		leaveProject("project-1");
+		expect(partySockets[1]?.close).toHaveBeenCalledTimes(1);
+	});
+
+	it("closes every PartySocket and clears the singleton on logout", () => {
+		connectSocket("user-1");
+		joinProject("project-1");
 		disconnectSocket();
-	});
 
-	afterEach(() => {
-		disconnectSocket();
-	});
-
-	describe("connectSocket", () => {
-		it("creates a new socket on first call", () => {
-			const socket = connectSocket();
-
-			expect(mockSocketFactory).toHaveBeenCalledTimes(1);
-			expect(socket).toBe(mockSocket);
-		});
-
-		it("reuses the existing socket when already connected", () => {
-			mockSocket.connected = true;
-
-			connectSocket();
-			const second = connectSocket();
-
-			expect(mockSocketFactory).toHaveBeenCalledTimes(1);
-			expect(second).toBe(mockSocket);
-		});
-
-		it("calls connect() on an existing disconnected socket instead of creating a new one", () => {
-			// First call creates the socket.
-			connectSocket();
-			expect(mockSocketFactory).toHaveBeenCalledTimes(1);
-
-			// Simulate disconnected state (connected = false, socket exists).
-			mockSocket.connected = false;
-
-			// Second call should reuse and call connect().
-			connectSocket();
-			expect(mockSocketFactory).toHaveBeenCalledTimes(1);
-			expect(mockSocket.connect).toHaveBeenCalledTimes(1);
-		});
-	});
-
-	describe("disconnectSocket", () => {
-		it("disconnects and nullifies the socket", () => {
-			connectSocket();
-			disconnectSocket();
-
-			expect(mockSocket.disconnect).toHaveBeenCalledTimes(1);
-			expect(getSocket()).toBeNull();
-		});
-
-		it("is a no-op when no socket exists", () => {
-			// Should not throw.
-			expect(() => disconnectSocket()).not.toThrow();
-		});
-	});
-
-	describe("getSocket", () => {
-		it("returns null when no socket is created", () => {
-			expect(getSocket()).toBeNull();
-		});
-
-		it("returns the current socket after connecting", () => {
-			connectSocket();
-			expect(getSocket()).toBe(mockSocket);
-		});
-	});
-
-	describe("joinProject", () => {
-		it("emits a join event with the projectId", () => {
-			connectSocket();
-			joinProject("proj-123");
-
-			expect(mockSocket.emit).toHaveBeenCalledWith("join", {
-				projectId: "proj-123",
-			});
-		});
-
-		it("is a no-op when no socket is connected", () => {
-			// No connectSocket() call — socket is null.
-			joinProject("proj-123");
-			expect(mockSocket.emit).not.toHaveBeenCalled();
-		});
-	});
-
-	describe("leaveProject", () => {
-		it("emits a leave event with the projectId", () => {
-			connectSocket();
-			leaveProject("proj-123");
-
-			expect(mockSocket.emit).toHaveBeenCalledWith("leave", {
-				projectId: "proj-123",
-			});
-		});
-
-		it("is a no-op when no socket is connected", () => {
-			leaveProject("proj-123");
-			expect(mockSocket.emit).not.toHaveBeenCalled();
-		});
-
-		it("does not emit leave while another subscriber is still joined (reference counting)", () => {
-			connectSocket();
-			// Two independent callers join the same project (e.g. the project
-			// layout and a nested conversations layout).
-			joinProject("proj-123");
-			joinProject("proj-123");
-			mockSocket.emit.mockClear();
-
-			// First caller unmounts and leaves — the second is still joined,
-			// so the socket must stay in the project's rooms.
-			leaveProject("proj-123");
-			expect(mockSocket.emit).not.toHaveBeenCalledWith(
-				"leave",
-				expect.anything(),
-			);
-
-			// Second caller leaves too — now it should actually emit leave.
-			leaveProject("proj-123");
-			expect(mockSocket.emit).toHaveBeenCalledWith("leave", {
-				projectId: "proj-123",
-			});
-		});
-
-		it("tracks subscriber counts independently per projectId", () => {
-			connectSocket();
-			joinProject("proj-a");
-			joinProject("proj-b");
-			mockSocket.emit.mockClear();
-
-			leaveProject("proj-a");
-			expect(mockSocket.emit).toHaveBeenCalledWith("leave", {
-				projectId: "proj-a",
-			});
-			expect(mockSocket.emit).not.toHaveBeenCalledWith("leave", {
-				projectId: "proj-b",
-			});
-		});
-	});
-
-	describe("rejoinProject", () => {
-		it("emits a join event without affecting the subscriber count", () => {
-			connectSocket();
-			joinProject("proj-123");
-			mockSocket.emit.mockClear();
-
-			// Simulate a socket reconnect re-joining an already-subscribed
-			// project — this must not require a second leaveProject call to
-			// actually release the room.
-			rejoinProject("proj-123");
-			expect(mockSocket.emit).toHaveBeenCalledWith("join", {
-				projectId: "proj-123",
-			});
-
-			mockSocket.emit.mockClear();
-			leaveProject("proj-123");
-			expect(mockSocket.emit).toHaveBeenCalledWith("leave", {
-				projectId: "proj-123",
-			});
-		});
-
-		it("is a no-op when no socket is connected", () => {
-			rejoinProject("proj-123");
-			expect(mockSocket.emit).not.toHaveBeenCalled();
-		});
+		expect(partySockets[0]?.close).toHaveBeenCalledWith(
+			1000,
+			"client disconnect",
+		);
+		expect(partySockets[1]?.close).toHaveBeenCalledWith(
+			1000,
+			"client disconnect",
+		);
+		expect(getSocket()).toBeNull();
 	});
 });

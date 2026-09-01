@@ -13,15 +13,29 @@ const connectionStateSchema = z
     version: z.literal(1),
     actorType: z.enum(["user", "agent"]),
     actorId: z.string().min(1).max(255),
+    sessionId: z.string().min(1).max(255).nullable(),
     roomType: z.enum(["project", "user"]),
     roomId: z.string().min(1).max(255),
     namespaces: z.array(z.enum(realtimeNamespaces)).max(realtimeNamespaces.length),
     taskIds: z.array(z.uuid()).max(25),
     documentIds: z.array(z.uuid()).max(25),
+    issuedAt: z.number().int().positive(),
     expiresAt: z.number().int().positive(),
     nonce: z.uuid(),
+    permissionVersion: z.string().regex(/^[a-f0-9]{64}$/),
   })
-  .strict();
+  .strict()
+  .superRefine((state, context) => {
+    if (state.actorType === "user" && !state.sessionId) {
+      context.addIssue({ code: "custom", message: "User connection requires sessionId" });
+    }
+    if (state.actorType === "agent" && state.sessionId) {
+      context.addIssue({ code: "custom", message: "Agent connection cannot use sessionId" });
+    }
+    if (state.issuedAt >= state.expiresAt) {
+      context.addIssue({ code: "custom", message: "Connection lifetime is invalid" });
+    }
+  });
 
 export type RealtimeConnectionState = z.infer<typeof connectionStateSchema>;
 export type RealtimeConnectionStateView = Omit<
@@ -104,7 +118,7 @@ export function canReceiveRealtimeEvent(
   event: RealtimeEnvelope,
   now = Date.now(),
 ): boolean {
-  if (state.expiresAt <= now) return false;
+  if (state.issuedAt > now || state.expiresAt <= now) return false;
 
   if (state.roomType === "user") {
     if (state.actorType !== "user" || state.actorId !== state.roomId) return false;

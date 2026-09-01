@@ -362,12 +362,12 @@ export class PostgresProjectAccessRepository implements ProjectAccessRepository 
     return await this.findMember(projectId, memberId);
   }
 
-  async removeMember(projectId: string, memberId: string): Promise<void> {
-    await this.database.transaction(async (transaction) => {
+  async removeMember(projectId: string, memberId: string): Promise<{ userId: string }> {
+    return await this.database.transaction(async (transaction) => {
       await transaction.execute(sql`select pg_advisory_xact_lock(${PROJECT_ACCESS_ADVISORY_LOCK})`);
       await this.requireActiveProject(transaction, projectId);
       const [member] = await transaction
-        .select({ id: pacaProjectMembers.id })
+        .select({ id: pacaProjectMembers.id, userId: pacaProjectMembers.userId })
         .from(pacaProjectMembers)
         .where(
           and(eq(pacaProjectMembers.id, memberId), eq(pacaProjectMembers.projectId, projectId)),
@@ -381,6 +381,7 @@ export class PostgresProjectAccessRepository implements ProjectAccessRepository 
         .where(
           and(eq(pacaProjectMembers.id, memberId), eq(pacaProjectMembers.projectId, projectId)),
         );
+      return { userId: member.userId };
     });
   }
 

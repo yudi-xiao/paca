@@ -12,6 +12,7 @@ import { withDatabase } from "../database";
 import { PostgresPacaPermissionStore } from "../permission/postgres-store";
 import { PacaPermissionService } from "../permission/service";
 import type { PermissionGrant } from "../permission/statement";
+import { realtimePermissionVersion } from "./permission-version";
 import {
   encodeConnectionState,
   REALTIME_CONNECTION_TTL_MS,
@@ -159,17 +160,30 @@ export async function authorizeRealtimeConnection(
 
     if (lobby.className === "UserParty") {
       if (lobby.name !== userSession.user.id) return failure(403, "REALTIME_USER_SCOPE_DENIED");
-      return trustedRequest(request, {
-        version: 1,
+      const permissionVersion = await realtimePermissionVersion({
         actorType: "user",
         actorId: userSession.user.id,
+        sessionId: userSession.id,
         roomType: "user",
         roomId: lobby.name,
         namespaces: [],
         taskIds: [],
         documentIds: [],
+      });
+      return trustedRequest(request, {
+        version: 1,
+        actorType: "user",
+        actorId: userSession.user.id,
+        sessionId: userSession.id,
+        roomType: "user",
+        roomId: lobby.name,
+        namespaces: [],
+        taskIds: [],
+        documentIds: [],
+        issuedAt: now,
         expiresAt,
         nonce: crypto.randomUUID(),
+        permissionVersion,
       });
     }
 
@@ -178,18 +192,31 @@ export async function authorizeRealtimeConnection(
     if (!grants) return failure(403, "REALTIME_PROJECT_SCOPE_DENIED");
     const namespaces = userRealtimeNamespaces(grants);
     if (namespaces.length === 0) return failure(403, "REALTIME_PROJECT_PERMISSION_DENIED");
-
-    return trustedRequest(request, {
-      version: 1,
+    const permissionVersion = await realtimePermissionVersion({
       actorType: "user",
       actorId: userSession.user.id,
+      sessionId: userSession.id,
       roomType: "project",
       roomId: lobby.name,
       namespaces,
       taskIds: [],
       documentIds: [],
+    });
+
+    return trustedRequest(request, {
+      version: 1,
+      actorType: "user",
+      actorId: userSession.user.id,
+      sessionId: userSession.id,
+      roomType: "project",
+      roomId: lobby.name,
+      namespaces,
+      taskIds: [],
+      documentIds: [],
+      issuedAt: now,
       expiresAt,
       nonce: crypto.randomUUID(),
+      permissionVersion,
     });
   }
 
@@ -210,17 +237,30 @@ export async function authorizeRealtimeConnection(
   if (subscriptions.taskIds.length > 0) namespaces.push("tasks");
   if (subscriptions.documentIds.length > 0) namespaces.push("docs");
   if (namespaces.length === 0) return failure(403, "REALTIME_AGENT_GRANT_DENIED");
-
-  return trustedRequest(request, {
-    version: 1,
+  const permissionVersion = await realtimePermissionVersion({
     actorType: "agent",
     actorId: agentSession.agentId,
+    sessionId: null,
     roomType: "project",
     roomId: lobby.name,
     namespaces,
     taskIds: subscriptions.taskIds,
     documentIds: subscriptions.documentIds,
+  });
+
+  return trustedRequest(request, {
+    version: 1,
+    actorType: "agent",
+    actorId: agentSession.agentId,
+    sessionId: null,
+    roomType: "project",
+    roomId: lobby.name,
+    namespaces,
+    taskIds: subscriptions.taskIds,
+    documentIds: subscriptions.documentIds,
+    issuedAt: now,
     expiresAt: Math.min(jwtExpiry, now + REALTIME_CONNECTION_TTL_MS),
     nonce: crypto.randomUUID(),
+    permissionVersion,
   });
 }

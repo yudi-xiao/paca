@@ -3,6 +3,7 @@ import type { BetterAuthOptions } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { betterAuth } from "better-auth/minimal";
 import { organization } from "better-auth/plugins";
+import { eq } from "drizzle-orm";
 import { pacaAgentApprovalGuard } from "../agent-auth/approval-guard";
 import { recordAgentAuthEvent } from "../agent-auth/audit";
 import { createPostgresPacaAgentExecutor } from "../agent-auth/execution";
@@ -14,6 +15,11 @@ import * as schema from "../db/schema";
 import { pacaPermission } from "../permission/plugin";
 import { PostgresPacaPermissionStore } from "../permission/postgres-store";
 import { PacaPermissionService } from "../permission/service";
+import {
+  invalidateProjectActor,
+  invalidateProjectSession,
+  invalidateUserSession,
+} from "../realtime/invalidation";
 
 const MINIMUM_SECRET_LENGTH = 32;
 const ONE_DAY_SECONDS = 60 * 60 * 24;
@@ -22,6 +28,7 @@ const SESSION_EXPIRES_IN_SECONDS = ONE_DAY_SECONDS * 7;
 type AuthDatabase = NonNullable<BetterAuthOptions["database"]>;
 
 export type CurrentUserSession = {
+  id: string;
   user: {
     id: string;
     name: string;
@@ -183,6 +190,11 @@ export function createAuth(db: PacaDatabase, env: AppBindings) {
     permissionService: new PacaPermissionService(permissionStore),
     findProjectOrganization: (projectId) => permissionStore.findProjectOrganization(projectId),
     onEvent: (event) => recordAgentAuthEvent(db, event),
+    onCapabilitiesRevoked: async ({ agentId, projectIds }) => {
+      await Promise.all(
+        projectIds.map((projectId) => invalidateProjectActor(env, projectId, "agent", agentId)),
+      );
+    },
   });
   const secondaryStorage = new PostgresBetterAuthSecondaryStorage(db);
 
@@ -199,7 +211,34 @@ export function createAuth(db: PacaDatabase, env: AppBindings) {
 }
 
 export async function handleAuthRequest(request: Request, env: AppBindings): Promise<Response> {
-  return withDatabase(env, async (db) => createAuth(db, env).handler(request));
+  return withDatabase(env, async (db) => {
+    const auth = createAuth(db, env);
+    const isSignOut =
+      request.method === "POST" && new URL(request.url).pathname === "/api/auth/sign-out";
+    const current = isSignOut
+      ? await auth.api.getSession({
+          headers: request.headers,
+          query: { disableCookieCache: true },
+        })
+      : null;
+    const memberships = current
+      ? await db
+          .select({ projectId: schema.pacaProjectMembers.projectId })
+          .from(schema.pacaProjectMembers)
+          .where(eq(schema.pacaProjectMembers.userId, current.user.id))
+      : [];
+
+    const response = await auth.handler(request);
+    if (response.ok && current) {
+      await Promise.all([
+        invalidateUserSession(env, current.user.id, current.session.id),
+        ...memberships.map(({ projectId }) =>
+          invalidateProjectSession(env, projectId, current.session.id),
+        ),
+      ]);
+    }
+    return response;
+  });
 }
 
 export async function handleAgentConfigurationRequest(
@@ -249,6 +288,7 @@ export async function readCurrentUserSessionFromDatabase(
   if (!result) return null;
 
   return {
+    id: result.session.id,
     user: {
       id: result.user.id,
       name: result.user.name,

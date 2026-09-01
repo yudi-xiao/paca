@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "test": "vitest run",
+    "test:workers": "vitest run --config vitest.workers.config.ts --max-workers=1 --no-isolate",
     "test:watch": "vitest",
     "smoke:internal": "bun run scripts/smoke-internal.ts",
     "smoke:permission:internal": "bun run scripts/smoke-permission-internal.ts",
@@ -31,7 +32,7 @@
     "agent:approve:internal": "bun run scripts/approve-agent-internal.ts",
     "agent:status": "bun run scripts/agent-status.ts",
     "agent:execute": "bun run scripts/execute-agent-actions.ts",
-    "check": "bun run build:web:internal && bun run types:check && bun run db:check && bun run typecheck && bun run lint && bun run test && bun run deploy:dry-run"
+    "check": "bun run build:web:internal && bun run types:check && bun run db:check && bun run typecheck && bun run lint && bun run test && bun run test:workers && bun run deploy:dry-run"
   },
   "dependencies": {
     "@better-auth/agent-auth": "0.6.2",
@@ -45,6 +46,7 @@
   "devDependencies": {
     "@better-auth/memory-adapter": "1.7.2",
     "@biomejs/biome": "2.4.12",
+    "@cloudflare/vitest-plugin": "^1.1.2",
     "@types/node": "26.4.0",
     "@types/pg": "8.15.6",
     "auth": "1.7.2",

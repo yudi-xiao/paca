@@ -1,14 +1,9 @@
 // Hook that listens for global-agent chat events (home page / admin pages,
 // no project context) and invalidates the matching React Query caches.
 //
-// Unlike useProjectRealtime, there is no explicit room to join here: the
-// server auto-joins every connected socket into its own
-// `user:<userId>:agent-chat` room at connect time (see
-// services/realtime/src/server.ts), the same way it auto-joins the
-// notifications room — a global chat conversation has no project to gate
-// room membership on, only the caller's own identity. So this hook only
-// needs to attach a listener, mirroring useProjectRealtime's event handling
-// but without the join/leave/rejoin bookkeeping.
+// Unlike useProjectRealtime, there is no explicit room to join here. The
+// authenticated layout owns the current user's UserParty connection, so this
+// hook only multiplexes its agent.* messages into the relevant query caches.
 //
 // Usage: call once from wherever the global AIChatFloat is mounted.
 //

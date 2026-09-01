@@ -104,7 +104,7 @@ function AuthenticatedLayout() {
 		if (!user) return;
 		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") return;
 
-		const socket = connectSocket();
+		const socket = connectSocket(user.id);
 
 		const handleNotification = ({ type }: { type: string }) => {
 			if (type === "notification.created") {
@@ -130,9 +130,7 @@ function AuthenticatedLayout() {
 		// network drop.
 		const unsubscribe = onTokenRefreshed(() => {
 			const current = getSocket();
-			if (current?.connected) {
-				current.disconnect().connect();
-			}
+			current?.connect();
 		});
 
 		return () => {

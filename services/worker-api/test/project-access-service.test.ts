@@ -48,7 +48,7 @@ function repository(overrides: Partial<ProjectAccessRepository> = {}): ProjectAc
       assertAssignable(role);
       return member;
     },
-    removeMember: async () => undefined,
+    removeMember: async () => ({ userId: member.userId }),
     listUsers: async (_page, _pageSize) => ({
       items: [],
       total: 0,

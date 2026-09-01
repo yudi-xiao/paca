@@ -30,6 +30,7 @@ function websocketRequest(headers: HeadersInit = {}): Request {
 
 function userSession(overrides: Partial<CurrentUserSession> = {}): CurrentUserSession {
   return {
+    id: "session-1",
     user: {
       id: "user-1",
       name: "User",
@@ -116,8 +117,10 @@ describe("realtime connection authorization", () => {
       roomType: "project",
       roomId: PROJECT_ID,
       namespaces: ["tasks", "docs"],
+      sessionId: "session-1",
     });
     expect(state?.expiresAt).toBe(NOW + 5 * 60_000);
+    expect(state?.permissionVersion).toMatch(/^[a-f0-9]{64}$/);
     expect((result as Request).headers.get(REALTIME_CONTEXT_HEADER)).not.toBe("spoofed");
   });
 
@@ -183,16 +186,19 @@ describe("realtime connection authorization", () => {
     );
 
     expect(result).toBeInstanceOf(Request);
-    expect(
-      decodeConnectionState((result as Request).headers.get(REALTIME_CONTEXT_HEADER)),
-    ).toMatchObject({
+    const agentState = decodeConnectionState(
+      (result as Request).headers.get(REALTIME_CONTEXT_HEADER),
+    );
+    expect(agentState).toMatchObject({
       actorType: "agent",
       actorId: "agent-1",
+      sessionId: null,
       namespaces: ["tasks", "docs"],
       taskIds: [TASK_ID],
       documentIds: [DOCUMENT_ID],
       expiresAt: NOW + 60_000,
     });
+    expect(agentState?.permissionVersion).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("denies broad or mismatched Agent grants and never admits Agents to UserParty", async () => {

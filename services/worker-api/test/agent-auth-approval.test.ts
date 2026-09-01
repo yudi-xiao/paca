@@ -127,6 +127,10 @@ async function signedInApproval(allowed: boolean, organizationId = "paca-default
 async function signedInAuth(
   allowed: boolean,
   onEvent?: (event: AgentAuthEvent) => void | Promise<void>,
+  onCapabilitiesRevoked?: (change: {
+    agentId: string;
+    projectIds: string[];
+  }) => void | Promise<void>,
 ) {
   const env = bindings();
   const db = database();
@@ -142,6 +146,7 @@ async function signedInAuth(
         permissionService: service,
         findProjectOrganization: (projectId) => store.findProjectOrganization(projectId),
         onEvent,
+        onCapabilitiesRevoked,
       }),
     ),
   );
@@ -205,7 +210,8 @@ describe("Paca Agent Auth approval guard", () => {
 
   it("allows a Project approver to grant and revoke a minimal autonomous capability", async () => {
     const onEvent = vi.fn();
-    const { auth, cookie, db } = await signedInAuth(true, onEvent);
+    const onCapabilitiesRevoked = vi.fn();
+    const { auth, cookie, db } = await signedInAuth(true, onEvent, onCapabilitiesRevoked);
     seedAutonomousAgent(db);
     const constraints = {
       organizationId: "paca-default",
@@ -255,6 +261,10 @@ describe("Paca Agent Auth approval guard", () => {
         agentId: "agent-1",
       }),
     );
+    expect(onCapabilitiesRevoked).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      projectIds: [PROJECT_ID],
+    });
   });
 
   it("rejects autonomous grants without Project approval permission or complete constraints", async () => {

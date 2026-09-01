@@ -220,6 +220,7 @@ describe("worker api", () => {
 
   it("returns only the current authenticated user session projection", async () => {
     const currentUserSession = vi.fn(async () => ({
+      id: "session-1",
       user: {
         id: "user-1",
         name: "Internal Tester",

@@ -234,11 +234,11 @@
 - [x] 盘点 `services/realtime/src/subscriber.ts` 的 Valkey Pub/Sub 事件并区分在线广播与可靠事件；已补齐旧订阅器遗漏的 `automation.*` → workflows 映射，Valkey Streams/可靠处理仍保留在后续 Queue/Workflow 迁移范围。
 - [x] 实现 ProjectParty 与 UserParty，使用稳定 room name 路由并启用 WebSocket Hibernation；Wrangler 已声明独立 DO binding 与 `new_sqlite_classes` 迁移，连接状态写入 WebSocket attachment 以便休眠恢复。
 - [x] Worker 在路由到 PartyServer 前验证用户 Session 或 Agent Auth：浏览器必须同源且按 `pacaPermission` 计算可读 namespace；Agent 必须持有仍有效、精确到 Project+Task/Document 的 active read Grant，UserParty 不接受 Agent。
-- [ ] 设计绑定 actor、scope、action、expiry、nonce 和权限版本的短期连接 capability；当前可信 attachment 已绑定 actor、room scope、namespace/object action、5 分钟上限、JWT/Session expiry 与 nonce，权限版本/主动撤销和强制重连仍待实现。
+- [x] 设计绑定 actor、scope、action、expiry、nonce 和权限版本的短期连接 capability；可信 attachment 现已绑定 actor、Session、room scope、namespace/object action、5 分钟上限、JWT/Session expiry、nonce 和规范化权限摘要。项目角色/成员变更、项目归档、Agent Grant 撤销与用户 sign-out 会通过 DO RPC 写入持久失效时间并关闭匹配连接，新连接必须重新经过 Better Auth/Paca Permission/Agent Auth 判定。
 - [ ] 可靠事件先进入 Queue/Workflow，再由 PartyServer 推送；广播不作为持久队列。
-- [ ] 完成重连、休眠恢复、权限撤销、重复消息和滚动发布测试；当前纯协议/鉴权单测已覆盖 project/user/Agent 作用域、过期、事件大小和伪造 header，远端已验证非 Upgrade 为 426、无凭据 WebSocket Upgrade 为 401，已登录握手和休眠恢复尚未完成。
+- [ ] 完成重连、休眠恢复、权限撤销、重复消息和滚动发布测试；Workers Runtime 已覆盖 WebSocket attachment 休眠恢复、休眠后的 actor 撤销、连接关闭和旧 capability 重连拒绝，纯协议/鉴权单测覆盖 project/user/Agent 作用域、过期、事件大小和伪造 header，PartySocket 客户端覆盖同源 UserParty、按项目引用计数、事件分发、重连和登出清理。远端已验证 public health、无凭据 WebSocket Upgrade 为 401；仍需已登录远端休眠恢复、重复消息和滚动发布验证。
 
-当前首个实时服务端切片已部署到 internal Worker 版本 `ee279964-fe64-427b-92aa-bc36d33077a7`。完整 Worker check 通过（35 个测试文件、196 项测试），dry-run 与真实部署均识别 `ProjectParty`、`UserParty`、独立 internal Hyperdrive/R2 binding 和首次 DO migration。本切片只建立在线广播与鉴权边界，未把广播声明为可靠队列，也尚未将 React 的旧 Socket.IO client 切换到 PartySocket。
+当前实时权限撤销与 PartySocket 切片已部署到 internal Worker 版本 `c087ad49-b6ce-44bd-9efe-609185851380`。React 59 个测试文件、623 项测试，Worker 36 个测试文件、198 项测试，以及 Workers Runtime 1 个文件、2 项 DO/WebSocket 测试全部通过；dry-run 与真实部署均识别 `ProjectParty`、`UserParty`、独立 internal Hyperdrive/R2 binding。React 已从 Socket.IO 切换到 `partysocket@1.3.0`，旧 `socket.io-client` 依赖已移除。当前业务写入后直接等待 DO RPC 完成，尚未建立 Queue/Workflow/outbox 可靠投递，因此不能把权限失效通知或在线广播声明为跨故障可靠事件。
 
 ## M8：Yjs DocumentParty
 

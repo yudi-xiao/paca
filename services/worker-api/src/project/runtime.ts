@@ -1,5 +1,6 @@
 import type { AppBindings } from "../bindings";
 import { withDatabase } from "../database";
+import { invalidateProjectRoom } from "../realtime/invalidation";
 import { PostgresProjectRepository } from "./postgres-repository";
 import {
   type Project,
@@ -47,5 +48,8 @@ export const projectRuntime: ProjectRuntime = {
     withService(env, (service) => service.create(organizationId, createdBy, input)),
   update: (env, projectId, input) =>
     withService(env, (service) => service.update(projectId, input)),
-  archive: (env, projectId) => withService(env, (service) => service.archive(projectId)),
+  archive: async (env, projectId) => {
+    await withService(env, (service) => service.archive(projectId));
+    await invalidateProjectRoom(env, projectId);
+  },
 };

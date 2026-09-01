@@ -1,129 +1,201 @@
-// Singleton Socket.IO client.
-//
-// A single socket connection is shared across the whole app.  Consumers call
-// `connectSocket()` once (authenticated layout) and `disconnectSocket()` on
-// logout.  Project pages call `joinProject` / `leaveProject` to subscribe to
-// namespace-scoped rooms — these are reference-counted per projectId, since
-// more than one mounted component can subscribe to the same project
-// concurrently (see the comment above `projectSubscriberCounts` below).
-//
-// The realtime service uses two rooms per project:
-//   project:<projectId>:tasks  — task.* events
-//   project:<projectId>:docs   — doc.* events
-//
-// The server places each socket into only the rooms it has permission for, so
-// clients always emit join/leave for both namespaces and let the server decide.
+import PartySocket from "partysocket";
 
-import { io, type Socket } from "socket.io-client";
+const PARTY_PREFIX = "ws/parties";
+const MAX_RETRIES = 12;
 
-const REALTIME_URL = window.location.origin;
+export interface RealtimeEvent {
+	type: string;
+	payload: Record<string, unknown>;
+}
 
-const SOCKET_PATH = "/ws/socket.io";
+type RealtimeEventMap = {
+	connect: () => void;
+	event: (event: RealtimeEvent) => void;
+	notification: (event: RealtimeEvent) => void;
+};
 
-let socket: Socket | null = null;
+type RealtimeEventName = keyof RealtimeEventMap;
+type AnyListener = (...args: never[]) => void;
 
-/** Connect (or return the existing) socket.  Safe to call multiple times. */
-export function connectSocket(): Socket {
-	if (socket?.connected) return socket;
+export interface RealtimeSocket {
+	readonly connected: boolean;
+	connect(): RealtimeSocket;
+	disconnect(): RealtimeSocket;
+	on<T extends RealtimeEventName>(
+		event: T,
+		listener: RealtimeEventMap[T],
+	): RealtimeSocket;
+	off<T extends RealtimeEventName>(
+		event: T,
+		listener: RealtimeEventMap[T],
+	): RealtimeSocket;
+}
 
-	if (socket) {
-		socket.connect();
-		return socket;
+type PartyMessage = RealtimeEvent & { kind: "event" | "notification" };
+
+function parsePartyMessage(data: unknown): PartyMessage | null {
+	if (typeof data !== "string") return null;
+	try {
+		const value = JSON.parse(data) as Record<string, unknown>;
+		if (
+			(value.kind !== "event" && value.kind !== "notification") ||
+			typeof value.type !== "string" ||
+			!value.payload ||
+			typeof value.payload !== "object" ||
+			Array.isArray(value.payload)
+		) {
+			return null;
+		}
+		return {
+			kind: value.kind,
+			type: value.type,
+			payload: value.payload as Record<string, unknown>,
+		};
+	} catch {
+		return null;
+	}
+}
+
+class PacaRealtimeSocket implements RealtimeSocket {
+	private userId: string | null = null;
+	private userSocket: PartySocket | null = null;
+	private readonly projectSockets = new Map<string, PartySocket>();
+	private readonly listeners = new Map<RealtimeEventName, Set<AnyListener>>();
+
+	get connected(): boolean {
+		return this.sockets().some(
+			(partySocket) => partySocket.readyState === WebSocket.OPEN,
+		);
 	}
 
-	socket = io(REALTIME_URL, {
-		path: SOCKET_PATH,
-		// Cookies are sent automatically by the browser (HttpOnly access_token).
-		withCredentials: true,
-		// Prefer WebSocket; fall back to polling only when necessary.
-		transports: ["websocket", "polling"],
-		autoConnect: true,
-	});
+	connect(): RealtimeSocket {
+		for (const partySocket of this.sockets()) partySocket.reconnect();
+		return this;
+	}
 
-	// socket.io-client auto-reconnects after most disconnects, but NOT after
-	// one the server itself initiated (reason "io server disconnect") — per
-	// https://socket.io/docs/v4/client-socket-instance/#disconnect, that case
-	// requires an explicit reconnect call. The realtime service disconnects a
-	// socket exactly this way when a "join" 401s because its captured
-	// access-token snapshot has expired (see services/realtime/src/server.ts)
-	// — without this handler that socket would sit disconnected forever,
-	// joining no project rooms and receiving nothing, until something else
-	// (e.g. a full page reload) established a new connection.
-	socket.on("disconnect", (reason) => {
-		if (reason === "io server disconnect") {
-			socket?.connect();
+	disconnect(): RealtimeSocket {
+		for (const partySocket of this.sockets())
+			partySocket.close(1000, "client disconnect");
+		this.userSocket = null;
+		this.projectSockets.clear();
+		this.userId = null;
+		return this;
+	}
+
+	on<T extends RealtimeEventName>(
+		event: T,
+		listener: RealtimeEventMap[T],
+	): RealtimeSocket {
+		const listeners = this.listeners.get(event) ?? new Set<AnyListener>();
+		listeners.add(listener as AnyListener);
+		this.listeners.set(event, listeners);
+		return this;
+	}
+
+	off<T extends RealtimeEventName>(
+		event: T,
+		listener: RealtimeEventMap[T],
+	): RealtimeSocket {
+		this.listeners.get(event)?.delete(listener as AnyListener);
+		return this;
+	}
+
+	connectUser(userId: string): void {
+		if (this.userId === userId && this.userSocket) return;
+		this.userSocket?.close(1000, "user changed");
+		this.userId = userId;
+		this.userSocket = this.createPartySocket("user-party", userId);
+	}
+
+	joinProject(projectId: string): void {
+		if (this.projectSockets.has(projectId)) return;
+		this.projectSockets.set(
+			projectId,
+			this.createPartySocket("project-party", projectId),
+		);
+	}
+
+	leaveProject(projectId: string): void {
+		this.projectSockets.get(projectId)?.close(1000, "project unsubscribed");
+		this.projectSockets.delete(projectId);
+	}
+
+	reconnectProject(projectId: string): void {
+		this.projectSockets.get(projectId)?.reconnect();
+	}
+
+	private createPartySocket(
+		party: "project-party" | "user-party",
+		room: string,
+	): PartySocket {
+		const partySocket = new PartySocket({
+			host: window.location.host,
+			party,
+			room,
+			prefix: PARTY_PREFIX,
+			maxRetries: MAX_RETRIES,
+			maxEnqueuedMessages: 16,
+		});
+		partySocket.addEventListener("open", () => this.emit("connect"));
+		partySocket.addEventListener("message", (message) => {
+			const event = parsePartyMessage(message.data);
+			if (event)
+				this.emit(event.kind, { type: event.type, payload: event.payload });
+		});
+		return partySocket;
+	}
+
+	private emit<T extends RealtimeEventName>(
+		event: T,
+		value?: Parameters<RealtimeEventMap[T]>[0],
+	): void {
+		for (const listener of this.listeners.get(event) ?? []) {
+			(listener as (argument?: typeof value) => void)(value);
 		}
-	});
+	}
 
+	private sockets(): PartySocket[] {
+		return [this.userSocket, ...this.projectSockets.values()].filter(
+			(partySocket): partySocket is PartySocket => Boolean(partySocket),
+		);
+	}
+}
+
+let socket: PacaRealtimeSocket | null = null;
+const projectSubscriberCounts = new Map<string, number>();
+
+export function connectSocket(userId?: string): RealtimeSocket {
+	socket ??= new PacaRealtimeSocket();
+	if (userId) socket.connectUser(userId);
 	return socket;
 }
 
-/** Disconnect and destroy the socket.  Call on logout. */
 export function disconnectSocket(): void {
-	if (socket) {
-		socket.disconnect();
-		socket = null;
-	}
+	socket?.disconnect();
+	socket = null;
 	projectSubscriberCounts.clear();
 }
 
-/** Returns the current socket instance, or null if not connected. */
-export function getSocket(): Socket | null {
+export function getSocket(): RealtimeSocket | null {
 	return socket;
 }
 
-// Reference counts of active `joinProject` callers per projectId. Multiple
-// independent components can be subscribed to the same project at once
-// (e.g. the persistent project layout that owns the floating AI chat, and a
-// nested conversations layout) — without this, one of them unmounting and
-// calling `leaveProject` would evict the shared socket from every namespace
-// room for that project, silently starving the others of live events until
-// something happened to re-join (see `leaveProject` below).
-const projectSubscriberCounts = new Map<string, number>();
-
-/**
- * Ask the server to place this socket into the project's namespace rooms.
- * Reference-counted per projectId: call once per mounted subscriber,
- * paired with a matching `leaveProject` on cleanup.
- */
 export function joinProject(projectId: string): void {
 	const count = projectSubscriberCounts.get(projectId) ?? 0;
 	projectSubscriberCounts.set(projectId, count + 1);
-	socket?.emit("join", { projectId });
+	if (count === 0) socket?.joinProject(projectId);
 }
 
-/**
- * Remove this socket from the project's namespace rooms — but only once
- * every subscriber registered via `joinProject` has also left. This
- * prevents one subscriber's unmount from evicting room membership that a
- * sibling subscriber (e.g. the floating AI chat widget's parent layout)
- * still relies on.
- */
 export function leaveProject(projectId: string): void {
 	const count = projectSubscriberCounts.get(projectId) ?? 0;
 	if (count <= 1) {
 		projectSubscriberCounts.delete(projectId);
-		socket?.emit("leave", { projectId });
+		socket?.leaveProject(projectId);
 		return;
 	}
 	projectSubscriberCounts.set(projectId, count - 1);
 }
 
-/**
- * Re-emit "join" for a project after the socket reconnects, without
- * affecting the subscriber count used by `joinProject`/`leaveProject`. A
- * reconnect starts a new server-side session with no room membership, so
- * every project the socket cares about needs to be re-joined — but this
- * isn't a new subscriber, so it must not be counted as one (or a later
- * `leaveProject` would never bring the count back down to zero).
- */
 export function rejoinProject(projectId: string): void {
-	socket?.emit("join", { projectId });
-}
-
-// ── Typed event payloads ─────────────────────────────────────────────────────
-
-export interface RealtimeEvent {
-	type: string;
-	payload: Record<string, unknown>;
+	socket?.reconnectProject(projectId);
 }

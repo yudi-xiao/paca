@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "paca-worker-api-test",
+  "main": "test/workers/worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ProjectParty",
+        "class_name": "ProjectParty"
+      },
+      {
+        "name": "UserParty",
+        "class_name": "UserParty"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1-realtime-parties",
+      "new_sqlite_classes": ["ProjectParty", "UserParty"]
+    }
+  ]
+}

@@ -69,6 +69,8 @@ export type DirectoryUserList = {
   pageSize: number;
 };
 
+export type RemovedProjectMember = Pick<ProjectMember, "userId">;
+
 export type ProjectRoleInput = {
   name: string;
   description?: string;
@@ -103,7 +105,7 @@ export interface ProjectAccessRepository {
     roleId: string,
     assertAssignable: (role: ProjectRole) => void,
   ): Promise<ProjectMember>;
-  removeMember(projectId: string, memberId: string): Promise<void>;
+  removeMember(projectId: string, memberId: string): Promise<RemovedProjectMember>;
   listUsers(page: number, pageSize: number): Promise<DirectoryUserList>;
 }
 
@@ -196,7 +198,7 @@ export class ProjectAccessService {
     });
   }
 
-  removeMember(projectId: string, memberId: string): Promise<void> {
+  removeMember(projectId: string, memberId: string): Promise<RemovedProjectMember> {
     return this.repository.removeMember(projectId, memberId);
   }
 
