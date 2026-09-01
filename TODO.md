@@ -13,9 +13,9 @@
 
 ## 当前状态
 
-更新时间：2026-08-31
+更新时间：2026-09-01
 
-当前里程碑：**M6 R2 任务附件纵向切片与 internal 环境隔离已闭环。`paca/main` 的认证、Demo、任务和 Agent 数据已复制到 `paca/internal`，Worker 使用独立 Hyperdrive、最小权限 runtime role 与独立 R2；真实附件 smoke 已通过上传、Range 下载、软删除/恢复/scheduled 物理清理、真实 5 MiB multipart 分片上传与 abort，以及项目权限在上传过程中撤销后的即时 403。每日 UTC 10:15 Cron 已注册并以 `claimed=1/purged=1/failed=0` 验收。M6 仅剩 production binding 与需要外部 legacy 凭据的历史附件迁移演练。**
+当前里程碑：**M7 PartyServer 可靠实时事件已形成并部署首个完整闭环。PostgreSQL 0015 outbox 与 7 个事务触发器捕获 Task/Sprint/View 写入，request `waitUntil` 和每分钟 Cron 负责恢复性投递，Cloudflare Queue/DLQ 采用至少一次交付，ProjectParty/UserParty 用 DO SQLite outbox ID 幂等，浏览器以有界 ID 集合去重。真实 DEMO-1 无可见值变化 PATCH 已得到 `delivered/attempts=1`；M7 仍需已登录远端 WebSocket 休眠重连和滚动发布专项验收。**
 
 已确认前置条件：
 
@@ -30,11 +30,11 @@
 - [x] 已使用管理页生成的一次性 token 将本机 `Mac codex agent` 注册为 active delegated Agent Host；Host 使用设备本地 Ed25519 身份，私钥仅保存于被 Git 忽略且权限为 `0600` 的 `.paca/agent-host.json`，token 未落盘。该状态只代表 Host 身份已建立，尚未注册 Agent、完成 device approval、取得 Capability Grant 或接入 legacy Agent Runner。
 - [x] 已创建隔离的 PlanetScale PostgreSQL `paca/internal` development branch；确认初始 `public` schema 为 0 张业务表。
 - [x] 用户确认当前环境尚未上线，授权首个 internal 认证预览直接使用原 `paca/main` Hyperdrive；此例外不代表生产架构决策。
-- [x] internal 已退出原 Hyperdrive 的宽权限 role：新建无继承管理角色的 `paca-worker-internal`，仅显式授予 37 张 runtime 业务表 CRUD，验证其能读取业务表且不能读取 migration ledger；独立 Hyperdrive 已创建并接收 internal 流量。根/main Hyperdrive 仅保留为独立环境与 Wrangler 版本回滚路径。
-- [x] 已固化 runtime role 的显式 37 表 CRUD GRANT 与验权 SQL；目标最小权限 role 无 DDL 和 migration ledger/附件迁移账本权限，PlanetScale 授权时使用去掉路由后缀的真实 role 名。现有宽权限 role 的验权会按预期失败，不能作为生产验收结果。
+- [x] internal 已退出原 Hyperdrive 的宽权限 role：新建无继承管理角色的 `paca-worker-internal`，现仅显式授予 38 张 runtime 业务表 CRUD，验证其能读取业务表且不能读取 migration ledger；独立 Hyperdrive 已创建并接收 internal 流量。根/main Hyperdrive 仅保留为独立环境与 Wrangler 版本回滚路径。
+- [x] 已固化 runtime role 的显式 38 表 CRUD GRANT 与验权 SQL；目标最小权限 role 无 DDL 和 migration ledger/附件迁移账本权限，PlanetScale 授权时使用去掉路由后缀的真实 role 名。现有宽权限 role 的验权会按预期失败，不能作为生产验收结果。
 - [x] `deploy:internal` 强制拒绝与根环境相同的 Hyperdrive；首轮 main 预览例外已移除，不能再通过环境变量绕过隔离守卫。
 - [x] 已创建 `paca-attachments-development`、`paca-attachments-internal` 与 `paca-attachments-production` 三个隔离 R2 bucket；根/internal Wrangler binding 已分别指向 development/internal，部署守卫会同时拒绝数据库和附件 bucket 环境混用。production binding 待生产环境配置时接入。
-- [x] 已实现并实际执行受确认串保护的 `database:provision:internal`：检查 main/internal migration ledger、拒绝分叉目标、以单事务和 `ON CONFLICT DO NOTHING` 初始复制、核对 37 表行数与业务表指纹、应用/验证最小权限 role 并创建或更新独立 Hyperdrive。脚本不输出密码，临时 admin role 15 分钟自动过期；2026-08-31 已完成获批的数据复制与 runtime role 凭据轮换，Task 自引用外键在提交前恢复为 `NOT DEFERRABLE`。
+- [x] 已实现并实际执行受确认串保护的 `database:provision:internal`：检查 main/internal migration ledger、拒绝分叉目标、以单事务和 `ON CONFLICT DO NOTHING` 初始复制、核对应用表行数与业务表指纹、应用/验证最小权限 role 并创建或更新独立 Hyperdrive；当前清单为 38 张 runtime 表。脚本不输出密码，临时 admin role 15 分钟自动过期；2026-08-31 已完成获批的数据复制与 runtime role 凭据轮换，Task 自引用外键在提交前恢复为 `NOT DEFERRABLE`。
 - [x] internal 数据隔离版本 `9ec5c792-3d28-4a5b-8f90-73c9e2a39613` 已部署到 `paca.howlearnwood.com`：Wrangler dry-run/部署输出均确认独立 Hyperdrive 与 `paca-attachments-internal` binding；公开 health 返回 `environment=internal`，真实账号 API 验证完成登录、Session、Demo 项目、12 个任务、登出和旧 Cookie 撤销。
 - [x] 已用只读查询确认此前因 `pscale sql` 间歇性 `EOF` 中断的事务未留下部分 DDL；随后改用 `pscale shell` + `psql` 在单事务中成功应用首版 migration。
 - [x] `paca/internal` 已生成 13 张表，`paca_schema_migration` 中的 migration ID 与 snapshot checksum 均已核验。
@@ -53,6 +53,7 @@
 - [x] 0012 附件迁移账本 migration 已经受控 admin shell 以单事务应用于 `paca/internal` 与 `paca/main`：新增 `paca_attachment_migration_item`，账本不授权给 Worker runtime role；两端 migration ledger 与 snapshot checksum 已核验。
 - [x] 0013 Task Link migration 已经受控 admin shell 以单事务应用于 `paca/internal` 与 `paca/main`：新增 `paca_task_link`、项目作用域 source/target 复合外键、方向/类型唯一约束、自关联约束和双向查询索引；main 应用前后 active Task 均为 12，双方 migration ledger/checksum 已核验，main 的 13 个约束和 4 个索引已核验。
 - [x] 0014 附件迁移 active-run guard 已经受控 admin shell 以单事务应用于 `paca/internal` 与 `paca/main`：partial unique index 保证同一源附件最多属于一个非 `rolled_back` run；应用前只读检查确认 main 迁移台账为空且没有跨 run 冲突，两端 checksum 和索引定义均已核验。
+- [x] 0015 可靠实时 outbox migration 已以 15 分钟自动过期 admin role 在 `paca/internal` 单事务应用：新增 `paca_realtime_outbox`、2 个调度索引、7 个 Task/Sprint/View 事务触发器和版本化 checksum；runtime role 已扩为 38 表 CRUD 且无 DDL/ledger 权限。`paca/main` 尚未应用，因为本轮只切换 internal Worker。
 - [x] Better Auth + React Static Assets 的规范入口已固定为 `paca.howlearnwood.com`；Wrangler internal 环境将 Better Auth URL/可信 Origin 仅绑定到该自定义域名。`workers.dev` 仅保留为诊断/回滚入口，不属于认证可信 Origin。验收版本 `783cbcf7-1d29-41d0-9ae2-afde028af068` 已验证根页面、SPA fallback、public health、API 404 与 Origin 拒绝边界。
 - [x] 远端烟测已通过 public health、Hyperdrive database health、注册/登录、Session、`GET /api/me`、登出和旧 Cookie 服务端撤销；本地一次性 Secret 与测试凭据已清理。
 - [x] React Web 已通过同一 Worker origin 提供；浏览器已验证登录页渲染，远端全链路已验证注册、Session、空工作区读取、登出和会话撤销。
@@ -118,7 +119,7 @@
 - [x] 首先在 `paca/internal` 空 development branch 验证 migration；随后因环境尚未上线且用户明确授权，将同一 migration 应用于 `paca/main` 作为首版内部预览目标。
 - [x] 建立 PostgreSQL Drizzle schema 目录和 `drizzle.config.ts`。
 - [x] `drizzle.config.ts` 仅从本地/CI `DATABASE_URL` 读取直接连接串，不使用 Hyperdrive runtime URL。
-- [x] migration 使用临时 admin role；internal runtime 已切换到持久、无继承管理角色且仅显式 37 表 CRUD 的 `paca-worker-internal` role 与独立 Hyperdrive，migration ledger 不授予 runtime。
+- [x] migration 使用临时 admin role；internal runtime 已切换到持久、无继承管理角色且仅显式 38 表 CRUD 的 `paca-worker-internal` role 与独立 Hyperdrive，migration ledger 不授予 runtime。
 - [x] 生成第一版 Better Auth Core/Organization + Paca Project Permission SQL migration，并人工审查 UUID、索引、复合外键、默认值和 migration ledger。
 - [ ] 建立 migration dry-run/测试数据库流程，禁止生产启动时自动 `push` 或自动迁移。
 - [ ] 建立 PostgreSQL repository contract test 基础设施。
@@ -235,10 +236,10 @@
 - [x] 实现 ProjectParty 与 UserParty，使用稳定 room name 路由并启用 WebSocket Hibernation；Wrangler 已声明独立 DO binding 与 `new_sqlite_classes` 迁移，连接状态写入 WebSocket attachment 以便休眠恢复。
 - [x] Worker 在路由到 PartyServer 前验证用户 Session 或 Agent Auth：浏览器必须同源且按 `pacaPermission` 计算可读 namespace；Agent 必须持有仍有效、精确到 Project+Task/Document 的 active read Grant，UserParty 不接受 Agent。
 - [x] 设计绑定 actor、scope、action、expiry、nonce 和权限版本的短期连接 capability；可信 attachment 现已绑定 actor、Session、room scope、namespace/object action、5 分钟上限、JWT/Session expiry、nonce 和规范化权限摘要。项目角色/成员变更、项目归档、Agent Grant 撤销与用户 sign-out 会通过 DO RPC 写入持久失效时间并关闭匹配连接，新连接必须重新经过 Better Auth/Paca Permission/Agent Auth 判定。
-- [ ] 可靠事件先进入 Queue/Workflow，再由 PartyServer 推送；广播不作为持久队列。
+- [x] 已迁移写入的 Task/Sprint/View 可靠事件先由 PostgreSQL 事务触发器写入 outbox，再由 request `waitUntil`/每分钟恢复 Cron 批量发送到 Cloudflare Queue；Queue consumer 按消息调用 ProjectParty/UserParty，成功后标记 delivered，失败指数退避并在超过重试上限后进入独立 DLQ。广播本身不作为持久队列，outbox claim 支持 lease/stale recovery，DO SQLite 与浏览器均按 outbox ID 去重。尚未迁移的 Document/Workflow 事件随 M8/M9 接入相同契约。
 - [ ] 完成重连、休眠恢复、权限撤销、重复消息和滚动发布测试；Workers Runtime 已覆盖 WebSocket attachment 休眠恢复、休眠后的 actor 撤销、连接关闭和旧 capability 重连拒绝，纯协议/鉴权单测覆盖 project/user/Agent 作用域、过期、事件大小和伪造 header，PartySocket 客户端覆盖同源 UserParty、按项目引用计数、事件分发、重连和登出清理。远端已验证 public health、无凭据 WebSocket Upgrade 为 401；仍需已登录远端休眠恢复、重复消息和滚动发布验证。
 
-当前实时权限撤销与 PartySocket 切片已部署到 internal Worker 版本 `c087ad49-b6ce-44bd-9efe-609185851380`。React 59 个测试文件、623 项测试，Worker 36 个测试文件、198 项测试，以及 Workers Runtime 1 个文件、2 项 DO/WebSocket 测试全部通过；dry-run 与真实部署均识别 `ProjectParty`、`UserParty`、独立 internal Hyperdrive/R2 binding。React 已从 Socket.IO 切换到 `partysocket@1.3.0`，旧 `socket.io-client` 依赖已移除。当前业务写入后直接等待 DO RPC 完成，尚未建立 Queue/Workflow/outbox 可靠投递，因此不能把权限失效通知或在线广播声明为跨故障可靠事件。
+当前可靠实时事件切片已部署到 internal Worker 版本 `040997b7-0d32-4505-80a8-f96ea46cac35`。React 59 个测试文件、624 项测试，Worker 38 个测试文件、203 项测试，以及 Workers Runtime 1 个文件、3 项 DO/WebSocket 测试全部通过；完整 check/dry-run/真实部署识别 `REALTIME_EVENTS`、ProjectParty/UserParty、独立 internal Hyperdrive/R2。真实账号对 DEMO-1 的同值 PATCH 生成 `task.updated`，随后经 outbox→Queue→ProjectParty 成功标记 `delivered`，首次尝试完成。已登录浏览器的远端消息接收、休眠重连与滚动发布专项仍未完成，因此上一项测试保持未勾选。
 
 ## M8：Yjs DocumentParty
 
@@ -318,5 +319,5 @@
 - `services/realtime/src/subscriber.ts`：现有 Valkey Pub/Sub 事件路由基线。
 - `apps/web`：现有 React 与 TanStack Router/Query/Form 前端。
 - `services/worker-api`：Hono Worker、Hyperdrive runtime 数据访问、Drizzle schema/migration 与 Better Auth 的目标代码路径。
-- `services/worker-api/src/realtime`：ProjectParty/UserParty、Hibernation、可信连接 attachment、事件过滤和 Worker 路由的首个 PartyServer 落点。
+- `services/worker-api/src/realtime`：ProjectParty/UserParty、Hibernation、可信连接 attachment、事件过滤、PostgreSQL outbox、Queue consumer、DO 幂等投递和 Worker 路由。
 - Yjs DocumentParty 的目标代码路径：待 M8 实现时确定。

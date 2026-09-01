@@ -147,8 +147,9 @@ export function canReceiveRealtimeEvent(
   return false;
 }
 
-export function realtimeClientMessage(event: RealtimeEnvelope) {
+export function realtimeClientMessage(event: RealtimeEnvelope, id?: string) {
   return {
+    ...(id ? { id } : {}),
     kind: event.type.startsWith("notification.") ? ("notification" as const) : ("event" as const),
     type: event.type,
     payload: event.payload,

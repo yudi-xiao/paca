@@ -115,4 +115,33 @@ describe("PartyServer Durable Object runtime", () => {
     const staleClosed = nextClose(stale.socket);
     await expect(staleClosed).resolves.toMatchObject({ code: 4003 });
   });
+
+  it("delivers an outbox event once and persists its idempotency key across eviction", async () => {
+    const { socket, stub } = await connect(connectionState());
+    await nextMessage(socket);
+    const outboxId = "55555555-5555-4555-8555-555555555555";
+    const value = {
+      version: 1 as const,
+      outboxId,
+      roomType: "project" as const,
+      roomId: PROJECT_ID,
+      event: {
+        type: "task.updated",
+        payload: { project_id: PROJECT_ID, task_id: "task-1" },
+      },
+      createdAt: new Date().toISOString(),
+    };
+
+    const delivered = nextMessage(socket);
+    await expect(stub.publishReliable(value)).resolves.toEqual({ delivered: 1, duplicate: false });
+    expect(JSON.parse(await delivered)).toMatchObject({
+      id: outboxId,
+      kind: "event",
+      type: "task.updated",
+    });
+
+    await evictDurableObject(stub, { webSockets: "hibernate" });
+    await expect(stub.publishReliable(value)).resolves.toEqual({ delivered: 0, duplicate: true });
+    socket.close(1000, "done");
+  });
 });

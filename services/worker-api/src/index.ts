@@ -1,22 +1,49 @@
 import { createApp } from "./app";
-import { runScheduledAttachmentCleanup } from "./attachment/scheduled";
+import { ATTACHMENT_CLEANUP_CRON, runScheduledAttachmentCleanup } from "./attachment/scheduled";
+import { consumeRealtimeQueue } from "./realtime/consumer";
+import { dispatchRealtimeOutbox } from "./realtime/outbox";
 import { routeRealtimeRequest } from "./realtime/router";
 
 export { ProjectParty, UserParty } from "./realtime/party";
 
 const app = createApp();
+const REALTIME_OUTBOX_CRON = "* * * * *";
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+async function dispatchAndLog(env: Env, source: "request" | "scheduled"): Promise<void> {
+  const result = await dispatchRealtimeOutbox(env);
+  if (result.claimed > 0 || result.failed > 0) {
+    console.log(JSON.stringify({ event: "realtime.outbox.dispatched", source, ...result }));
+  }
+}
 
 export default {
-  fetch(request, env, executionContext) {
+  async fetch(request, env, executionContext) {
     if (new URL(request.url).pathname.startsWith("/ws/parties/")) {
-      return routeRealtimeRequest(request, env).then(
-        (response) => response ?? Response.json({ status: "not_found" }, { status: 404 }),
+      return (
+        (await routeRealtimeRequest(request, env)) ??
+        Response.json({ status: "not_found" }, { status: 404 })
       );
     }
-    return app.fetch(request, env, executionContext);
+    const response = await app.fetch(request, env, executionContext);
+    if (response.ok && MUTATING_METHODS.has(request.method)) {
+      executionContext.waitUntil(dispatchAndLog(env, "request"));
+    }
+    return response;
   },
   async scheduled(controller, env) {
-    const result = await runScheduledAttachmentCleanup(controller, env);
-    console.log(JSON.stringify({ event: "attachment.cleanup.completed", ...result }));
+    if (controller.cron === REALTIME_OUTBOX_CRON) {
+      await dispatchAndLog(env, "scheduled");
+      return;
+    }
+    if (controller.cron === ATTACHMENT_CLEANUP_CRON) {
+      const result = await runScheduledAttachmentCleanup(controller, env);
+      console.log(JSON.stringify({ event: "attachment.cleanup.completed", ...result }));
+      return;
+    }
+    console.warn(JSON.stringify({ event: "scheduled.unknown_cron", cron: controller.cron }));
+  },
+  async queue(batch, env) {
+    await consumeRealtimeQueue(batch, env);
   },
 } satisfies ExportedHandler<Env>;

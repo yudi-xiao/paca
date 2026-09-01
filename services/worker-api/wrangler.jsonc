@@ -38,6 +38,24 @@
       "bucket_name": "paca-attachments-development"
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "REALTIME_EVENTS",
+        "queue": "paca-realtime-events-development"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "paca-realtime-events-development",
+        "max_batch_size": 10,
+        "max_batch_timeout": 1,
+        "max_retries": 5,
+        "retry_delay": 5,
+        "dead_letter_queue": "paca-realtime-events-development-dlq"
+      }
+    ]
+  },
   "durable_objects": {
     "bindings": [
       {
@@ -73,7 +91,7 @@
         "TRUSTED_ORIGINS": "https://paca.howlearnwood.com"
       },
       "triggers": {
-        "crons": ["15 10 * * *"]
+        "crons": ["* * * * *", "15 10 * * *"]
       },
       "hyperdrive": [
         {
@@ -87,6 +105,24 @@
           "bucket_name": "paca-attachments-internal"
         }
       ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "REALTIME_EVENTS",
+            "queue": "paca-realtime-events-internal"
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "paca-realtime-events-internal",
+            "max_batch_size": 10,
+            "max_batch_timeout": 1,
+            "max_retries": 5,
+            "retry_delay": 5,
+            "dead_letter_queue": "paca-realtime-events-internal-dlq"
+          }
+        ]
+      },
       "durable_objects": {
         "bindings": [
           {

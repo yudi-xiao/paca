@@ -10,6 +10,7 @@ import {
   type RealtimeConnectionStateView,
   realtimeClientMessage,
 } from "./protocol";
+import { parseRealtimeQueueMessage } from "./queue-protocol";
 
 type RealtimeConnection = Connection<RealtimeConnectionState>;
 type InvalidationScope = "actor" | "room" | "session";
@@ -32,7 +33,11 @@ abstract class PacaRealtimeParty extends Server<Env> {
           subject TEXT NOT NULL,
           invalidated_at INTEGER NOT NULL,
           PRIMARY KEY (scope, subject)
-        )
+        );
+        CREATE TABLE IF NOT EXISTS paca_realtime_delivery (
+          event_id TEXT PRIMARY KEY,
+          delivered_at INTEGER NOT NULL
+        );
       `);
     });
   }
@@ -93,9 +98,9 @@ abstract class PacaRealtimeParty extends Server<Env> {
     }
   }
 
-  protected publishAuthorized(value: unknown): number {
+  protected publishAuthorized(value: unknown, eventId?: string): number {
     const event = parseRealtimeEnvelope(value);
-    const message = JSON.stringify(realtimeClientMessage(event));
+    const message = JSON.stringify(realtimeClientMessage(event, eventId));
     let delivered = 0;
     for (const connection of this.getConnections<RealtimeConnectionState>()) {
       const state = connection.state;
@@ -109,6 +114,36 @@ abstract class PacaRealtimeParty extends Server<Env> {
     }
     return delivered;
   }
+
+  protected publishReliableAuthorized(value: unknown): {
+    delivered: number;
+    duplicate: boolean;
+  } {
+    const message = parseRealtimeQueueMessage(value);
+    if (message.roomType !== this.roomType() || message.roomId !== this.name) {
+      throw new Error("REALTIME_ROOM_SCOPE_MISMATCH");
+    }
+    const [existing] = this.durableState.storage.sql
+      .exec<{ eventId: string }>(
+        "SELECT event_id AS eventId FROM paca_realtime_delivery WHERE event_id = ?",
+        message.outboxId,
+      )
+      .toArray();
+    if (existing) return { delivered: 0, duplicate: true };
+
+    this.validateEventScope(message.event);
+    const delivered = this.publishAuthorized(message.event, message.outboxId);
+    this.durableState.storage.sql.exec(
+      "INSERT INTO paca_realtime_delivery (event_id, delivered_at) VALUES (?, ?)",
+      message.outboxId,
+      Date.now(),
+    );
+    return { delivered, duplicate: false };
+  }
+
+  protected abstract roomType(): "project" | "user";
+
+  protected abstract validateEventScope(event: ReturnType<typeof parseRealtimeEnvelope>): void;
 
   invalidateActor(actorType: "user" | "agent", actorId: string): number {
     if (!actorId || actorId.length > 255) throw new Error("REALTIME_ACTOR_INVALID");
@@ -195,21 +230,45 @@ abstract class PacaRealtimeParty extends Server<Env> {
 }
 
 export class ProjectParty extends PacaRealtimeParty {
+  protected roomType(): "project" {
+    return "project";
+  }
+
+  protected validateEventScope(event: ReturnType<typeof parseRealtimeEnvelope>): void {
+    if (event.payload.project_id !== this.name) throw new Error("REALTIME_PROJECT_SCOPE_MISMATCH");
+  }
+
   publish(value: unknown): number {
     const event = parseRealtimeEnvelope(value);
-    if (event.payload.project_id !== this.name) throw new Error("REALTIME_PROJECT_SCOPE_MISMATCH");
+    this.validateEventScope(event);
     return this.publishAuthorized(event);
+  }
+
+  publishReliable(value: unknown): { delivered: number; duplicate: boolean } {
+    return this.publishReliableAuthorized(value);
   }
 }
 
 export class UserParty extends PacaRealtimeParty {
-  publish(value: unknown): number {
-    const event = parseRealtimeEnvelope(value);
+  protected roomType(): "user" {
+    return "user";
+  }
+
+  protected validateEventScope(event: ReturnType<typeof parseRealtimeEnvelope>): void {
     const recipient = event.payload.recipient_user_id;
     const actor = event.payload.actor_user_id;
     if (recipient !== this.name && actor !== this.name) {
       throw new Error("REALTIME_USER_SCOPE_MISMATCH");
     }
+  }
+
+  publish(value: unknown): number {
+    const event = parseRealtimeEnvelope(value);
+    this.validateEventScope(event);
     return this.publishAuthorized(event);
+  }
+
+  publishReliable(value: unknown): { delivered: number; duplicate: boolean } {
+    return this.publishReliableAuthorized(value);
   }
 }

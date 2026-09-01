@@ -733,6 +733,38 @@ export const pacaTaskActivities = pgTable(
   ],
 );
 
+export type RealtimeOutboxStatus = "pending" | "enqueuing" | "enqueued" | "delivered";
+
+export const pacaRealtimeOutbox = pgTable(
+  "paca_realtime_outbox",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    roomType: text("room_type").notNull(),
+    roomId: text("room_id").notNull(),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: text("status").$type<RealtimeOutboxStatus>().default("pending").notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    availableAt: timestamp("available_at", { withTimezone: true }).defaultNow().notNull(),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    enqueuedAt: timestamp("enqueued_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    failureCode: text("failure_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("paca_realtime_outbox_dispatch_idx").on(table.status, table.availableAt, table.createdAt),
+    index("paca_realtime_outbox_room_idx").on(table.roomType, table.roomId, table.createdAt),
+    check("paca_realtime_outbox_room_type_check", sql`${table.roomType} in ('project', 'user')`),
+    check(
+      "paca_realtime_outbox_status_check",
+      sql`${table.status} in ('pending', 'enqueuing', 'enqueued', 'delivered')`,
+    ),
+    check("paca_realtime_outbox_attempts_check", sql`${table.attempts} >= 0`),
+  ],
+);
+
 export const pacaProjectsRelations = relations(pacaProjects, ({ one, many }) => ({
   organization: one(organization, {
     fields: [pacaProjects.organizationId],

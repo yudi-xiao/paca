@@ -6,6 +6,9 @@ const expectedInternalOrigin = "https://paca.howlearnwood.com";
 const expectedDevelopmentAttachmentBucket = "paca-attachments-development";
 const expectedInternalAttachmentBucket = "paca-attachments-internal";
 const expectedAttachmentCleanupCron = "15 10 * * *";
+const expectedRealtimeOutboxCron = "* * * * *";
+const expectedDevelopmentRealtimeQueue = "paca-realtime-events-development";
+const expectedInternalRealtimeQueue = "paca-realtime-events-internal";
 const expectedPartyBindings = new Map([
   ["ProjectParty", "ProjectParty"],
   ["UserParty", "UserParty"],
@@ -79,6 +82,27 @@ function assertRealtimeMigration(record: JsonRecord): void {
   }
 }
 
+function assertRealtimeQueue(record: JsonRecord, label: string, expectedQueue: string): void {
+  const queues = asRecord(record.queues, `${label}_QUEUES`);
+  const producers = asRecordArray(queues.producers, `${label}_QUEUE_PRODUCERS`);
+  const consumers = asRecordArray(queues.consumers, `${label}_QUEUE_CONSUMERS`);
+  const producer = producers.find((entry) => entry.binding === "REALTIME_EVENTS");
+  const consumer = consumers.find((entry) => entry.queue === expectedQueue);
+  if (!producer || producer.queue !== expectedQueue) {
+    throw new Error(`${label}_REALTIME_QUEUE_PRODUCER_INVALID`);
+  }
+  if (
+    !consumer ||
+    consumer.max_batch_size !== 10 ||
+    consumer.max_batch_timeout !== 1 ||
+    consumer.max_retries !== 5 ||
+    consumer.retry_delay !== 5 ||
+    consumer.dead_letter_queue !== `${expectedQueue}-dlq`
+  ) {
+    throw new Error(`${label}_REALTIME_QUEUE_CONSUMER_INVALID`);
+  }
+}
+
 async function main(): Promise<void> {
   const source = await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8");
   const parsed: unknown = JSON.parse(source);
@@ -96,6 +120,8 @@ async function main(): Promise<void> {
   // internal environment must repeat the bindings explicitly.
   assertPartyBindings(internal, "INTERNAL");
   assertRealtimeMigration(config);
+  assertRealtimeQueue(config, "ROOT", expectedDevelopmentRealtimeQueue);
+  assertRealtimeQueue(internal, "INTERNAL", expectedInternalRealtimeQueue);
 
   if (usesRootDatabase) {
     throw new Error("INTERNAL_HYPERDRIVE_MUST_NOT_MATCH_ROOT");
@@ -127,8 +153,9 @@ async function main(): Promise<void> {
   if (
     attachmentCleanupEnabled !== "true" ||
     !Array.isArray(crons) ||
-    crons.length !== 1 ||
-    crons[0] !== expectedAttachmentCleanupCron
+    crons.length !== 2 ||
+    !crons.includes(expectedAttachmentCleanupCron) ||
+    !crons.includes(expectedRealtimeOutboxCron)
   ) {
     throw new Error("INTERNAL_ATTACHMENT_CLEANUP_TRIGGER_INVALID");
   }

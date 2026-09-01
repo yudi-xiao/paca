@@ -4,6 +4,21 @@
   "main": "test/workers/worker.ts",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
+  "queues": {
+    "producers": [
+      {
+        "binding": "REALTIME_EVENTS",
+        "queue": "paca-realtime-events-test"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "paca-realtime-events-test",
+        "max_batch_size": 10,
+        "max_batch_timeout": 1
+      }
+    ]
+  },
   "durable_objects": {
     "bindings": [
       {

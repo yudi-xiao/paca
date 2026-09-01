@@ -2,6 +2,7 @@ import PartySocket from "partysocket";
 
 const PARTY_PREFIX = "ws/parties";
 const MAX_RETRIES = 12;
+const MAX_DELIVERED_EVENT_IDS = 1_000;
 
 export interface RealtimeEvent {
 	type: string;
@@ -31,7 +32,10 @@ export interface RealtimeSocket {
 	): RealtimeSocket;
 }
 
-type PartyMessage = RealtimeEvent & { kind: "event" | "notification" };
+type PartyMessage = RealtimeEvent & {
+	id?: string;
+	kind: "event" | "notification";
+};
 
 function parsePartyMessage(data: unknown): PartyMessage | null {
 	if (typeof data !== "string") return null;
@@ -47,6 +51,7 @@ function parsePartyMessage(data: unknown): PartyMessage | null {
 			return null;
 		}
 		return {
+			...(typeof value.id === "string" && value.id ? { id: value.id } : {}),
 			kind: value.kind,
 			type: value.type,
 			payload: value.payload as Record<string, unknown>,
@@ -61,6 +66,7 @@ class PacaRealtimeSocket implements RealtimeSocket {
 	private userSocket: PartySocket | null = null;
 	private readonly projectSockets = new Map<string, PartySocket>();
 	private readonly listeners = new Map<RealtimeEventName, Set<AnyListener>>();
+	private readonly deliveredEventIds = new Set<string>();
 
 	get connected(): boolean {
 		return this.sockets().some(
@@ -79,6 +85,7 @@ class PacaRealtimeSocket implements RealtimeSocket {
 		this.userSocket = null;
 		this.projectSockets.clear();
 		this.userId = null;
+		this.deliveredEventIds.clear();
 		return this;
 	}
 
@@ -139,10 +146,21 @@ class PacaRealtimeSocket implements RealtimeSocket {
 		partySocket.addEventListener("open", () => this.emit("connect"));
 		partySocket.addEventListener("message", (message) => {
 			const event = parsePartyMessage(message.data);
-			if (event)
+			if (event && this.acceptEventId(event.id))
 				this.emit(event.kind, { type: event.type, payload: event.payload });
 		});
 		return partySocket;
+	}
+
+	private acceptEventId(id: string | undefined): boolean {
+		if (!id) return true;
+		if (this.deliveredEventIds.has(id)) return false;
+		this.deliveredEventIds.add(id);
+		if (this.deliveredEventIds.size > MAX_DELIVERED_EVENT_IDS) {
+			const oldest = this.deliveredEventIds.values().next().value;
+			if (oldest) this.deliveredEventIds.delete(oldest);
+		}
+		return true;
 	}
 
 	private emit<T extends RealtimeEventName>(

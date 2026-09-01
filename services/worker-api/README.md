@@ -60,7 +60,7 @@ projections until their domains move to the Worker.
   production traffic, create a least-privilege runtime role, connect it through a separate
   Hyperdrive, and replace only the `env.internal` binding ID.
 - The runtime role must not inherit `postgres`, `pg_read_all_data`, or `pg_write_all_data`.
-  `scripts/sql/grant-runtime-role.sql` grants explicit CRUD on the 37 application tables while
+  `scripts/sql/grant-runtime-role.sql` grants explicit CRUD on the 38 application tables while
   denying schema creation and access to the schema and attachment-migration ledgers;
   `verify-runtime-role.sql` checks
   that boundary. With PlanetScale, use the database role name before the routing-only
@@ -107,7 +107,7 @@ the existing main Hyperdrive remains the rollback path and the new runtime role 
 
 The current internal deployment completed this switch on 2026-08-31. Its dedicated Hyperdrive is
 backed by the `paca/internal` branch and a non-inheriting `paca-worker-internal` role with explicit
-CRUD grants on the 37 runtime business tables. The root/main Hyperdrive remains separate and is
+CRUD grants on the 38 runtime business tables. The root/main Hyperdrive remains separate and is
 not accepted by the internal deployment guard.
 
 The internal attachment cleanup runs once per day at `10:15 UTC` (`18:15` in Asia/Shanghai). The
@@ -142,6 +142,11 @@ Reviewed migrations through `drizzle/0014_clear_ultron.sql` have been applied to
 `0013_glorious_miracleman.sql` adds typed task links, and `0014_clear_ultron.sql` prevents one
 source attachment from belonging to multiple active migration runs. `TODO.md` records the remote
 checksums and remaining production safeguards.
+
+`0015_dry_quasimodo.sql` adds the PostgreSQL realtime outbox and transaction-bound triggers for
+Task, activity, link, attachment, Sprint and saved-view changes. It was applied to `paca/internal`
+before enabling its `REALTIME_EVENTS` Queue; `paca/main` remains at 0014 until that environment is
+explicitly promoted.
 
 `bun run smoke:task:database` performs a guarded direct-database Task repository smoke test and
 removes its temporary project before exit. It requires a currently valid root `DATABASE_URL`;
