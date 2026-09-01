@@ -60,7 +60,7 @@ projections until their domains move to the Worker.
   production traffic, create a least-privilege runtime role, connect it through a separate
   Hyperdrive, and replace only the `env.internal` binding ID.
 - The runtime role must not inherit `postgres`, `pg_read_all_data`, or `pg_write_all_data`.
-  `scripts/sql/grant-runtime-role.sql` grants explicit CRUD on the 38 application tables while
+  `scripts/sql/grant-runtime-role.sql` grants explicit CRUD on the 39 application tables while
   denying schema creation and access to the schema and attachment-migration ledgers;
   `verify-runtime-role.sql` checks
   that boundary. With PlanetScale, use the database role name before the routing-only
@@ -107,7 +107,7 @@ the existing main Hyperdrive remains the rollback path and the new runtime role 
 
 The current internal deployment completed this switch on 2026-08-31. Its dedicated Hyperdrive is
 backed by the `paca/internal` branch and a non-inheriting `paca-worker-internal` role with explicit
-CRUD grants on the 38 runtime business tables. The root/main Hyperdrive remains separate and is
+CRUD grants on the 39 runtime business tables. The root/main Hyperdrive remains separate and is
 not accepted by the internal deployment guard.
 
 The internal attachment cleanup runs once per day at `10:15 UTC` (`18:15` in Asia/Shanghai). The
@@ -147,6 +147,12 @@ checksums and remaining production safeguards.
 Task, activity, link, attachment, Sprint and saved-view changes. It was applied to `paca/internal`
 before enabling its `REALTIME_EVENTS` Queue; `paca/main` remains at 0014 until that environment is
 explicitly promoted.
+
+`0016_busy_changeling.sql` and `0017_last_toro.sql` add the Document projection, its Project
+realtime trigger, monotonic Yjs revision and immutable R2 snapshot metadata. They are applied only
+to `paca/internal`; both checksums, the 16-column table, trigger and runtime-role CRUD boundary were
+verified before deploying the DocumentParty slice. The additive schema remains compatible with
+the previous Worker version, which is the first rollback step if the document deployment fails.
 
 `bun run smoke:task:database` performs a guarded direct-database Task repository smoke test and
 removes its temporary project before exit. It requires a currently valid root `DATABASE_URL`;
@@ -266,6 +272,15 @@ starts a multipart upload as that member, removes the member, verifies the old S
 again. All modes create an isolated smoke Project and print exact IDs so generated Project/User
 records can be removed with reviewed targets after verification.
 
+`bun run smoke:document:internal` verifies the deployed DocumentParty path with an existing project
+administrator. Set `PACA_DOCUMENT_SMOKE_EMAIL` and `PACA_DOCUMENT_SMOKE_PASSWORD`; the script creates
+an isolated Project/Document and a fresh delegated Agent with exact `document.read`/`document.edit`
+constraints. It covers Agent Auth approval, suggest/collaborate/exclusive operations, user
+WebSocket reconnect, lease acquire/renew/release/timeout, user-write blocking, Grant revocation,
+user recovery and PostgreSQL materialization. The temporary Agent and Session are revoked and the
+Project is archived in independent cleanup steps. The script logs only IDs, revisions and status
+codes, never credentials, private keys or document text.
+
 ## Deployment and rollback
 
 ```bash
@@ -301,7 +316,7 @@ home/create/detail slice, Task list/create/search/detail/edit/archive/activity/c
 parent/child hierarchy and typed related-task links, Sprint lifecycle,
 the full existing Backlog/Timeline/Sprint Board/Table/Roadmap layouts, persisted task views, project custom fields, project Team and
 migration-safe Settings pages, Organization access, notifications shell, read-only profile,
-password change, dynamic global roles, theme, locale, and shortcut UI. Organization access
+password change, dynamic global roles, Documents/BlockNote collaboration, theme, locale, and shortcut UI. Organization access
 manages Paca dynamic roles and multi-role assignments for existing Better Auth Organization
 members, but does not duplicate member lifecycle. Team supports human members only; Agent
 membership remains unavailable until the Better Auth Agent Auth identity is mapped into the
@@ -310,7 +325,7 @@ project general data, dynamic roles, custom fields and the existing archive flow
 cover the existing interaction layout's multi-value/null filters, custom-field and range filters,
 built-in/custom/manual-view ordering, opaque keyset cursors, counts and numeric sums. Attachments,
 Agent conversations, API keys, admin settings/plugins,
-documents, environments, workflows and other legacy features stay hidden or redirect to `/home`
+environments, workflows and other legacy features stay hidden or redirect to `/home`
 until their Worker-side domain contracts are implemented. Do not re-enable their navigation by
 returning fabricated success data from catch-all endpoints; add each feature only with its real
 authorization and persistence path.

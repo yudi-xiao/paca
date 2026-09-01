@@ -15,7 +15,7 @@
 
 更新时间：2026-09-01
 
-当前里程碑：**M8 Yjs 文档纵向切片已形成第五版未部署候选：锁定 `y-partyserver@2.2.0`/`yjs@13.6.30`，一篇文档一个稳定 `documentId` 房间，启用 WebSocket Hibernation，DO SQLite 同步持久化增量并支持 checkpoint、压缩和驱逐恢复。每次持久化更新同步递增修订号，独立 Document Materialization Queue 从 DO 获取不低于请求修订的权威快照，以不可变修订 key 条件写入隔离 R2 bucket，再由轻量服务端解析器物化 BlockNote JSON；PostgreSQL 只接受更高 Yjs 修订，重复/乱序消息不会覆盖新投影，Queue 发送失败由 DO Alarm 补投，消费失败按队列重试/DLQ 边界处理。React 不再直接 PATCH 文档内容；旧 JSON 仍仅在首次打开时原子 bootstrap，失败时降级为只读。Agent 原始 Yjs 连接保持只读并要求精确 `document.read` Grant；`document.edit` 改走 Better Auth Agent Auth 执行边界，只接受受 Organization/Project/Document/字段/模式/action/有效期 constraints 限定的细粒度 block 内容操作，支持建议、乐观并发协作和 5～60 秒独占租约。独占租约持久化在 DocumentParty SQLite，受实际授权有效期约束，支持幂等 acquire/renew/apply/release、超时接管和 Grant 撤销释放；活跃租约会动态阻断已连接用户的 Yjs 写入，并通过自定义消息让 React 显示只读提示及按到期时间恢复。新增自清理 `smoke:document:internal`，可在部署后以临时项目、文档和最小 Capability Agent 验证完整链路。PostgreSQL 0016/0017、Document Queue/R2 资源和 internal 部署尚未执行。**
+当前里程碑：**M8 Yjs 文档纵向切片已部署到 internal Worker `1e7d9965-6a35-4701-a656-f0e96306e970`：PlanetScale `paca/internal` 已应用并核验 0016/0017，现有最小权限 runtime role 已扩为 39 张业务表 CRUD；Cloudflare 已创建并绑定隔离的 Document Materialization Queue、DLQ 和 APAC/Standard R2 快照 bucket。真实 `smoke:document:internal` 以临时 Project/Document/Agent 完成 Session 登录、Better Auth Agent Auth 注册审批、read、suggest、collaborate、用户 WebSocket 断线重连、exclusive acquire/renew/release/超时接管、独占期用户写入阻断、Grant 撤销释放、用户写入恢复和 PostgreSQL 物化追平；最终 Yjs revision 4 的 309 字节 R2 快照可按精确 key 远端读取，SHA-256 与 PostgreSQL 元数据一致，临时 Agent/Grant/Session 已撤销且项目已归档。真实 BlockNote 浏览器编辑仍因浏览器控制层加载超时未取得可靠证据；Queue 消费失败、乱序和 DLQ 恢复的远端故障注入也仍待完成。**
 
 已确认前置条件：
 
@@ -30,11 +30,11 @@
 - [x] 已使用管理页生成的一次性 token 将本机 `Mac codex agent` 注册为 active delegated Agent Host；Host 使用设备本地 Ed25519 身份，私钥仅保存于被 Git 忽略且权限为 `0600` 的 `.paca/agent-host.json`，token 未落盘。该状态只代表 Host 身份已建立，尚未注册 Agent、完成 device approval、取得 Capability Grant 或接入 legacy Agent Runner。
 - [x] 已创建隔离的 PlanetScale PostgreSQL `paca/internal` development branch；确认初始 `public` schema 为 0 张业务表。
 - [x] 用户确认当前环境尚未上线，授权首个 internal 认证预览直接使用原 `paca/main` Hyperdrive；此例外不代表生产架构决策。
-- [x] internal 已退出原 Hyperdrive 的宽权限 role：新建无继承管理角色的 `paca-worker-internal`，现仅显式授予 38 张 runtime 业务表 CRUD，验证其能读取业务表且不能读取 migration ledger；独立 Hyperdrive 已创建并接收 internal 流量。根/main Hyperdrive 仅保留为独立环境与 Wrangler 版本回滚路径。
-- [x] 已固化 runtime role 的显式 38 表 CRUD GRANT 与验权 SQL；目标最小权限 role 无 DDL 和 migration ledger/附件迁移账本权限，PlanetScale 授权时使用去掉路由后缀的真实 role 名。现有宽权限 role 的验权会按预期失败，不能作为生产验收结果。
+- [x] internal 已退出原 Hyperdrive 的宽权限 role：新建无继承管理角色的 `paca-worker-internal`，现仅显式授予 39 张 runtime 业务表 CRUD，验证其能读取业务表且不能读取 migration ledger；独立 Hyperdrive 已创建并接收 internal 流量。根/main Hyperdrive 仅保留为独立环境与 Wrangler 版本回滚路径。
+- [x] 已固化 runtime role 的显式 39 表 CRUD GRANT 与验权 SQL；目标最小权限 role 无 DDL 和 migration ledger/附件迁移账本权限，PlanetScale 授权时使用去掉路由后缀的真实 role 名。现有宽权限 role 的验权会按预期失败，不能作为生产验收结果。
 - [x] `deploy:internal` 强制拒绝与根环境相同的 Hyperdrive；首轮 main 预览例外已移除，不能再通过环境变量绕过隔离守卫。
 - [x] 已创建 `paca-attachments-development`、`paca-attachments-internal` 与 `paca-attachments-production` 三个隔离 R2 bucket；根/internal Wrangler binding 已分别指向 development/internal，部署守卫会同时拒绝数据库和附件 bucket 环境混用。production binding 待生产环境配置时接入。
-- [x] 已实现并实际执行受确认串保护的 `database:provision:internal`：检查 main/internal migration ledger、拒绝分叉目标、以单事务和 `ON CONFLICT DO NOTHING` 初始复制、核对应用表行数与业务表指纹、应用/验证最小权限 role 并创建或更新独立 Hyperdrive；当前清单为 38 张 runtime 表。脚本不输出密码，临时 admin role 15 分钟自动过期；2026-08-31 已完成获批的数据复制与 runtime role 凭据轮换，Task 自引用外键在提交前恢复为 `NOT DEFERRABLE`。
+- [x] 已实现并实际执行受确认串保护的 `database:provision:internal`：检查 main/internal migration ledger、拒绝分叉目标、以单事务和 `ON CONFLICT DO NOTHING` 初始复制、核对应用表行数与业务表指纹、应用/验证最小权限 role 并创建或更新独立 Hyperdrive；当前清单为 39 张 runtime 表。脚本不输出密码，临时 admin role 15 分钟自动过期；2026-08-31 已完成获批的数据复制与 runtime role 凭据轮换，Task 自引用外键在提交前恢复为 `NOT DEFERRABLE`。
 - [x] internal 数据隔离版本 `9ec5c792-3d28-4a5b-8f90-73c9e2a39613` 已部署到 `paca.howlearnwood.com`：Wrangler dry-run/部署输出均确认独立 Hyperdrive 与 `paca-attachments-internal` binding；公开 health 返回 `environment=internal`，真实账号 API 验证完成登录、Session、Demo 项目、12 个任务、登出和旧 Cookie 撤销。
 - [x] 已用只读查询确认此前因 `pscale sql` 间歇性 `EOF` 中断的事务未留下部分 DDL；随后改用 `pscale shell` + `psql` 在单事务中成功应用首版 migration。
 - [x] `paca/internal` 已生成 13 张表，`paca_schema_migration` 中的 migration ID 与 snapshot checksum 均已核验。
@@ -54,6 +54,7 @@
 - [x] 0013 Task Link migration 已经受控 admin shell 以单事务应用于 `paca/internal` 与 `paca/main`：新增 `paca_task_link`、项目作用域 source/target 复合外键、方向/类型唯一约束、自关联约束和双向查询索引；main 应用前后 active Task 均为 12，双方 migration ledger/checksum 已核验，main 的 13 个约束和 4 个索引已核验。
 - [x] 0014 附件迁移 active-run guard 已经受控 admin shell 以单事务应用于 `paca/internal` 与 `paca/main`：partial unique index 保证同一源附件最多属于一个非 `rolled_back` run；应用前只读检查确认 main 迁移台账为空且没有跨 run 冲突，两端 checksum 和索引定义均已核验。
 - [x] 0015 可靠实时 outbox migration 已以 15 分钟自动过期 admin role 在 `paca/internal` 单事务应用：新增 `paca_realtime_outbox`、2 个调度索引、7 个 Task/Sprint/View 事务触发器和版本化 checksum；runtime role 已扩为 38 表 CRUD 且无 DDL/ledger 权限。`paca/main` 尚未应用，因为本轮只切换 internal Worker。
+- [x] 0016/0017 文档投影与 Yjs 快照元数据 migration 已在 `paca/internal` 分别以独立事务应用：新增 `paca_document`、项目实时 outbox trigger、`content_version`、`yjs_revision`、R2 key/SHA-256/字节数/时间元数据和非负约束；两个 ledger checksum、16 列、trigger 与 runtime role 的第 39 张表 CRUD 均已核验。`paca/main` 仍停在 0014，本轮只部署 internal。
 - [x] Better Auth + React Static Assets 的规范入口已固定为 `paca.howlearnwood.com`；Wrangler internal 环境将 Better Auth URL/可信 Origin 仅绑定到该自定义域名。`workers.dev` 仅保留为诊断/回滚入口，不属于认证可信 Origin。验收版本 `783cbcf7-1d29-41d0-9ae2-afde028af068` 已验证根页面、SPA fallback、public health、API 404 与 Origin 拒绝边界。
 - [x] 远端烟测已通过 public health、Hyperdrive database health、注册/登录、Session、`GET /api/me`、登出和旧 Cookie 服务端撤销；本地一次性 Secret 与测试凭据已清理。
 - [x] React Web 已通过同一 Worker origin 提供；浏览器已验证登录页渲染，远端全链路已验证注册、Session、空工作区读取、登出和会话撤销。
@@ -243,17 +244,17 @@
 
 ## M8：Yjs DocumentParty
 
-本地候选验收：React 60 个测试文件/628 项（前端本轮未改）、Worker 44 个测试文件/243 项、Workers Runtime 2 个测试文件/14 项全部通过；internal production build、Drizzle check、Wrangler types、Biome 和 deploy dry-run 均通过。第五版候选在 Queue/R2 幂等物化、PostgreSQL 新旧修订保护、DO Alarm 补投、服务端 BlockNote 投影、前端单写路径和 Agent 独占租约之上，新增通用的 action-scoped delegated Agent 注册入口，以及可重复、自清理的 `smoke:document:internal`。该 smoke 会建立临时 Project/Document/Agent，用正式 Session 和 Better Auth Agent Auth 完成注册审批，依次验证 read、suggest、collaborate、用户 WebSocket 断线重连、exclusive acquire/renew/release/超时接管、独占期用户写入阻断、Grant 撤销释放、用户写入恢复和 PostgreSQL 物化修订追平，最后撤销 Agent、归档项目并注销 Session；清理步骤彼此隔离，任一步失败都会非零退出且不会输出凭据或正文。Workers Runtime 另以真实 Yjs sync 协议证明连接断开、DocumentParty 驱逐后可从 SQLite 恢复并向新连接同步权威状态。0016/0017 尚未应用，Document Queue/R2 尚未创建、internal 尚未部署，故该远端 smoke 仅为可执行候选且尚未运行，涉及远端资源与完整纵向验收的任务继续保持未勾选。
+当前 M8 验收版本为 internal Worker `1e7d9965-6a35-4701-a656-f0e96306e970`。React 60 个测试文件/628 项（前端本轮未改）、Worker 44 个测试文件/243 项、Workers Runtime 2 个测试文件/14 项全部通过；internal production build、Drizzle check、Wrangler types、Biome、deploy dry-run、真实部署和 public health/SPA 200 均通过。Document Queue 部署后显示 1 个 producer 和 1 个 consumer，DLQ 保持独立；真实 smoke 最终 revision 4 已物化到 PostgreSQL，精确 R2 对象为 309 字节且 SHA-256 与数据库一致。Agent 最终为 revoked，两个 Document Grant 均为 revoked，临时 Project 为 archived，Session 已注销。首页在既有登录浏览器中真实渲染，但 Documents 深链的浏览器自动化两次在等待加载时超时，因此不把 BlockNote UI 视为已验收。
 
 - [x] 盘点 `services/api/internal/repository/postgres/document_repository.go` 的文档结构和快照语义；旧实现保存当前 BlockNote JSONB 和整份 JSON snapshot，不保存 Yjs state vector/update，因此不能直接作为协作恢复源。
-- [ ] 为 BlockNote 接入 Yjs 和 `y-partyserver/provider`。本地候选已接入 provider、连接 capability、断线重连和独占租约只读状态；待应用迁移、创建资源并完成真实浏览器验收后勾选。
+- [ ] 为 BlockNote 接入 Yjs 和 `y-partyserver/provider`。代码、迁移、资源和部署均已完成，原始用户 WebSocket 远端重连已通过；仍需取得真实浏览器中 BlockNote 编辑、刷新恢复和独占只读提示的可靠证据后勾选。
 - [x] 实现一篇文档一个 DocumentParty/YServer，使用稳定 `documentId` 寻址；Wrangler 已声明独立 DO binding 和 `v2-document-party` SQLite class migration。
 - [x] 实现 `onLoad`、`onSave`、增量 update、checkpoint、恢复与压缩清理；更新先同步写入 DO SQLite 再广播，阈值 checkpoint 清理已覆盖真实 Workers Runtime 驱逐恢复测试。
-- [ ] DO SQLite 保存实时增量；R2/业务数据库保存长期快照和可查询业务视图。代码候选已完成独立 Queue、不可变 R2 修订对象、SHA-256/大小元数据、服务端 BlockNote JSON 物化、PostgreSQL 只增修订更新、孤儿清理和 Queue 发送失败 Alarm 补投；待创建隔离 Queue/R2、应用 0016/0017 并完成真实远端重试/乱序/死信恢复验收后勾选。
-- [ ] 用户连接检查 `docs.read`/`docs.write`；Agent 连接检查 `document.read`/`document.edit` Grant 与 constraints。代码候选中用户连接已检查 Project `docs` 权限，Agent 原始 Yjs 连接仅允许精确 `document.read` 且强制只读；编辑通过 Agent Auth `onExecute` 再次检查精确 scope、Grant constraints 和 delegated 当前权限。待远端 Agent read/edit E2E 后勾选。
-- [ ] Agent 只提交细粒度、带 base state vector/版本的操作，不提交无条件整篇覆盖。代码候选仅接受最多 10 个 `replace_block_content`，绑定当前 block opaque version、base revision/state vector、run ID 和 request ID；同块陈旧写入返回 conflict，不同块并发允许合并，正文不会写入审计。待远端协作写入与恢复验证后勾选。
-- [ ] 实现建议、协作和独占三种 Agent 编辑模式。本地候选已实现建议模式非写入结果、协作模式目标块乐观并发和单次 Yjs transaction，以及独占模式的持久化 acquire/renew/apply/release、5～60 秒超时接管、授权期限上限、Grant 撤销释放、用户写入阻断和前端只读提示；待远端 Agent Auth + DocumentParty E2E 后勾选。
-- [ ] 测试单用户、单 Agent、用户+Agent、断网重连、冲突、checkpoint 恢复和权限撤销。Workers Runtime 已覆盖单 Agent 建议/协作/独占、命令幂等、租约竞争/续期/释放/超时接管、同块冲突、用户改 B 块与 Agent 改 A 块合并、独占期间已连接用户写入拒绝、租约状态广播、审计、checkpoint/驱逐恢复、真实连接断开后驱逐与 Yjs 重同步，以及连接/Grant 撤销释放；`smoke:document:internal` 已固化远端 Agent Auth Grant 撤销、独占租约和用户恢复流程，但需先部署本候选再执行，因此本项仍不勾选。
+- [ ] DO SQLite 保存实时增量；R2/业务数据库保存长期快照和可查询业务视图。隔离 Queue/R2、0016/0017、不可变 R2 修订对象、SHA-256/大小元数据、服务端 BlockNote JSON 和 PostgreSQL 高修订保护已真实验收；最终 revision 4 的精确远端对象与数据库元数据一致。仍需真实故障注入验证消费重试、乱序、DLQ 和恢复后才能勾选。
+- [x] 用户连接检查 `docs.read`/`docs.write`；Agent 连接检查 `document.read`/`document.edit` Grant 与 constraints。真实 smoke 使用项目管理员 Session 建立用户连接，并以临时 delegated Agent 的精确 Organization/Project/Document/字段/模式/action/有效期 Grant 完成读写；撤销 `document.edit` 会同步释放租约、恢复用户写入且拒绝 Agent 后续编辑，最终两个 Grant 与 Agent 均撤销。
+- [x] Agent 只提交细粒度、带 base state vector/版本的操作，不提交无条件整篇覆盖。实现仅接受最多 10 个 `replace_block_content`，绑定当前 block opaque version、base revision/state vector、run ID 和 request ID；本地测试覆盖同块陈旧冲突和不同块合并，真实 smoke 通过该协议依次完成 collaborate/exclusive 并物化 revision 4，正文不进入审计。
+- [x] 实现建议、协作和独占三种 Agent 编辑模式。真实 Agent Auth E2E 已验证 suggest 不写入、collaborate 写入，以及 exclusive acquire/renew/apply/release、5 秒超时接管、授权撤销释放、独占期用户写入阻断和撤销后恢复。
+- [x] 测试单用户、单 Agent、用户+Agent、断网重连、冲突、checkpoint 恢复和权限撤销。Workers Runtime 覆盖建议/协作/独占、幂等、租约竞争/续期/释放/超时、同块冲突、不同块合并、用户写入拒绝、广播、审计、checkpoint/驱逐恢复和真实 Yjs 重同步；远端 smoke 覆盖用户+Agent、断线重连、独占写入阻断、Grant 撤销、用户恢复、Queue/R2/PostgreSQL 物化及自清理。
 
 ## M9：Agent 编排与执行环境
 
