@@ -15,7 +15,7 @@
 
 更新时间：2026-09-01
 
-当前里程碑：**M9 Agent 编排已开始，internal Worker `179810a9-12b0-48d2-8287-26af41c6a4d1` 新增 `AgentCoordinator` SQLite Durable Object，并以 `v3-agent-coordinator` migration 部署。每个稳定 Agent ID 对应一个协调对象；对象只保存有界的 run scope、状态、版本、幂等键和不含正文/凭据的错误码，不运行推理、工具调用或长时间文档修改。状态机支持 queued/running/waiting/cancelling 与终态，创建和 transition idempotency 在 DO eviction 后仍可恢复，终态不可重新打开。完整 Worker/Web 质量门通过，公开 health 保持 internal/200；回滚代码基线为 `1e7d9965-6a35-4701-a656-f0e96306e970`。M8 的 Queue/DLQ/R2/PostgreSQL 远端恢复验收已完成，真实 BlockNote 浏览器编辑仍因浏览器控制层加载超时未取得可靠证据。**
+当前里程碑：**M9 的首个 Document Agent Workflow 已部署为 internal Worker `d29d1866-cffd-4b40-a9f1-452de1135453`（Git `f3a6e761`）。受 Better Auth Agent JWT 保护的 Hono API 使用分别受约束的 `workflow.execute` 与 `document.edit` Grant 创建 Cloudflare Workflow；Workflow 在每次 DocumentParty 写入前从 PostgreSQL 重查 Agent、两个精确 Grant、文档作用域和 delegated 用户当前 `docs.write` 权限。`AgentCoordinator` 只持久化有界 run 状态与请求指纹，Cloudflare Workflow 负责重试、超时和取消，DocumentParty 以 request ID 保证实际命令幂等。真实 internal smoke 已验证空闲 Agent 重新激活后再授权、Workflow 成功终态、完全相同请求复用、改变参数的同 run ID 返回 409、Grant 撤销和测试文档清理；Agent Auth 后台审计/心跳现在会在请求级 PostgreSQL Client 关闭前完成。Worker 49 个文件/256 项与 Workers Runtime 4 个文件/20 项测试通过。安全回滚点为 Worker `14f7e913-de7b-49ea-b142-5d5b9c6c23e9` / Git `048c81e9`，该版本保留 Workflow/DO schema 但继续阻止公开 `workflow.execute`。下一步是执行环境选型与真实长任务失败恢复验收。**
 
 已确认前置条件：
 
@@ -258,14 +258,14 @@
 
 ## M9：Agent 编排与执行环境
 
-当前 M9 基础版本为 internal Worker `179810a9-12b0-48d2-8287-26af41c6a4d1`（Git `8c10a637`）。`AgentCoordinator` 以稳定 Agent ID 寻址并持久化最小 run 状态；纯领域测试 2 项、Workers Runtime 3 项覆盖状态转换、重试键冲突、单 Agent 身份固定和 eviction 恢复。完整质量门为 Worker 45 个文件/245 项、Workers Runtime 3 个文件/17 项，并通过 Web internal build、Drizzle、TypeScript、Biome、Wrangler types/dry-run、真实部署和公开 health。当前没有公开 AgentCoordinator 路由；下一步由受 Better Auth Agent Auth 保护的 Hono endpoint 创建 Cloudflare Workflow，再由 Workflow RPC 更新该 DO。
+当前 M9 版本为 internal Worker `d29d1866-cffd-4b40-a9f1-452de1135453`（Git `f3a6e761`）。固定 Document Agent Workflow `00000000-0000-4000-8000-000000000201` 已由受 Better Auth Agent Auth 保护的 Hono API 创建、查询和取消；Workflow 参数不包含 JWT、私钥、文档正文或完整 Grant，只保存精确 Grant ID、受限 scope 和结构化命令。Agent Auth 的绝对 24 小时硬失效已恢复为库的禁用语义，保留短期 JWT、滑动会话、透明重新激活、显式撤销和密钥轮换；重新激活会按 Agent Auth 语义清除旧 Grant，因此自动化先重新激活再签发精确短期 Grant。请求级 PostgreSQL Client 会等 Better Auth 后台审计、心跳和到期维护 settle 后再关闭。远程 smoke 与日志共同验证 Workflow/DocumentParty/Coordinator/审计链路，完整质量门为 Worker 49 个文件/256 项、Workers Runtime 4 个文件/20 项，并通过 Web internal build、TypeScript、Biome、Wrangler types/dry-run、真实部署和公开 health。
 
 - [x] 明确 AgentDO 只保存会话状态，不在 DO 内执行长时间推理。已部署 `AgentCoordinator`，SQLite 仅保存 Agent 绑定、run scope、状态/版本、幂等 transition 和安全错误码；不保存正文、JWT、Grant 内容、推理上下文或执行结果，不暴露公开 fetch/WebSocket 路由。
-- [ ] 用 Workflows 编排可恢复的长任务、重试、超时、取消和补偿。
+- [x] 用 Workflows 编排可恢复步骤、重试、超时与取消。Document Agent Workflow 使用版本化固定定义、确定性 transition ID 和 Cloudflare `terminate()`；取消不会回滚已提交的 Yjs/CRDT 变更，产品级补偿必须作为新的可审计文档操作，而不是伪造底层事务回滚。
 - [ ] 评估并选择 Computer、Sandbox 或 Containers 作为各类任务的执行环境。
-- [ ] AgentDO/Workflow 调用 DocumentParty 前验证 Agent Auth Grant 和 constraints。
-- [ ] 所有可重试步骤使用业务幂等键，并把 run ID、actor、输入范围和结果写入审计。
-- [ ] 完成长任务恢复、重复投递、取消、执行环境失败和权限中途撤销测试。
+- [x] AgentDO/Workflow 调用 DocumentParty 前验证 Agent Auth Grant 和 constraints。入口先验证 JWT 中的两个 capability，随后按精确 Grant ID 从 PostgreSQL 重查 active/expiry/constraints、文档真实 Organization/Project scope，并实时求 delegated 用户 `docs.write` 权限交集。
+- [x] 所有可重试步骤使用业务幂等键，并把 run ID、actor、输入范围和结果写入审计。Coordinator 用 SHA-256 请求指纹拒绝同 run ID 的变更请求，Workflow transition 使用确定性 ID，DocumentParty 用 request ID 去重；审计不包含正文、JWT 或私钥。
+- [ ] 完成长任务恢复、重复投递、取消、执行环境失败和权限中途撤销测试。当前本地运行时已覆盖 Workflow step 重试、Grant 拒绝和取消竞态，远程 smoke 已覆盖成功、完全重复投递、变更请求冲突和 Grant 撤销；仍需接入真实执行环境后验证长时间 sleep/恢复、执行容器失败、运行中权限撤销和人工取消。
 
 ## M10：API 与前端逐步切换
 

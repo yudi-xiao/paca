@@ -328,6 +328,21 @@ reversible. Applied content remains auditable and a later product-level revert m
 a new document operation. Execution audit rows contain the trusted Agent/run/Grant/scope, action,
 mode and bounded outcome only, never document content, JWTs or private keys.
 
+The internal Workflow smoke reuses the git-ignored delegated Agent config. It first refreshes an
+idle Agent session because Agent Auth intentionally clears stale Grants during transparent
+reactivation, then creates and bootstraps a temporary Yjs document, issues exact ten-minute Grants,
+and verifies success plus both idempotency cases. Cleanup revokes the Grants, waits for the short
+lease to expire, archives the document, and signs out:
+
+```bash
+PACA_APPROVER_EMAIL='operator@example.com' \
+PACA_APPROVER_PASSWORD='…' \
+PACA_PROJECT_ID='project-id' \
+bun run smoke:agent-workflow:internal
+```
+
+The script never prints the password, Agent private key, JWT, Grant payload, or document content.
+
 ## Deployment and rollback
 
 ```bash
