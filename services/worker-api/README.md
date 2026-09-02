@@ -343,6 +343,39 @@ bun run smoke:agent-workflow:internal
 
 The script never prints the password, Agent private key, JWT, Grant payload, or document content.
 
+## Runtime-independent task Harness leases
+
+Cloudflare-hosted Agents and local Codex, Claude Code, DeepSeek or custom Harnesses use the same
+Better Auth Agent Auth execution location. `task.execute` is separate from `task.write`: it permits
+a Harness to coordinate execution of one exact task, but it does not permit changing task fields or
+documents. Those mutations still require their own constrained domain Grants.
+
+Every command includes `organizationId`, `projectId`, `taskId`, `operationMode: "execute"`, a short
+`validUntil` and a unique `requestId`. Supported actions are `claim`, `renew`, `checkpoint`,
+`complete`, `fail` and `cancel_ack`. A claim also records the bounded Harness kind/version/instance;
+the trusted Agent and Host IDs always come from the verified Agent Auth session, never from request
+arguments.
+
+PostgreSQL tables `paca_agent_task_lease` and `paca_agent_task_lease_event` are authoritative. They
+enforce one active lease per task, monotonic lease versions, strictly increasing checkpoint
+sequences and globally idempotent request IDs. The lease expires no later than its active Grant.
+AgentDO state remains a bounded coordination mirror and cannot replace this durable record.
+
+The internal smoke creates a temporary task and delegated Agent, approves an exact ten-minute
+`task.execute` Grant, executes the protocol as a local Codex Harness, checks duplicate and conflict
+paths, revokes the Grant, archives the fixture, revokes the Agent and signs out:
+
+```bash
+PACA_APPROVER_EMAIL='operator@example.com' \
+PACA_APPROVER_PASSWORD='…' \
+PACA_PROJECT_ID='project-id' \
+bun run smoke:agent-task-harness:internal
+```
+
+It never prints credentials, private keys, JWTs or Grant payloads. Protocol failures are returned as
+bounded Agent Auth error codes such as `AGENT_TASK_LEASE_CONFLICT`; SQL and arbitrary exception
+messages are not exposed.
+
 ## Deployment and rollback
 
 ```bash

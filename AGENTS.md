@@ -201,7 +201,7 @@ Paca Agent 是一等执行主体，正式 Agent 鉴权必须使用 Better Auth A
 必须区分：
 
 - 用户“管理 Agent”的权限属于 Paca Permission，例如 `agents.read`、`agents.write`、`agents.approveGrant`。
-- Agent “执行业务”的权限属于 Agent Auth Capability，例如 `project.read`、`task.read`、`task.write`、`task.create`、`document.edit`、`environment.connect`、`workflow.execute`。
+- Agent “执行业务”的权限属于 Agent Auth Capability，例如 `project.read`、`task.read`、`task.write`、`task.create`、`task.execute`、`document.edit`、`environment.connect`、`workflow.execute`。
 
 Capability Grant 必须携带最小作用域约束，例如 `organizationId`、`projectId`、`documentId`、`taskIds`、允许的字段或操作模式，不能只授予一个无边界的 `task.write` 或 `task.create`。修改既有工作项时应绑定具体 `taskId` 和字段；创建工作项时至少绑定 Organization、Project、操作模式和短有效期。Hono 自定义 `location` 路由在取得 `agentSession` 后，必须同时检查 active grant 和 constraints；不能因为 JWT 已通过签名验证就跳过约束。
 
@@ -220,6 +220,8 @@ Paca 的 Agent 控制面不得绑定某一种模型或执行器。每个 Better 
 - 未来其他远程 Harness：只要实现同一版本化协议和安全约束即可接入，不得绕过 Agent Auth 直接读写业务数据库或 DocumentParty。
 
 所有 Harness 共用以下控制协议和语义：注册与心跳、能力发现与申请、审批、领取任务、短期 lease/续租、幂等 checkpoint、提交结果、取消确认、Grant 撤销和审计。Harness 类型只影响执行能力与调度标签，不改变 `project.read`、`task.write`、`document.edit` 等 Capability 的业务语义。任务分派必须按 Agent/Host 已审批 capability、约束、在线状态和 Harness 能力匹配，不能仅按客户端自报名称决定权限。
+
+领取和推进工作项使用独立的 `task.execute` Capability，不把“可以运行任务”混入 `task.write`。Grant 至少绑定 Organization、Project、Task、`operationMode=execute`、允许的 action 与短有效期；Agent Auth Session 中的 Agent/Host 是可信租约所有者，客户端提交的 actor 字段一律忽略。PostgreSQL 对同一 Task 的 active lease、单调版本、checkpoint 序列、幂等 request ID 和事件记录负责，AgentDO 只镜像有界运行摘要。Harness 若要实际修改 Task 或 Document，仍需另行取得对应 `task.write`、`document.edit` Grant，`task.execute` 本身不授予业务字段写权限。
 
 Cloudflare Agents SDK 的默认 `/agents/*` 路由不得直接公开。浏览器、Cloudflare Agent 和外部 Harness 都先经过 Hono 的 Better Auth Session 或 Agent Auth JWT 校验，再由服务端按 Better Auth Agent ID 获取 AgentDO stub；AgentDO RPC 与 Workflow 在执行敏感工具前仍需重查 active Grant、constraints 和 delegated 用户权限交集。
 

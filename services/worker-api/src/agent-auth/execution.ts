@@ -1,7 +1,22 @@
-import type { AgentAuthOptions, AgentCapabilityGrant, AgentSession } from "@better-auth/agent-auth";
+import {
+  type AgentAuthOptions,
+  type AgentCapabilityGrant,
+  type AgentSession,
+  agentError,
+} from "@better-auth/agent-auth";
 import { and, eq, isNull } from "drizzle-orm";
 import * as z from "zod";
-
+import { PostgresAgentTaskLeaseRepository } from "../agent-task/postgres-repository";
+import {
+  type AgentTaskLeaseCommand,
+  type AgentTaskLeaseResult,
+  agentTaskLeaseCommandSchema,
+} from "../agent-task/protocol";
+import {
+  AgentTaskLeaseError,
+  AgentTaskLeaseService,
+  agentTaskLeaseErrorCodes,
+} from "../agent-task/service";
 import type { AppBindings } from "../bindings";
 import type { PacaDatabase } from "../database";
 import * as schema from "../db/schema";
@@ -52,6 +67,11 @@ export type PacaAgentExecutionDependencies = {
     actor: TaskActor,
     input: TaskUpdateInput,
   ): Promise<Task>;
+  executeTaskLease(
+    actor: { agentId: string; hostId: string },
+    command: AgentTaskLeaseCommand,
+    authorizationExpiresAt: Date,
+  ): Promise<AgentTaskLeaseResult>;
   findDocumentScope(documentId: string): Promise<DocumentScope | null>;
   readDocument(documentId: string): Promise<DocumentAgentSnapshot>;
   executeDocumentCommand(
@@ -105,6 +125,24 @@ const documentCommandEnvelopeSchema = scopeSchema
 
 function denied(code: string): never {
   throw new Error(code);
+}
+
+function agentTaskLeaseFailure(error: unknown): never {
+  if (!(error instanceof AgentTaskLeaseError)) throw error;
+  const status =
+    error.code === agentTaskLeaseErrorCodes.inputInvalid
+      ? "BAD_REQUEST"
+      : error.code === agentTaskLeaseErrorCodes.taskNotFound ||
+          error.code === agentTaskLeaseErrorCodes.leaseNotFound
+        ? "NOT_FOUND"
+        : error.code === agentTaskLeaseErrorCodes.leaseOwnerMismatch ||
+            error.code === agentTaskLeaseErrorCodes.leaseScopeMismatch ||
+            error.code === agentTaskLeaseErrorCodes.authorizationExpired
+          ? "FORBIDDEN"
+          : "CONFLICT";
+  // Use Agent Auth's own error factory so its batch executor recognizes the
+  // error instance and preserves the bounded per-request protocol code.
+  throw agentError(status, { code: error.code, message: error.code });
 }
 
 function requireDelegatedUser(session: AgentSession): string {
@@ -309,6 +347,33 @@ export function createPacaAgentExecutor(
           create,
         );
       }
+      case "task.execute": {
+        const input = agentTaskLeaseCommandSchema.parse(context.arguments);
+        requireGrant(context.grant, "task.execute", input);
+        await requireAgentProjectAccess(
+          dependencies,
+          context.agentSession,
+          input.organizationId,
+          input.projectId,
+          { tasks: ["read"] },
+        );
+        const host = context.agentSession.host;
+        if (!host || context.agentSession.agent.hostId !== host.id) {
+          denied("AGENT_HOST_IDENTITY_MISMATCH");
+        }
+        try {
+          return await dependencies.executeTaskLease(
+            {
+              agentId: context.agentSession.agentId,
+              hostId: host.id,
+            },
+            input,
+            new Date(agentAuthorizationExpiresAt(context.grant)),
+          );
+        } catch (error) {
+          return agentTaskLeaseFailure(error);
+        }
+      }
       case "document.read": {
         const input = documentReadSchema.parse(context.arguments);
         requireGrant(context.grant, "document.read", input);
@@ -368,6 +433,9 @@ function postgresPacaAgentExecutionDependencies(
   const permissionService = new PacaPermissionService(permissionStore);
   const projectService = new ProjectService(new PostgresProjectRepository(database));
   const taskService = new TaskService(new PostgresTaskRepository(database));
+  const taskLeaseService = new AgentTaskLeaseService(
+    new PostgresAgentTaskLeaseRepository(database),
+  );
 
   return {
     findProjectOrganization: (projectId) => permissionStore.findProjectOrganization(projectId),
@@ -378,6 +446,8 @@ function postgresPacaAgentExecutionDependencies(
     createTask: (projectId, actor, input) => taskService.createAs(projectId, actor, input),
     updateTask: (projectId, taskId, actor, input) =>
       taskService.updateAs(projectId, taskId, actor, input),
+    executeTaskLease: (actor, command, authorizationExpiresAt) =>
+      taskLeaseService.execute(actor, command, authorizationExpiresAt),
     findDocumentScope: async (documentId) => {
       const [scope] = await database
         .select({

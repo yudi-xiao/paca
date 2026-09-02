@@ -46,7 +46,9 @@ WITH application_tables(table_name) AS (
     ('paca_file'),
     ('paca_task_attachment'),
     ('paca_document'),
-    ('paca_realtime_outbox')
+    ('paca_realtime_outbox'),
+    ('paca_agent_task_lease'),
+    ('paca_agent_task_lease_event')
 )
 SELECT count(*) = 0 AS crud_is_valid
 FROM application_tables

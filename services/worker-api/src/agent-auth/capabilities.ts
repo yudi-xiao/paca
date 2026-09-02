@@ -15,6 +15,7 @@ export const pacaCapabilityNames = [
   "task.read",
   "task.write",
   "task.create",
+  "task.execute",
   "document.read",
   "document.edit",
   "environment.connect",
@@ -142,6 +143,17 @@ const documentCommandProperties = {
   runId: { type: "string", format: "uuid" },
 } as const;
 
+const taskExecutionProperties = {
+  taskId: { type: "string", format: "uuid" },
+  requestId: { type: "string", format: "uuid" },
+  operationMode: { const: "execute" },
+} as const;
+
+const taskLeaseProperties = {
+  ...taskExecutionProperties,
+  leaseId: { type: "string", format: "uuid" },
+} as const;
+
 const documentApplyProperties = {
   ...documentCommandProperties,
   action: { const: "apply" },
@@ -220,6 +232,100 @@ export const pacaCapabilities = [
       },
       ["operationMode", "title"],
     ),
+  },
+  {
+    name: "task.execute",
+    description: "由已审批的 Cloudflare 或本地 Harness 领取并执行一个明确限定的 Paca 任务。",
+    approvalStrength: "session",
+    requiredConstraints: [
+      "organizationId",
+      "projectId",
+      "taskId",
+      "operationMode",
+      "action",
+      "validUntil",
+    ],
+    grantTTL: PACA_AGENT_GRANT_TTL_SECONDS,
+    input: {
+      oneOf: [
+        scopedInput(
+          {
+            ...taskExecutionProperties,
+            action: { const: "claim" },
+            leaseDurationMs: { type: "integer", minimum: 5_000, maximum: 300_000 },
+            harness: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                kind: {
+                  type: "string",
+                  enum: ["cloudflare-agent", "codex", "claude-code", "deepseek", "custom"],
+                },
+                version: { type: "string", minLength: 1, maxLength: 100 },
+                instanceId: { type: "string", minLength: 1, maxLength: 255 },
+              },
+              required: ["kind"],
+            },
+          },
+          ["taskId", "requestId", "operationMode", "action", "leaseDurationMs", "harness"],
+        ),
+        scopedInput(
+          {
+            ...taskLeaseProperties,
+            action: { const: "renew" },
+            leaseDurationMs: { type: "integer", minimum: 5_000, maximum: 300_000 },
+          },
+          ["taskId", "requestId", "operationMode", "action", "leaseId", "leaseDurationMs"],
+        ),
+        scopedInput(
+          {
+            ...taskLeaseProperties,
+            action: { const: "checkpoint" },
+            sequence: { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+            checkpointKey: { type: ["string", "null"], maxLength: 1_024 },
+            summary: { type: ["string", "null"], maxLength: 4_000 },
+            artifactKeys: {
+              type: "array",
+              maxItems: 32,
+              items: { type: "string", minLength: 1, maxLength: 1_024 },
+            },
+          },
+          ["taskId", "requestId", "operationMode", "action", "leaseId", "sequence"],
+        ),
+        ...(["complete", "fail", "cancel_ack"] as const).map((action) =>
+          scopedInput(
+            {
+              ...taskLeaseProperties,
+              action: { const: action },
+              ...(action === "fail"
+                ? { errorCode: { type: "string", pattern: "^[A-Z][A-Z0-9_]{0,99}$" } }
+                : {}),
+              summary: {
+                type: ["string", "null"],
+                maxLength: action === "cancel_ack" ? 4_000 : 16_000,
+              },
+              ...(action === "cancel_ack"
+                ? {}
+                : {
+                    artifactKeys: {
+                      type: "array",
+                      maxItems: 32,
+                      items: { type: "string", minLength: 1, maxLength: 1_024 },
+                    },
+                  }),
+            },
+            [
+              "taskId",
+              "requestId",
+              "operationMode",
+              "action",
+              "leaseId",
+              ...(action === "fail" ? ["errorCode"] : []),
+            ],
+          ),
+        ),
+      ],
+    },
   },
   {
     name: "document.read",
@@ -422,6 +528,14 @@ const requiredConstraints = {
   "task.read": ["organizationId", "projectId", "taskId", "validUntil"],
   "task.write": ["organizationId", "projectId", "taskId", "field", "operationMode", "validUntil"],
   "task.create": ["organizationId", "projectId", "operationMode", "validUntil"],
+  "task.execute": [
+    "organizationId",
+    "projectId",
+    "taskId",
+    "operationMode",
+    "action",
+    "validUntil",
+  ],
   "document.read": ["organizationId", "projectId", "documentId", "validUntil"],
   "document.edit": [
     "organizationId",

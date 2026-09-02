@@ -62,6 +62,8 @@ const applicationTables = [
   "paca_task_attachment",
   "paca_document",
   "paca_realtime_outbox",
+  "paca_agent_task_lease",
+  "paca_agent_task_lease_event",
 ] as const;
 
 const targetInitiallyEmptyTables = [
@@ -99,6 +101,8 @@ const targetInitiallyEmptyTables = [
   "paca_task_attachment",
   "paca_document",
   "paca_realtime_outbox",
+  "paca_agent_task_lease",
+  "paca_agent_task_lease_event",
 ] as const;
 
 type RolePayload = {

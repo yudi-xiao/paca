@@ -5,6 +5,8 @@ import {
   createPacaAgentExecutor,
   type PacaAgentExecutionDependencies,
 } from "../src/agent-auth/execution";
+import type { AgentHarnessKind, AgentTaskLease } from "../src/agent-task/protocol";
+import { AgentTaskLeaseError, agentTaskLeaseErrorCodes } from "../src/agent-task/service";
 import type {
   DocumentAgentCommand,
   DocumentAgentCommandResult,
@@ -56,6 +58,26 @@ const task: Task = {
   tags: [],
   viewPosition: null,
   viewGroupKey: null,
+  createdAt: NOW,
+  updatedAt: NOW,
+};
+
+const taskLease: AgentTaskLease = {
+  id: "77777777-7777-4777-8777-777777777777",
+  organizationId: "paca-default",
+  projectId: PROJECT_ID,
+  taskId: TASK_ID,
+  agentId: "agent-1",
+  hostId: "host-1",
+  harness: { kind: "cloudflare-agent", version: null, instanceId: null },
+  status: "active",
+  version: 1,
+  lastCheckpointSequence: 0,
+  leaseExpiresAt: new Date(Date.now() + 30_000),
+  claimedAt: NOW,
+  finishedAt: null,
+  errorCode: null,
+  resultSummary: null,
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -164,6 +186,9 @@ function dependencies(
       ...task,
       title: input.title ?? task.title,
     }),
+    executeTaskLease: async () => {
+      throw new Error("AGENT_TASK_LEASE_NOT_CONFIGURED");
+    },
     findDocumentScope: async () => ({
       documentId: DOCUMENT_ID,
       organizationId: "paca-default",
@@ -181,6 +206,7 @@ function executeContext(
     | "task.read"
     | "task.write"
     | "task.create"
+    | "task.execute"
     | "document.read"
     | "document.edit",
   session: AgentSession,
@@ -357,6 +383,85 @@ describe("Paca Agent Auth execution boundary", () => {
         tags: ["test-data"],
       },
     );
+  });
+
+  it.each([
+    "cloudflare-agent",
+    "codex",
+    "claude-code",
+    "deepseek",
+  ] satisfies AgentHarnessKind[])("uses the same task.execute contract for the %s Harness", async (kind) => {
+    const executeTaskLease = vi.fn(async (_actor, command) => ({
+      duplicate: false,
+      lease: {
+        ...taskLease,
+        harness: { kind: command.harness.kind, version: null, instanceId: null },
+      },
+    }));
+    const hasProjectPermission = vi.fn(async () => ({ allowed: true, scopeExists: true }));
+    const executor = createPacaAgentExecutor(
+      dependencies({ executeTaskLease, hasProjectPermission }),
+    );
+    const constraints = {
+      ...scope,
+      taskId: TASK_ID,
+      operationMode: "execute",
+      action: { in: ["claim", "renew", "checkpoint", "complete", "fail", "cancel_ack"] },
+    } satisfies CapabilityConstraints;
+    const session = agentSession("task.execute", constraints);
+    const command = {
+      ...scope,
+      taskId: TASK_ID,
+      operationMode: "execute" as const,
+      action: "claim" as const,
+      requestId: REQUEST_ID,
+      leaseDurationMs: 30_000,
+      harness: { kind },
+    };
+
+    await expect(executor(executeContext("task.execute", session, command))).resolves.toMatchObject(
+      { lease: { harness: { kind } } },
+    );
+    expect(executeTaskLease).toHaveBeenCalledWith(
+      { agentId: "agent-1", hostId: "host-1" },
+      command,
+      expect.any(Date),
+    );
+    expect(hasProjectPermission).toHaveBeenCalledWith("user-1", PROJECT_ID, {
+      tasks: ["read"],
+    });
+  });
+
+  it("exposes bounded task lease protocol errors through Agent Auth", async () => {
+    const executor = createPacaAgentExecutor(
+      dependencies({
+        executeTaskLease: async () => {
+          throw new AgentTaskLeaseError(agentTaskLeaseErrorCodes.leaseConflict);
+        },
+      }),
+    );
+    const constraints = {
+      ...scope,
+      taskId: TASK_ID,
+      operationMode: "execute",
+      action: "claim",
+    } satisfies CapabilityConstraints;
+    const command = {
+      ...constraints,
+      requestId: REQUEST_ID,
+      leaseDurationMs: 30_000,
+      harness: { kind: "codex" },
+    };
+
+    await expect(
+      executor(executeContext("task.execute", agentSession("task.execute", constraints), command)),
+    ).rejects.toMatchObject({
+      status: "CONFLICT",
+      body: {
+        error: agentTaskLeaseErrorCodes.leaseConflict,
+        message: agentTaskLeaseErrorCodes.leaseConflict,
+      },
+    });
   });
 
   it("rejects a cross-organization project before any domain read", async () => {

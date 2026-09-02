@@ -53,6 +53,7 @@ describe("Paca Agent Auth capability contract", () => {
       "task.read",
       "task.write",
       "task.create",
+      "task.execute",
       "document.read",
       "document.edit",
       "environment.connect",
@@ -78,6 +79,47 @@ describe("Paca Agent Auth capability contract", () => {
         NOW,
       ),
     ).toEqual({ allowed: true });
+  });
+
+  it("binds task execution leases to one task, execute mode, and approved actions", () => {
+    const constraints = {
+      organizationId: "paca-default",
+      projectId: PROJECT_ID,
+      taskId: TASK_ID,
+      operationMode: "execute",
+      action: { in: ["claim", "renew", "checkpoint", "complete", "fail", "cancel_ack"] },
+      validUntil: "2026-08-28T07:10:00.000Z",
+    } satisfies CapabilityConstraints;
+    const agentSession = session("task.execute", constraints);
+
+    expect(
+      evaluateAgentCapability(
+        agentSession,
+        "task.execute",
+        {
+          organizationId: "paca-default",
+          projectId: PROJECT_ID,
+          taskId: TASK_ID,
+          operationMode: "execute",
+          action: "checkpoint",
+        },
+        NOW,
+      ),
+    ).toEqual({ allowed: true });
+    expect(
+      evaluateAgentCapability(
+        agentSession,
+        "task.execute",
+        {
+          organizationId: "paca-default",
+          projectId: PROJECT_ID,
+          taskId: "33333333-3333-4333-8333-333333333333",
+          operationMode: "execute",
+          action: "claim",
+        },
+        NOW,
+      ),
+    ).toEqual({ allowed: false, code: "AGENT_GRANT_CONSTRAINT_MISMATCH" });
   });
 
   it("rejects wrong project, task, field, and operation constraints", () => {

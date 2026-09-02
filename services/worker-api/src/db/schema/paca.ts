@@ -19,7 +19,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-import { agent, member, organization, user } from "./auth";
+import { agent, agentHost, member, organization, user } from "./auth";
 
 export const pacaSchemaMigrations = pgTable("paca_schema_migration", {
   id: text("id").primaryKey(),
@@ -456,6 +456,103 @@ export const pacaTasks = pgTable(
     check(
       "paca_task_story_points_check",
       sql`${table.storyPoints} is null or ${table.storyPoints} >= 0`,
+    ),
+  ],
+);
+
+export type AgentTaskLeaseStatus = "active" | "cancelled" | "completed" | "expired" | "failed";
+
+export const pacaAgentTaskLeases = pgTable(
+  "paca_agent_task_lease",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    organizationId: text("organization_id").notNull(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agent.id, { onDelete: "cascade" }),
+    hostId: text("host_id")
+      .notNull()
+      .references(() => agentHost.id, { onDelete: "cascade" }),
+    harnessKind: text("harness_kind").notNull(),
+    harnessVersion: text("harness_version"),
+    harnessInstanceId: text("harness_instance_id"),
+    status: text("status").$type<AgentTaskLeaseStatus>().default("active").notNull(),
+    version: integer("version").default(1).notNull(),
+    lastCheckpointSequence: integer("last_checkpoint_sequence").default(0).notNull(),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }).notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }).defaultNow().notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    errorCode: text("error_code"),
+    resultSummary: text("result_summary"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.taskId, table.projectId],
+      foreignColumns: [pacaTasks.id, pacaTasks.projectId],
+      name: "paca_agent_task_lease_task_project_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("paca_agent_task_lease_active_task_uidx")
+      .on(table.taskId)
+      .where(sql`${table.status} = 'active'`),
+    index("paca_agent_task_lease_agent_status_idx").on(
+      table.agentId,
+      table.status,
+      table.updatedAt,
+    ),
+    index("paca_agent_task_lease_project_status_idx").on(
+      table.projectId,
+      table.status,
+      table.updatedAt,
+    ),
+    check(
+      "paca_agent_task_lease_status_check",
+      sql`${table.status} in ('active', 'cancelled', 'completed', 'expired', 'failed')`,
+    ),
+    check("paca_agent_task_lease_version_check", sql`${table.version} >= 1`),
+    check(
+      "paca_agent_task_lease_checkpoint_sequence_check",
+      sql`${table.lastCheckpointSequence} >= 0`,
+    ),
+    check(
+      "paca_agent_task_lease_finished_check",
+      sql`(${table.status} = 'active' and ${table.finishedAt} is null) or (${table.status} <> 'active' and ${table.finishedAt} is not null)`,
+    ),
+  ],
+);
+
+export const pacaAgentTaskLeaseEvents = pgTable(
+  "paca_agent_task_lease_event",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    leaseId: uuid("lease_id")
+      .notNull()
+      .references(() => pacaAgentTaskLeases.id, { onDelete: "cascade" }),
+    requestId: uuid("request_id").notNull(),
+    requestFingerprint: text("request_fingerprint").notNull(),
+    action: text("action").notNull(),
+    sequence: integer("sequence"),
+    checkpointKey: text("checkpoint_key"),
+    summary: text("summary"),
+    artifactKeys: jsonb("artifact_keys").$type<string[]>().default([]).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("paca_agent_task_lease_event_request_unique").on(table.requestId),
+    uniqueIndex("paca_agent_task_lease_event_checkpoint_uidx")
+      .on(table.leaseId, table.sequence)
+      .where(sql`${table.sequence} is not null`),
+    index("paca_agent_task_lease_event_lease_created_idx").on(table.leaseId, table.createdAt),
+    check(
+      "paca_agent_task_lease_event_action_check",
+      sql`${table.action} in ('claim', 'renew', 'checkpoint', 'complete', 'fail', 'cancel_ack')`,
+    ),
+    check(
+      "paca_agent_task_lease_event_sequence_check",
+      sql`${table.sequence} is null or ${table.sequence} >= 1`,
     ),
   ],
 );

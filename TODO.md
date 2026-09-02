@@ -15,7 +15,7 @@
 
 更新时间：2026-09-02
 
-当前里程碑：**M9 的 Cloudflare Agents SDK 垂直切片已部署为 internal Worker `307be8f8-7629-4331-b616-abfe0a19535d`。既有 `AgentCoordinator` 现为按 Better Auth Agent ID 稳定命名的 Agents SDK AgentDO，只镜像最近 run ID、状态、版本和时间；PostgreSQL/Workflow 继续分别作为业务审计和持久编排权威，默认 `/agents/*` 路由没有公开。Worker tracing 已启用且 payload 不写入 Agent state。最终版本的真实 internal run `051e0260-1dd9-4acb-b85f-d574626f94c8` 已成功到达 `succeeded`，重复请求复用与变更请求冲突均通过。执行面确定为运行时无关的多 Harness：Cloudflare Agent 用于线上托管，本地 Codex、Claude Code、DeepSeek harness 等继续通过同一 Agent Host 与 Capability Grant 体系消费任务。`@cloudflare/computer` 0.2.1 的实际部署被平台以 experimental compatibility flag 错误 10021 拒绝，且当前业务工具不需要通用 sandbox，因此退出生产主线。质量门为 49 个文件/256 项单元测试、4 个文件/21 项 Workers Runtime 测试、TypeScript、Biome、Wrangler types/dry-run、冻结锁文件安装、真实部署和远程 Workflow smoke。安全回滚点仍为 Worker `14f7e913-de7b-49ea-b142-5d5b9c6c23e9` / Git `048c81e9`。下一步是实现跨 Harness 的任务 lease API 与 contract tests。**
+当前里程碑：**M9 的运行时无关任务 lease 核心已部署为 internal Worker `e45b9460-2435-4460-8c29-6178ea7d1caf`。Better Auth Agent Auth 新增真实 `task.execute` Capability，所有 Harness 都经同一 `/api/auth/capability/execute` 边界和 delegated 用户当前 `tasks.read` 权限交集；PostgreSQL 0018 新增任务 lease/event 两张权威表，强制单 Task 单 active lease、单调版本/checkpoint、全局 request ID 幂等和可信 Agent/Host owner。真实本地 Codex Harness smoke lease `ca796359-3416-4781-a2c5-dbb404f7940d` 已通过 claim、续租、checkpoint、完成、重复复用、变更重试/竞争/跳号拒绝和 Grant 撤销，稳定错误码可由 Agent Auth 协议消费。Cloudflare Agent、Codex、Claude Code、DeepSeek 共用执行 contract tests；下一步补 Host 心跳/能力标签、可领取任务发现、Cloudflare 托管 adapter、租约到期重领与失联/人工取消恢复。`@cloudflare/computer` 仍不在生产主线。当前质量门为 50 个文件/264 项单元测试、4 个文件/21 项 Workers Runtime 测试、TypeScript、Biome、Drizzle、Wrangler dry-run、真实部署和远端 Harness smoke。安全回滚点为上一已验收 Worker `307be8f8-7629-4331-b616-abfe0a19535d` / Git `7ea59164`；数据库 0018 为向前兼容的新增表 migration，旧 Worker 不访问新表。**
 
 已确认前置条件：
 
@@ -30,11 +30,11 @@
 - [x] 已使用管理页生成的一次性 token 将本机 `Mac codex agent` 注册为 active delegated Agent Host；Host 使用设备本地 Ed25519 身份，私钥仅保存于被 Git 忽略且权限为 `0600` 的 `.paca/agent-host.json`，token 未落盘。该状态只代表 Host 身份已建立，尚未注册 Agent、完成 device approval、取得 Capability Grant 或接入 legacy Agent Runner。
 - [x] 已创建隔离的 PlanetScale PostgreSQL `paca/internal` development branch；确认初始 `public` schema 为 0 张业务表。
 - [x] 用户确认当前环境尚未上线，授权首个 internal 认证预览直接使用原 `paca/main` Hyperdrive；此例外不代表生产架构决策。
-- [x] internal 已退出原 Hyperdrive 的宽权限 role：新建无继承管理角色的 `paca-worker-internal`，现仅显式授予 39 张 runtime 业务表 CRUD，验证其能读取业务表且不能读取 migration ledger；独立 Hyperdrive 已创建并接收 internal 流量。根/main Hyperdrive 仅保留为独立环境与 Wrangler 版本回滚路径。
-- [x] 已固化 runtime role 的显式 39 表 CRUD GRANT 与验权 SQL；目标最小权限 role 无 DDL 和 migration ledger/附件迁移账本权限，PlanetScale 授权时使用去掉路由后缀的真实 role 名。现有宽权限 role 的验权会按预期失败，不能作为生产验收结果。
+- [x] internal 已退出原 Hyperdrive 的宽权限 role：新建无继承管理角色的 `paca-worker-internal`，现仅显式授予 41 张 runtime 业务表 CRUD，验证其能读取业务表且不能读取 migration ledger；独立 Hyperdrive 已创建并接收 internal 流量。根/main Hyperdrive 仅保留为独立环境与 Wrangler 版本回滚路径。
+- [x] 已固化 runtime role 的显式 41 表 CRUD GRANT 与验权 SQL；目标最小权限 role 无 DDL 和 migration ledger/附件迁移账本权限，PlanetScale 授权时使用去掉路由后缀的真实 role 名。现有宽权限 role 的验权会按预期失败，不能作为生产验收结果。
 - [x] `deploy:internal` 强制拒绝与根环境相同的 Hyperdrive；首轮 main 预览例外已移除，不能再通过环境变量绕过隔离守卫。
 - [x] 已创建 `paca-attachments-development`、`paca-attachments-internal` 与 `paca-attachments-production` 三个隔离 R2 bucket；根/internal Wrangler binding 已分别指向 development/internal，部署守卫会同时拒绝数据库和附件 bucket 环境混用。production binding 待生产环境配置时接入。
-- [x] 已实现并实际执行受确认串保护的 `database:provision:internal`：检查 main/internal migration ledger、拒绝分叉目标、以单事务和 `ON CONFLICT DO NOTHING` 初始复制、核对应用表行数与业务表指纹、应用/验证最小权限 role 并创建或更新独立 Hyperdrive；当前清单为 39 张 runtime 表。脚本不输出密码，临时 admin role 15 分钟自动过期；2026-08-31 已完成获批的数据复制与 runtime role 凭据轮换，Task 自引用外键在提交前恢复为 `NOT DEFERRABLE`。
+- [x] 已实现并实际执行受确认串保护的 `database:provision:internal`：检查 main/internal migration ledger、拒绝分叉目标、以单事务和 `ON CONFLICT DO NOTHING` 初始复制、核对应用表行数与业务表指纹、应用/验证最小权限 role 并创建或更新独立 Hyperdrive；当前清单为 41 张 runtime 表。脚本不输出密码，临时 admin role 15 分钟自动过期；2026-08-31 已完成获批的数据复制与 runtime role 凭据轮换，Task 自引用外键在提交前恢复为 `NOT DEFERRABLE`。
 - [x] internal 数据隔离版本 `9ec5c792-3d28-4a5b-8f90-73c9e2a39613` 已部署到 `paca.howlearnwood.com`：Wrangler dry-run/部署输出均确认独立 Hyperdrive 与 `paca-attachments-internal` binding；公开 health 返回 `environment=internal`，真实账号 API 验证完成登录、Session、Demo 项目、12 个任务、登出和旧 Cookie 撤销。
 - [x] 已用只读查询确认此前因 `pscale sql` 间歇性 `EOF` 中断的事务未留下部分 DDL；随后改用 `pscale shell` + `psql` 在单事务中成功应用首版 migration。
 - [x] `paca/internal` 已生成 13 张表，`paca_schema_migration` 中的 migration ID 与 snapshot checksum 均已核验。
@@ -55,6 +55,7 @@
 - [x] 0014 附件迁移 active-run guard 已经受控 admin shell 以单事务应用于 `paca/internal` 与 `paca/main`：partial unique index 保证同一源附件最多属于一个非 `rolled_back` run；应用前只读检查确认 main 迁移台账为空且没有跨 run 冲突，两端 checksum 和索引定义均已核验。
 - [x] 0015 可靠实时 outbox migration 已以 15 分钟自动过期 admin role 在 `paca/internal` 单事务应用：新增 `paca_realtime_outbox`、2 个调度索引、7 个 Task/Sprint/View 事务触发器和版本化 checksum；runtime role 已扩为 38 表 CRUD 且无 DDL/ledger 权限。`paca/main` 尚未应用，因为本轮只切换 internal Worker。
 - [x] 0016/0017 文档投影与 Yjs 快照元数据 migration 已在 `paca/internal` 分别以独立事务应用：新增 `paca_document`、项目实时 outbox trigger、`content_version`、`yjs_revision`、R2 key/SHA-256/字节数/时间元数据和非负约束；两个 ledger checksum、16 列、trigger 与 runtime role 的第 39 张表 CRUD 均已核验。`paca/main` 仍停在 0014，本轮只部署 internal。
+- [x] 0018 Agent Task Lease migration 已在 `paca/internal` 以单事务应用：新增 `paca_agent_task_lease` 与追加式 event 表，ledger checksum 为 `6017b070be9add98482a614f230c7f3ce853263595ffbb4697c792fb1f72bc5c`；临时 migration role 的对象已通过 PlanetScale 官方 reassign 移交给 `postgres`，随后删除，runtime role 的 41 表 CRUD 与无 DDL/ledger 权限边界均已核验。`paca/main` 仍停在 0014。
 - [x] Better Auth + React Static Assets 的规范入口已固定为 `paca.howlearnwood.com`；Wrangler internal 环境将 Better Auth URL/可信 Origin 仅绑定到该自定义域名。`workers.dev` 仅保留为诊断/回滚入口，不属于认证可信 Origin。验收版本 `783cbcf7-1d29-41d0-9ae2-afde028af068` 已验证根页面、SPA fallback、public health、API 404 与 Origin 拒绝边界。
 - [x] 远端烟测已通过 public health、Hyperdrive database health、注册/登录、Session、`GET /api/me`、登出和旧 Cookie 服务端撤销；本地一次性 Secret 与测试凭据已清理。
 - [x] React Web 已通过同一 Worker origin 提供；浏览器已验证登录页渲染，远端全链路已验证注册、Session、空工作区读取、登出和会话撤销。
@@ -258,16 +259,17 @@
 
 ## M9：Agent 编排与执行环境
 
-当前 M9 API 版本为 internal Worker `307be8f8-7629-4331-b616-abfe0a19535d`。固定 Document Agent Workflow `00000000-0000-4000-8000-000000000201` 已由受 Better Auth Agent Auth 保护的 Hono API 创建、查询和取消；Workflow 参数不包含 JWT、私钥、文档正文或完整 Grant，只保存精确 Grant ID、受限 scope 和结构化命令。`AgentCoordinator` 已使用精确锁定的 `agents@0.22.0`，Agents SDK state 只包含有界 run 摘要；真实 internal Workflow smoke 已在该版本通过。执行环境评估已完成：当前业务修改只需要受限 Paca 工具，采用 Cloudflare Agents SDK + Workflows + Agent Tracing 的线上 Harness，并允许本地 Codex、Claude Code、DeepSeek 等 Harness 使用相同 Agent Auth 协议；通用 sandbox 延后到出现不可信代码、构建或 shell 需求时再选型。
+当前 M9 API 版本为 internal Worker `e45b9460-2435-4460-8c29-6178ea7d1caf`。固定 Document Agent Workflow `00000000-0000-4000-8000-000000000201` 已由受 Better Auth Agent Auth 保护的 Hono API 创建、查询和取消；Workflow 参数不包含 JWT、私钥、文档正文或完整 Grant，只保存精确 Grant ID、受限 scope 和结构化命令。`AgentCoordinator` 使用精确锁定的 `agents@0.22.0`，Agents SDK state 只包含有界 run 摘要。`task.execute` lease 核心现在允许 Cloudflare Agent 和本地 Codex、Claude Code、DeepSeek Harness 通过同一 Agent Auth 执行边界领取指定任务；PostgreSQL 是 lease/checkpoint/event 权威，通用 sandbox 继续延后到出现不可信代码、构建或 shell 需求时再选型。
 
 - [x] 明确 AgentDO 只保存会话状态，不在 DO 内执行长时间推理。已部署 `AgentCoordinator`，SQLite 仅保存 Agent 绑定、run scope、状态/版本、幂等 transition 和安全错误码；不保存正文、JWT、Grant 内容、推理上下文或执行结果，不暴露公开 fetch/WebSocket 路由。
 - [x] 用 Workflows 编排可恢复步骤、重试、超时与取消。Document Agent Workflow 使用版本化固定定义、确定性 transition ID 和 Cloudflare `terminate()`；取消不会回滚已提交的 Yjs/CRDT 变更，产品级补偿必须作为新的可审计文档操作，而不是伪造底层事务回滚。
 - [x] 评估并选择执行环境。Cloudflare 托管路径采用 Agents SDK AgentDO + Workflows + Agent Tracing，本地 Codex、Claude Code、DeepSeek harness 使用本机执行环境和同一 Agent Auth/任务协议；当前任务编辑与文档操作不引入通用 sandbox。`@cloudflare/computer` 0.2.1 Worker backend 的 internal 部署因 experimental compatibility flag 被平台以错误 10021 拒绝，实验代码已移除。未来若需要不可信代码、构建或 shell，再在独立 Gateway 后重新评估 Computer、Sandbox SDK 或 Containers。
 - [x] 完成 Cloudflare Agents SDK internal 垂直切片：既有 `AgentCoordinator` 已改为按 Better Auth Agent ID 稳定命名的 AgentDO，只镜像最近 run 的有界状态；未公开默认 `/agents/*` 路由；Worker traces 已启用，真实 Workflow run 已触发 Agent RPC/state 链路，payload 不进入 Agent state，PostgreSQL 审计继续作为权威。
-- [ ] 实现运行时无关的 Harness 任务协议：Host/Harness 能力标签、领取、短期 lease、续租、幂等 checkpoint、提交结果、取消确认和 Grant 撤销；Cloudflare Agent 与至少一个本地 Harness adapter 通过同一组 contract tests。
+- [x] 实现运行时无关的 `task.execute` lease 核心：命令覆盖 claim、renew、checkpoint、complete、fail、cancel_ack，Grant 精确绑定 Organization/Project/Task/execute/action/validUntil；可信 Agent/Host 来自 Agent Auth Session，PostgreSQL 强制同 Task 单 active lease、版本/checkpoint 单调、全局 request ID 幂等和事件审计。Cloudflare Agent、Codex、Claude Code、DeepSeek 共用 contract tests，真实 Codex Harness 完成远端全链路、稳定冲突码和 Grant 撤销拒绝。
+- [ ] 补齐 Harness 调度面：Host 心跳与受审批能力标签、可领取任务发现/匹配、Cloudflare 托管 adapter 和本地 CLI adapter；不得让 Harness 自报标签扩大 Grant，也不得建立绕过 `task.execute` 的第二套入口。
 - [x] AgentDO/Workflow 调用 DocumentParty 前验证 Agent Auth Grant 和 constraints。入口先验证 JWT 中的两个 capability，随后按精确 Grant ID 从 PostgreSQL 重查 active/expiry/constraints、文档真实 Organization/Project scope，并实时求 delegated 用户 `docs.write` 权限交集。
 - [x] 所有可重试步骤使用业务幂等键，并把 run ID、actor、输入范围和结果写入审计。Coordinator 用 SHA-256 请求指纹拒绝同 run ID 的变更请求，Workflow transition 使用确定性 ID，DocumentParty 用 request ID 去重；审计不包含正文、JWT 或私钥。
-- [ ] 完成长任务恢复、重复投递、取消、Harness 失联和权限中途撤销测试。当前本地运行时已覆盖 Workflow step 重试、Grant 拒绝和取消竞态，远程 smoke 已覆盖成功、完全重复投递、变更请求冲突和 Grant 撤销；仍需验证长时间等待/恢复、lease 到期重领、Harness 失联、运行中权限撤销和人工取消。
+- [ ] 完成长任务恢复、重复投递、取消、Harness 失联和权限中途撤销测试。当前本地运行时已覆盖 Workflow step 重试、Grant 拒绝和取消竞态；远程 Workflow smoke 覆盖成功、完全重复投递、变更请求冲突和 Grant 撤销，远程 Task Harness smoke 覆盖 claim/checkpoint 幂等、变更 request ID 冲突、竞争领取、checkpoint 跳号、完成和 Grant 撤销。仍需验证 lease 到期重领、Harness 失联、运行中人工取消与超长任务恢复。
 
 ## M10：API 与前端逐步切换
 

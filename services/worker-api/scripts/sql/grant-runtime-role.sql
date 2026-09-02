@@ -50,7 +50,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.paca_file,
   public.paca_task_attachment,
   public.paca_document,
-  public.paca_realtime_outbox
+  public.paca_realtime_outbox,
+  public.paca_agent_task_lease,
+  public.paca_agent_task_lease_event
 TO :"runtime_role";
 
 REVOKE ALL PRIVILEGES ON TABLE public.paca_schema_migration FROM :"runtime_role";
