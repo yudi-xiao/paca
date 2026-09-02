@@ -1,4 +1,5 @@
 import type { AgentSession } from "@better-auth/agent-auth";
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 
 import type { AppBindings, AppVariables } from "../bindings";
@@ -15,10 +16,43 @@ type AgentHonoEnvironment = {
   Variables: AppVariables;
 };
 
+type AgentHonoContext = Context<AgentHonoEnvironment>;
+
 type ConstraintContextResolver = (context: {
   param(name: string): string;
   query(name: string): string | undefined;
 }) => AgentConstraintContext;
+
+async function authenticateAgent(
+  context: AgentHonoContext,
+  readAgentSession: ReadAgentSession,
+): Promise<AgentSession | Response> {
+  try {
+    const session = await readAgentSession(context.req.raw, context.env);
+    if (session) return session;
+  } catch (error) {
+    if (!isAgentAuthenticationFailure(error)) throw error;
+    return context.json(
+      {
+        success: false as const,
+        error_code: "AGENT_TOKEN_INVALID",
+        error: "Agent authentication failed",
+        request_id: context.get("requestId"),
+      },
+      401,
+    );
+  }
+
+  return context.json(
+    {
+      success: false as const,
+      error_code: "AGENT_UNAUTHENTICATED",
+      error: "Agent authentication required",
+      request_id: context.get("requestId"),
+    },
+    401,
+  );
+}
 
 function isAgentAuthenticationFailure(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -37,33 +71,8 @@ export function requireAgentCapability(
   resolveConstraintContext: ConstraintContextResolver,
 ) {
   return createMiddleware<AgentHonoEnvironment>(async (context, next) => {
-    let session: AgentSession | null;
-    try {
-      session = await readAgentSession(context.req.raw, context.env);
-    } catch (error) {
-      if (!isAgentAuthenticationFailure(error)) throw error;
-      return context.json(
-        {
-          success: false as const,
-          error_code: "AGENT_TOKEN_INVALID",
-          error: "Agent authentication failed",
-          request_id: context.get("requestId"),
-        },
-        401,
-      );
-    }
-
-    if (!session) {
-      return context.json(
-        {
-          success: false as const,
-          error_code: "AGENT_UNAUTHENTICATED",
-          error: "Agent authentication required",
-          request_id: context.get("requestId"),
-        },
-        401,
-      );
-    }
+    const session = await authenticateAgent(context, readAgentSession);
+    if (session instanceof Response) return session;
 
     const decision = evaluateAgentCapability(
       session,
@@ -82,6 +91,15 @@ export function requireAgentCapability(
       );
     }
 
+    context.set("agentSession", session);
+    await next();
+  });
+}
+
+export function requireAgentAuthentication(readAgentSession: ReadAgentSession) {
+  return createMiddleware<AgentHonoEnvironment>(async (context, next) => {
+    const session = await authenticateAgent(context, readAgentSession);
+    if (session instanceof Response) return session;
     context.set("agentSession", session);
     await next();
   });

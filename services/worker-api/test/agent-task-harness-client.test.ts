@@ -55,8 +55,25 @@ function result(command: AgentTaskLeaseCommand) {
 
 function client() {
   const execute = vi.fn(async (command: AgentTaskLeaseCommand) => result(command));
-  const transport: AgentTaskHarnessTransport = { execute };
+  const discover = vi.fn(async () => ({
+    data: [
+      {
+        organization_id: "paca-default",
+        project_id: PROJECT_ID,
+        task_id: TASK_ID,
+        task_number: 1,
+        title: "Claimable task",
+        status_id: null,
+        task_updated_at: "2026-09-02T03:30:00.000Z",
+        valid_until: VALID_UNTIL,
+        availability: "claimable",
+        lease: null,
+      },
+    ],
+  }));
+  const transport: AgentTaskHarnessTransport = { execute, discover };
   return {
+    discover,
     execute,
     client: new AgentTaskHarnessClient(transport, {
       kind: "codex",
@@ -103,6 +120,20 @@ describe("runtime-independent Agent task Harness client", () => {
     await harness.client.claim(scope, input);
     await harness.client.claim(scope, input);
     expect(harness.execute.mock.calls[0]?.[0]).toEqual(harness.execute.mock.calls[1]?.[0]);
+  });
+
+  it("discovers approved work and decodes task timestamps", async () => {
+    const harness = client();
+    const tasks = await harness.client.discover();
+
+    expect(tasks).toEqual([
+      expect.objectContaining({
+        task_id: TASK_ID,
+        availability: "claimable",
+        task_updated_at: new Date("2026-09-02T03:30:00.000Z"),
+      }),
+    ]);
+    expect(harness.discover).toHaveBeenCalledOnce();
   });
 
   it("rejects malformed output and a claim that changes the configured Harness identity", async () => {

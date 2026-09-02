@@ -138,4 +138,46 @@ describe("Agent Auth Hono boundary", () => {
       validUntil: VALID_UNTIL,
     });
   });
+
+  it("discovers only server-authorized task.execute work through the Agent boundary", async () => {
+    const agentSession = session(scope);
+    const currentAgentSession = vi.fn(async () => agentSession);
+    const agentTasks = {
+      list: vi.fn(async () => [
+        {
+          organizationId: "paca-default",
+          projectId: PROJECT_ID,
+          taskId: OTHER_PROJECT_ID,
+          taskNumber: 7,
+          title: "Execute approved work",
+          statusId: null,
+          taskUpdatedAt: new Date("2026-08-28T01:00:00.000Z"),
+          validUntil: VALID_UNTIL,
+          availability: "claimable" as const,
+          lease: null,
+        },
+      ]),
+    };
+    const app = createApp({ currentAgentSession, agentTasks, log: vi.fn() });
+
+    const response = await app.request("/api/v1/agent/tasks/claimable", {}, bindings());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      data: [
+        {
+          organization_id: "paca-default",
+          project_id: PROJECT_ID,
+          task_id: OTHER_PROJECT_ID,
+          task_number: 7,
+          title: "Execute approved work",
+          valid_until: VALID_UNTIL,
+          availability: "claimable",
+          lease: null,
+        },
+      ],
+    });
+    expect(agentTasks.list).toHaveBeenCalledWith(bindings(), agentSession);
+  });
 });

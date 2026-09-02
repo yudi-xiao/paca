@@ -7,6 +7,10 @@ import {
   registerDelegatedAgentWithCapabilities,
 } from "../src/agent-auth/agent-client";
 import { AgentHostEnrollmentError } from "../src/agent-auth/host-enrollment";
+import {
+  AgentTaskHarnessClient,
+  delegatedAgentTaskHarnessTransport,
+} from "../src/agent-task/harness-client";
 
 type JsonRecord = Record<string, unknown>;
 type HeadersWithSetCookie = Headers & { getSetCookie?: () => string[] };
@@ -192,6 +196,19 @@ async function main(): Promise<void> {
     }
     grantActive = true;
 
+    const harnessClient = new AgentTaskHarnessClient(
+      delegatedAgentTaskHarnessTransport(registration.config),
+      { kind: "codex", version: "smoke", instanceId: `local-${runSuffix}` },
+    );
+    const discoveredBeforeClaim = await harnessClient.discover();
+    if (
+      discoveredBeforeClaim.length !== 1 ||
+      discoveredBeforeClaim[0]?.task_id !== taskId ||
+      discoveredBeforeClaim[0]?.availability !== "claimable"
+    ) {
+      throw new Error("DISCOVERY_CLAIMABLE_INVALID");
+    }
+
     const scope = {
       organizationId,
       projectId,
@@ -212,6 +229,14 @@ async function main(): Promise<void> {
       throw new Error("CLAIM_STATE_INVALID");
     }
     const leaseId = claimed.lease.id as string;
+    const discoveredOwned = await harnessClient.discover();
+    if (
+      discoveredOwned.length !== 1 ||
+      discoveredOwned[0]?.availability !== "owned" ||
+      discoveredOwned[0]?.lease?.id !== leaseId
+    ) {
+      throw new Error("DISCOVERY_OWNED_INVALID");
+    }
 
     const duplicateClaim = leaseResult(
       await execute(registration.config, claim),
@@ -319,6 +344,8 @@ async function main(): Promise<void> {
         finalVersion: completed.lease.version,
         duplicateClaim: true,
         duplicateCheckpoint: true,
+        discoveryClaimable: true,
+        discoveryOwned: true,
         changedRetryCode,
         competingClaimCode,
         skippedCheckpointCode,

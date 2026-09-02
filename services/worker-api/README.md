@@ -382,8 +382,16 @@ JSON on standard input; the config must belong to an approved Agent that request
 
 ```bash
 PACA_AGENT_CONFIG='/absolute/path/to/agent.json' \
+bun run agent:tasks
+
+PACA_AGENT_CONFIG='/absolute/path/to/agent.json' \
 bun run agent:task-lease < task-lease-command.json
 ```
+
+`agent:tasks` calls `GET /api/v1/agent/tasks/claimable` with a one-use Agent JWT. The server derives
+the list only from exact active `task.execute` Grants, intersects delegated Agents with the user's
+current `tasks.read`, hides work leased by another Agent, and returns the current Agent's own live
+lease for resume. Harness self-reported names or labels never add work to this list.
 
 The CLI reads the ignored local Agent key only to mint a short-lived, one-use Agent JWT. It does not
 copy the key, JWT or full Grant into command output.

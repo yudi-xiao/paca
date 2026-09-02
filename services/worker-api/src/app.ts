@@ -5,13 +5,22 @@ import * as z from "zod";
 
 import { exactConstraintString } from "./agent-auth/capabilities";
 import { readPostgresProjectAsAgent } from "./agent-auth/execution";
-import { type ReadAgentSession, requireAgentCapability } from "./agent-auth/http";
+import {
+  type ReadAgentSession,
+  requireAgentAuthentication,
+  requireAgentCapability,
+} from "./agent-auth/http";
 import {
   DOCUMENT_AGENT_WORKFLOW_ID,
   documentAgentWorkflowStartSchema,
 } from "./agent-run/document-workflow-protocol";
 import type { AgentRunRecord } from "./agent-run/protocol";
 import { AgentRunError, type AgentRunRuntime, agentRunRuntime } from "./agent-run/runtime";
+import type { AgentTaskDiscoveryItem } from "./agent-task/discovery";
+import {
+  type AgentTaskDiscoveryRuntime,
+  agentTaskDiscoveryRuntime,
+} from "./agent-task/discovery-runtime";
 import { type AttachmentRuntime, attachmentRuntime } from "./attachment/runtime";
 import {
   AttachmentError,
@@ -126,6 +135,7 @@ type AppDependencies = {
     scope: { organizationId: string; projectId: string; validUntil: string },
   ) => Promise<Project>;
   agentRuns: AgentRunRuntime;
+  agentTasks: AgentTaskDiscoveryRuntime;
   agentConfigurationHandler: (request: Request, env: AppBindings) => Promise<Response>;
   authHandler: (request: Request, env: AppBindings) => Promise<Response>;
   authorizeOrganizationPermission: AuthorizeOrganizationPermission;
@@ -1041,6 +1051,32 @@ function agentRunResponse(run: AgentRunRecord) {
   };
 }
 
+function agentTaskDiscoveryResponse(item: AgentTaskDiscoveryItem) {
+  return {
+    organization_id: item.organizationId,
+    project_id: item.projectId,
+    task_id: item.taskId,
+    task_number: item.taskNumber,
+    title: item.title,
+    status_id: item.statusId,
+    task_updated_at: item.taskUpdatedAt.toISOString(),
+    valid_until: item.validUntil,
+    availability: item.availability,
+    lease: item.lease
+      ? {
+          id: item.lease.id,
+          harness_kind: item.lease.harnessKind,
+          harness_version: item.lease.harnessVersion,
+          harness_instance_id: item.lease.harnessInstanceId,
+          status: item.lease.status,
+          version: item.lease.version,
+          last_checkpoint_sequence: item.lease.lastCheckpointSequence,
+          lease_expires_at: item.lease.leaseExpiresAt.toISOString(),
+        }
+      : null,
+  };
+}
+
 function agentRunFailure(context: AppContext, error: unknown) {
   if (error instanceof AgentRunError) {
     return legacyFailure(context, error.status, error.code, "Agent run request failed");
@@ -1053,6 +1089,7 @@ const defaultDependencies: AppDependencies = {
   agentProject: (env, session, scope) =>
     withDatabase(env, (database) => readPostgresProjectAsAgent(database, session, scope)),
   agentRuns: agentRunRuntime,
+  agentTasks: agentTaskDiscoveryRuntime,
   agentConfigurationHandler: handleAgentConfigurationRequest,
   authHandler: handleAuthRequest,
   authorizeOrganizationPermission,
@@ -1123,6 +1160,18 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
 
   app.get("/.well-known/agent-configuration", (context) =>
     dependencies.agentConfigurationHandler(context.req.raw, context.env),
+  );
+
+  app.get(
+    "/api/v1/agent/tasks/claimable",
+    requireAgentAuthentication(dependencies.currentAgentSession),
+    async (context) =>
+      legacySuccess(
+        context,
+        (await dependencies.agentTasks.list(context.env, context.get("agentSession"))).map(
+          agentTaskDiscoveryResponse,
+        ),
+      ),
   );
 
   app.get(

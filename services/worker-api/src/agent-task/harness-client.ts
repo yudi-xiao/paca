@@ -1,6 +1,10 @@
 import * as z from "zod";
 
-import { type DelegatedAgentConfig, executeAgentCapability } from "../agent-auth/agent-client";
+import {
+  type DelegatedAgentConfig,
+  executeAgentCapability,
+  fetchWithDelegatedAgent,
+} from "../agent-auth/agent-client";
 import {
   type AgentHarnessKind,
   type AgentTaskLeaseCommand,
@@ -46,6 +50,38 @@ const resultSchema = z
   })
   .strict();
 
+const discoveredTaskSchema = z
+  .object({
+    organization_id: z.string().min(1),
+    project_id: z.uuid(),
+    task_id: z.uuid(),
+    task_number: z.number().int().positive(),
+    title: z.string().min(1),
+    status_id: z.uuid().nullable(),
+    task_updated_at: z.coerce.date(),
+    valid_until: z.iso.datetime(),
+    availability: z.enum(["claimable", "owned"]),
+    lease: z
+      .object({
+        id: z.uuid(),
+        harness_kind: z.enum(agentHarnessKinds),
+        harness_version: z.string().nullable(),
+        harness_instance_id: z.string().nullable(),
+        status: z.literal("active"),
+        version: z.number().int().min(1),
+        last_checkpoint_sequence: z.number().int().min(0),
+        lease_expires_at: z.coerce.date(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+
+const discoveryResultSchema = z.union([
+  z.array(discoveredTaskSchema),
+  z.object({ data: z.array(discoveredTaskSchema) }).passthrough(),
+]);
+
 export type AgentTaskHarnessIdentity = {
   kind: AgentHarnessKind;
   version?: string;
@@ -61,11 +97,15 @@ export type AgentTaskExecutionScope = {
 
 export interface AgentTaskHarnessTransport {
   execute(command: AgentTaskLeaseCommand): Promise<unknown>;
+  discover?(): Promise<unknown>;
 }
 
 export class AgentTaskHarnessProtocolError extends Error {
   constructor(
-    readonly code: "AGENT_TASK_HARNESS_INPUT_INVALID" | "AGENT_TASK_HARNESS_RESULT_INVALID",
+    readonly code:
+      | "AGENT_TASK_HARNESS_DISCOVERY_UNAVAILABLE"
+      | "AGENT_TASK_HARNESS_INPUT_INVALID"
+      | "AGENT_TASK_HARNESS_RESULT_INVALID",
   ) {
     super(code);
     this.name = "AgentTaskHarnessProtocolError";
@@ -160,6 +200,17 @@ export class AgentTaskHarnessClient {
     return this.execute({ ...commandScope(scope), ...input, action: "cancel_ack" });
   }
 
+  async discover(): Promise<z.infer<typeof discoveredTaskSchema>[]> {
+    if (!this.transport.discover) {
+      throw new AgentTaskHarnessProtocolError("AGENT_TASK_HARNESS_DISCOVERY_UNAVAILABLE");
+    }
+    const result = discoveryResultSchema.safeParse(await this.transport.discover());
+    if (!result.success) {
+      throw new AgentTaskHarnessProtocolError("AGENT_TASK_HARNESS_RESULT_INVALID");
+    }
+    return Array.isArray(result.data) ? result.data : result.data.data;
+  }
+
   async execute(value: unknown): Promise<AgentTaskLeaseResult> {
     const command = agentTaskLeaseCommandSchema.safeParse(value);
     if (!command.success) {
@@ -193,5 +244,18 @@ export function delegatedAgentTaskHarnessTransport(
         arguments: { ...command },
         fetch,
       }),
+    discover: async () => {
+      const response = await fetchWithDelegatedAgent({
+        config,
+        path: "/api/v1/agent/tasks/claimable",
+        capabilities: ["task.execute"],
+        fetch,
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new AgentTaskHarnessProtocolError("AGENT_TASK_HARNESS_DISCOVERY_UNAVAILABLE");
+      }
+      return body;
+    },
   };
 }
