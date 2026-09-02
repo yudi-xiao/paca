@@ -13,9 +13,9 @@
 
 ## 当前状态
 
-更新时间：2026-09-01
+更新时间：2026-09-02
 
-当前里程碑：**M9 的首个 Document Agent Workflow 已部署为 internal Worker `d29d1866-cffd-4b40-a9f1-452de1135453`（Git `f3a6e761`）。受 Better Auth Agent JWT 保护的 Hono API 使用分别受约束的 `workflow.execute` 与 `document.edit` Grant 创建 Cloudflare Workflow；Workflow 在每次 DocumentParty 写入前从 PostgreSQL 重查 Agent、两个精确 Grant、文档作用域和 delegated 用户当前 `docs.write` 权限。`AgentCoordinator` 只持久化有界 run 状态与请求指纹，Cloudflare Workflow 负责重试、超时和取消，DocumentParty 以 request ID 保证实际命令幂等。真实 internal smoke 已验证空闲 Agent 重新激活后再授权、Workflow 成功终态、完全相同请求复用、改变参数的同 run ID 返回 409、Grant 撤销和测试文档清理；Agent Auth 后台审计/心跳现在会在请求级 PostgreSQL Client 关闭前完成。Worker 49 个文件/256 项与 Workers Runtime 4 个文件/20 项测试通过。安全回滚点为 Worker `14f7e913-de7b-49ea-b142-5d5b9c6c23e9` / Git `048c81e9`，该版本保留 Workflow/DO schema 但继续阻止公开 `workflow.execute`。下一步是执行环境选型与真实长任务失败恢复验收。**
+当前里程碑：**M9 的 Cloudflare Agents SDK 垂直切片已部署为 internal Worker `307be8f8-7629-4331-b616-abfe0a19535d`。既有 `AgentCoordinator` 现为按 Better Auth Agent ID 稳定命名的 Agents SDK AgentDO，只镜像最近 run ID、状态、版本和时间；PostgreSQL/Workflow 继续分别作为业务审计和持久编排权威，默认 `/agents/*` 路由没有公开。Worker tracing 已启用且 payload 不写入 Agent state。最终版本的真实 internal run `051e0260-1dd9-4acb-b85f-d574626f94c8` 已成功到达 `succeeded`，重复请求复用与变更请求冲突均通过。执行面确定为运行时无关的多 Harness：Cloudflare Agent 用于线上托管，本地 Codex、Claude Code、DeepSeek harness 等继续通过同一 Agent Host 与 Capability Grant 体系消费任务。`@cloudflare/computer` 0.2.1 的实际部署被平台以 experimental compatibility flag 错误 10021 拒绝，且当前业务工具不需要通用 sandbox，因此退出生产主线。质量门为 49 个文件/256 项单元测试、4 个文件/21 项 Workers Runtime 测试、TypeScript、Biome、Wrangler types/dry-run、冻结锁文件安装、真实部署和远程 Workflow smoke。安全回滚点仍为 Worker `14f7e913-de7b-49ea-b142-5d5b9c6c23e9` / Git `048c81e9`。下一步是实现跨 Harness 的任务 lease API 与 contract tests。**
 
 已确认前置条件：
 
@@ -258,14 +258,16 @@
 
 ## M9：Agent 编排与执行环境
 
-当前 M9 版本为 internal Worker `d29d1866-cffd-4b40-a9f1-452de1135453`（Git `f3a6e761`）。固定 Document Agent Workflow `00000000-0000-4000-8000-000000000201` 已由受 Better Auth Agent Auth 保护的 Hono API 创建、查询和取消；Workflow 参数不包含 JWT、私钥、文档正文或完整 Grant，只保存精确 Grant ID、受限 scope 和结构化命令。Agent Auth 的绝对 24 小时硬失效已恢复为库的禁用语义，保留短期 JWT、滑动会话、透明重新激活、显式撤销和密钥轮换；重新激活会按 Agent Auth 语义清除旧 Grant，因此自动化先重新激活再签发精确短期 Grant。请求级 PostgreSQL Client 会等 Better Auth 后台审计、心跳和到期维护 settle 后再关闭。远程 smoke 与日志共同验证 Workflow/DocumentParty/Coordinator/审计链路，完整质量门为 Worker 49 个文件/256 项、Workers Runtime 4 个文件/20 项，并通过 Web internal build、TypeScript、Biome、Wrangler types/dry-run、真实部署和公开 health。
+当前 M9 API 版本为 internal Worker `307be8f8-7629-4331-b616-abfe0a19535d`。固定 Document Agent Workflow `00000000-0000-4000-8000-000000000201` 已由受 Better Auth Agent Auth 保护的 Hono API 创建、查询和取消；Workflow 参数不包含 JWT、私钥、文档正文或完整 Grant，只保存精确 Grant ID、受限 scope 和结构化命令。`AgentCoordinator` 已使用精确锁定的 `agents@0.22.0`，Agents SDK state 只包含有界 run 摘要；真实 internal Workflow smoke 已在该版本通过。执行环境评估已完成：当前业务修改只需要受限 Paca 工具，采用 Cloudflare Agents SDK + Workflows + Agent Tracing 的线上 Harness，并允许本地 Codex、Claude Code、DeepSeek 等 Harness 使用相同 Agent Auth 协议；通用 sandbox 延后到出现不可信代码、构建或 shell 需求时再选型。
 
 - [x] 明确 AgentDO 只保存会话状态，不在 DO 内执行长时间推理。已部署 `AgentCoordinator`，SQLite 仅保存 Agent 绑定、run scope、状态/版本、幂等 transition 和安全错误码；不保存正文、JWT、Grant 内容、推理上下文或执行结果，不暴露公开 fetch/WebSocket 路由。
 - [x] 用 Workflows 编排可恢复步骤、重试、超时与取消。Document Agent Workflow 使用版本化固定定义、确定性 transition ID 和 Cloudflare `terminate()`；取消不会回滚已提交的 Yjs/CRDT 变更，产品级补偿必须作为新的可审计文档操作，而不是伪造底层事务回滚。
-- [ ] 评估并选择 Computer、Sandbox 或 Containers 作为各类任务的执行环境。
+- [x] 评估并选择执行环境。Cloudflare 托管路径采用 Agents SDK AgentDO + Workflows + Agent Tracing，本地 Codex、Claude Code、DeepSeek harness 使用本机执行环境和同一 Agent Auth/任务协议；当前任务编辑与文档操作不引入通用 sandbox。`@cloudflare/computer` 0.2.1 Worker backend 的 internal 部署因 experimental compatibility flag 被平台以错误 10021 拒绝，实验代码已移除。未来若需要不可信代码、构建或 shell，再在独立 Gateway 后重新评估 Computer、Sandbox SDK 或 Containers。
+- [x] 完成 Cloudflare Agents SDK internal 垂直切片：既有 `AgentCoordinator` 已改为按 Better Auth Agent ID 稳定命名的 AgentDO，只镜像最近 run 的有界状态；未公开默认 `/agents/*` 路由；Worker traces 已启用，真实 Workflow run 已触发 Agent RPC/state 链路，payload 不进入 Agent state，PostgreSQL 审计继续作为权威。
+- [ ] 实现运行时无关的 Harness 任务协议：Host/Harness 能力标签、领取、短期 lease、续租、幂等 checkpoint、提交结果、取消确认和 Grant 撤销；Cloudflare Agent 与至少一个本地 Harness adapter 通过同一组 contract tests。
 - [x] AgentDO/Workflow 调用 DocumentParty 前验证 Agent Auth Grant 和 constraints。入口先验证 JWT 中的两个 capability，随后按精确 Grant ID 从 PostgreSQL 重查 active/expiry/constraints、文档真实 Organization/Project scope，并实时求 delegated 用户 `docs.write` 权限交集。
 - [x] 所有可重试步骤使用业务幂等键，并把 run ID、actor、输入范围和结果写入审计。Coordinator 用 SHA-256 请求指纹拒绝同 run ID 的变更请求，Workflow transition 使用确定性 ID，DocumentParty 用 request ID 去重；审计不包含正文、JWT 或私钥。
-- [ ] 完成长任务恢复、重复投递、取消、执行环境失败和权限中途撤销测试。当前本地运行时已覆盖 Workflow step 重试、Grant 拒绝和取消竞态，远程 smoke 已覆盖成功、完全重复投递、变更请求冲突和 Grant 撤销；仍需接入真实执行环境后验证长时间 sleep/恢复、执行容器失败、运行中权限撤销和人工取消。
+- [ ] 完成长任务恢复、重复投递、取消、Harness 失联和权限中途撤销测试。当前本地运行时已覆盖 Workflow step 重试、Grant 拒绝和取消竞态，远程 smoke 已覆盖成功、完全重复投递、变更请求冲突和 Grant 撤销；仍需验证长时间等待/恢复、lease 到期重领、Harness 失联、运行中权限撤销和人工取消。
 
 ## M10：API 与前端逐步切换
 

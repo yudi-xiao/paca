@@ -1,4 +1,5 @@
-import { DurableObject } from "cloudflare:workers";
+import { Agent } from "agents";
+import * as z from "zod";
 
 import {
   type AgentRunCreate,
@@ -37,6 +38,20 @@ type TransitionRow = {
   errorCode: string | null;
 };
 
+const pacaAgentRuntimeStateSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    lastRunId: z.uuid().nullable(),
+    lastRunStatus: z
+      .enum(["queued", "running", "waiting", "cancelling", "cancelled", "succeeded", "failed"])
+      .nullable(),
+    lastRunVersion: z.number().int().nonnegative(),
+    updatedAt: z.number().int().nonnegative().nullable(),
+  })
+  .strict();
+
+export type PacaAgentRuntimeState = z.infer<typeof pacaAgentRuntimeStateSchema>;
+
 export type AgentRunMutationResult =
   | {
       success: true;
@@ -74,7 +89,23 @@ function publicRun(row: RunRow): AgentRunRecord {
   };
 }
 
-export class AgentCoordinator extends DurableObject<Env> {
+/**
+ * One durable Cloudflare Agent per Better Auth Agent ID.
+ *
+ * PostgreSQL and the run tables below remain the business/audit authorities.
+ * Agents SDK state deliberately mirrors only a bounded status summary so it can
+ * be traced and recovered without persisting prompts, documents, JWTs, grants,
+ * secrets, or harness-specific payloads.
+ */
+export class AgentCoordinator extends Agent<Env, PacaAgentRuntimeState> {
+  override initialState: PacaAgentRuntimeState = {
+    schemaVersion: 1,
+    lastRunId: null,
+    lastRunStatus: null,
+    lastRunVersion: 0,
+    updatedAt: null,
+  };
+
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
     state.blockConcurrencyWhile(async () => {
@@ -134,6 +165,7 @@ export class AgentCoordinator extends DurableObject<Env> {
       if (existing.requestFingerprint !== fingerprint) {
         return { success: false, errorCode: "AGENT_RUN_IDEMPOTENCY_CONFLICT" };
       }
+      this.mirrorRunState(existing);
       return { success: true, duplicate: true, run: publicRun(existing) };
     }
     if (this.findRun(input.runId)) return { success: false, errorCode: "AGENT_RUN_ID_CONFLICT" };
@@ -159,6 +191,7 @@ export class AgentCoordinator extends DurableObject<Env> {
     );
     const run = this.findRun(input.runId);
     if (!run) throw new Error("AGENT_RUN_CREATE_FAILED");
+    this.mirrorRunState(run);
     return { success: true, duplicate: false, run: publicRun(run) };
   }
 
@@ -180,6 +213,7 @@ export class AgentCoordinator extends DurableObject<Env> {
       }
       const current = this.findRun(input.runId);
       if (!current) return { success: false, errorCode: "AGENT_RUN_NOT_FOUND" };
+      this.mirrorRunState(current);
       return { success: true, duplicate: true, run: publicRun(current) };
     }
 
@@ -222,7 +256,18 @@ export class AgentCoordinator extends DurableObject<Env> {
 
     const run = this.findRun(input.runId);
     if (!run) throw new Error("AGENT_RUN_NOT_FOUND");
+    this.mirrorRunState(run);
     return { success: true, duplicate: false, run: publicRun(run) };
+  }
+
+  getRuntimeState(): PacaAgentRuntimeState {
+    return this.state;
+  }
+
+  override validateStateChange(nextState: PacaAgentRuntimeState): void {
+    if (!pacaAgentRuntimeStateSchema.safeParse(nextState).success) {
+      throw new Error("PACA_AGENT_RUNTIME_STATE_INVALID");
+    }
   }
 
   getRun(runId: string): AgentRunRecord | null {
@@ -285,6 +330,16 @@ export class AgentCoordinator extends DurableObject<Env> {
         )
         .toArray()[0] ?? null
     );
+  }
+
+  private mirrorRunState(run: RunRow): void {
+    this.setState({
+      schemaVersion: 1,
+      lastRunId: run.runId,
+      lastRunStatus: run.status,
+      lastRunVersion: run.version,
+      updatedAt: run.updatedAt,
+    });
   }
 
   private runSelect(): string {

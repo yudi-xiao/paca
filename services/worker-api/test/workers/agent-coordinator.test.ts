@@ -48,6 +48,32 @@ describe("AgentCoordinator Durable Object", () => {
       run: { status: "running", version: 2 },
     });
     await expect(stub.getRun(RUN_ID)).resolves.toMatchObject({ status: "running", version: 2 });
+    await expect(stub.getRuntimeState()).resolves.toEqual({
+      schemaVersion: 1,
+      lastRunId: RUN_ID,
+      lastRunStatus: "running",
+      lastRunVersion: 2,
+      updatedAt: expect.any(Number),
+    });
+  });
+
+  it("keeps Agents SDK state bounded and free of task payloads or credentials", async () => {
+    const stub = env.AgentCoordinator.getByName("agent-runtime-bounded-state");
+    await stub.createRun(
+      runInput({
+        agentId: "agent-runtime-bounded-state",
+        runId: "12121212-1212-4212-8212-121212121212",
+        idempotencyKey: "34343434-3434-4434-8434-343434343434",
+      }),
+    );
+
+    const state = await stub.getRuntimeState();
+    expect(Object.keys(state).sort()).toEqual(
+      ["lastRunId", "lastRunStatus", "lastRunVersion", "schemaVersion", "updatedAt"].sort(),
+    );
+    expect(JSON.stringify(state)).not.toContain("requestHash");
+    expect(JSON.stringify(state)).not.toContain("grant");
+    expect(JSON.stringify(state)).not.toContain("token");
   });
 
   it("rejects changed retry payloads and invalid terminal transitions", async () => {

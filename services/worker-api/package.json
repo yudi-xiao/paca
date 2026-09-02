@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@better-auth/agent-auth": "0.6.2",
+    "agents": "0.22.0",
     "better-auth": "1.7.2",
     "drizzle-orm": "0.45.2",
     "hono": "4.13.5",

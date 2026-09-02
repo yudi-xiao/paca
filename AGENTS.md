@@ -15,7 +15,7 @@
 - 实时协调优先使用 Cloudflare 的 PartyServer/PartyKit 生态，其底层仍是 Durable Objects，不再依赖中心化 Socket.IO 房间服务。
 - 文件和附件迁移到 R2。
 - 后台可靠任务使用 Queues 和 Workflows。
-- Agent 的身份鉴权、状态、编排和执行必须分层：Better Auth Agent Auth 负责 Agent 身份与 Capability Grant，Agent/AgentDO 保存会话状态，Workflows 负责持久编排，Computer、Sandbox 或 Containers 负责真正的执行环境。
+- Agent 的身份鉴权、控制面、持久编排、可观测性和 Harness 必须分层：Better Auth Agent Auth 负责 Agent/Host 身份与 Capability Grant，Cloudflare Agents SDK 的 AgentDO 保存有界运行状态，Workflows 负责持久编排，Agent Tracing 负责运行观测；Cloudflare 托管 Agent、本地 Codex、Claude Code、DeepSeek harness 等执行端通过同一套 Paca Agent 协议消费任务。
 
 核心原则：
 
@@ -41,7 +41,7 @@
 | Valkey Pub/Sub | DO 广播、Queues、Workflows | 在线推送与可靠事件处理必须分开 |
 | Valkey Streams | Queues + Workflows + 幂等消费 | 接受队列至少一次投递语义，消费者必须幂等 |
 | 对象存储 | R2 | 附件、导出文件、Yjs 大型 checkpoint 和归档 |
-| Agent Runner | Better Auth Agent Auth + Agents SDK / AgentDO + Workflows + Computer/Sandbox/Containers | 身份授权、状态、编排与执行环境分离 |
+| Agent 控制面与 Harness | Better Auth Agent Auth + Cloudflare Agents SDK / AgentDO + Workflows + Agent Tracing | Cloudflare 托管 Agent 与本地 Codex、Claude Code、DeepSeek 等 Harness 共用任务和授权协议；确需不可信代码执行时再接独立 sandbox |
 
 ## 三、数据库、ORM 与 D1 策略
 
@@ -122,8 +122,10 @@ Browser / React
                                ├── Queue：异步物化 BlockNote JSON
                                └── R2/业务数据库：长期快照与业务视图
 
-Agent Auth ── AgentDO / Workflow ──RPC────── DocumentParty
-       └── Computer / Sandbox / Containers
+Agent Auth ── Paca Agent Control Plane ── Workflow ──RPC────── DocumentParty
+                   ├── Cloudflare Agent + Agent Tracing
+                   ├── Local Codex / Claude Code / DeepSeek Harness
+                   └── 可选独立 Sandbox（仅不可信代码、构建或 shell 任务）
 ```
 
 Worker 是公开入口和鉴权边界。任何客户端都不应直接根据一个可猜测的 room ID 获得文档或项目访问权限。
@@ -206,6 +208,24 @@ Capability Grant 必须携带最小作用域约束，例如 `organizationId`、`
 Delegated Agent 的最终权限是 Capability Grant 与被代理用户当前 Paca 权限的交集；用户离开项目、角色被收回或会话被撤销后，Agent 不得继续沿用旧权限。Autonomous Agent 以审批后的 active Grant 和约束为唯一业务授权来源。
 
 普通 Better Auth API Key 仅用于 CI、Webhook、脚本和兼容 API 等非 Agent 集成，不作为 Agent Runner 身份。Agent Auth 当前仍在快速演进，落地时必须锁定版本、隔离适配层、覆盖注册/审批/撤销/JWT/约束测试，并在每次升级前核对官方文档和变更记录。
+
+### Agent 控制面、Tracing 与多 Harness
+
+Paca 的 Agent 控制面不得绑定某一种模型或执行器。每个 Better Auth Agent ID 对应一个稳定命名的 Cloudflare Agents SDK AgentDO；该对象只保存当前/最近 run、状态版本、恢复游标等有界协调状态，不保存 prompt、任务正文、JWT、Grant、数据库凭据或完整模型上下文。PostgreSQL 仍是 Agent、Grant、任务、run、审计和业务结果的权威来源，Workflow 仍是跨步骤重试、等待、取消和恢复的权威编排器。
+
+支持的 Harness 至少包括：
+
+- Cloudflare 托管 Agent：适合持续在线的业务工具调用，使用 Agents SDK 的状态、RPC、durable execution 能力，并由 Cloudflare Agent Tracing 观察 Agent、模型和工具执行。
+- 本地 Codex、Claude Code、DeepSeek harness 或其他 Agent Host：使用本机终端、文件系统和模型能力，通过 Better Auth Agent Auth 注册、审批和取得受约束 Grant，再通过 Paca Agent API 领取与提交任务。
+- 未来其他远程 Harness：只要实现同一版本化协议和安全约束即可接入，不得绕过 Agent Auth 直接读写业务数据库或 DocumentParty。
+
+所有 Harness 共用以下控制协议和语义：注册与心跳、能力发现与申请、审批、领取任务、短期 lease/续租、幂等 checkpoint、提交结果、取消确认、Grant 撤销和审计。Harness 类型只影响执行能力与调度标签，不改变 `project.read`、`task.write`、`document.edit` 等 Capability 的业务语义。任务分派必须按 Agent/Host 已审批 capability、约束、在线状态和 Harness 能力匹配，不能仅按客户端自报名称决定权限。
+
+Cloudflare Agents SDK 的默认 `/agents/*` 路由不得直接公开。浏览器、Cloudflare Agent 和外部 Harness 都先经过 Hono 的 Better Auth Session 或 Agent Auth JWT 校验，再由服务端按 Better Auth Agent ID 获取 AgentDO stub；AgentDO RPC 与 Workflow 在执行敏感工具前仍需重查 active Grant、constraints 和 delegated 用户权限交集。
+
+Agent Tracing 是运行可观测性，不是权限、业务审计或可靠事件日志。生产默认不记录 prompt、文档内容、JWT、Grant、secret 和工具原始 payload；只记录 run ID、Agent ID、Harness 类型、工具名、安全状态码、耗时和关联 span。Tracing 可能采样或丢失，业务审计必须继续写入 PostgreSQL。若后续使用 AI SDK，应采用 Cloudflare 官方 tracing 包装或自定义 span，并保持 payload 脱敏。
+
+当前任务编辑、文档操作和 backlog 拆解均通过受限 Paca 业务工具完成，不要求通用 shell sandbox。本地 Harness 使用其受用户控制的本机执行环境。只有任务明确需要执行不可信代码、隔离构建、原生二进制或远程 shell 时，才在版本化 Execution Gateway 后接入独立 sandbox（Computer、Sandbox SDK 或 Containers），并重新完成当时的可部署性、安全和恢复验收；不得把 preview 实验后端设为当前生产主线。
 
 ## 五、PartyKit、PartyServer 与 Durable Objects
 
@@ -319,7 +339,7 @@ Agent 推理不能在 DocumentParty 内长时间运行。推荐流程：
 
 1. Agent 通过 Better Auth Agent Auth 获取并使用受约束的 active Capability Grant。
 2. AgentDO 或 Workflow 在验证 `document.read` Grant 及其 `projectId`/`documentId` constraints 后，从 DocumentParty 获取快照和 Yjs state vector。
-3. 在 Agent Runner、Computer、Sandbox 或 Container 中完成推理和工具执行。
+3. 在已注册的 Cloudflare 托管 Agent 或本地 Harness 中完成推理，并只通过受约束的 Paca 业务工具执行修改；确需不可信代码时再调用独立 sandbox Gateway。
 4. 以 Agent Auth JWT 和 RPC/HTTP 向 DocumentParty 提交结构化修改。
 5. DocumentParty 验证 `document.edit` Grant、constraints、版本和目标范围后应用修改并持久化。
 
@@ -423,6 +443,10 @@ DocumentParty 应当：
 - Cloudflare Queues：https://developers.cloudflare.com/queues/
 - Cloudflare Workflows：https://developers.cloudflare.com/workflows/
 - Cloudflare R2：https://developers.cloudflare.com/r2/
+- Cloudflare Agents SDK：https://developers.cloudflare.com/agents/
+- 在现有 Worker 中加入 Agents SDK：https://developers.cloudflare.com/agents/getting-started/add-to-existing-project/
+- Cloudflare Agent Tracing：https://developers.cloudflare.com/agents/runtime/operations/observability/tracing/
+- Cloudflare Agent Durable Execution：https://developers.cloudflare.com/agents/runtime/execution/durable-execution/
 - Better Auth Hono Integration：https://better-auth.com/docs/beta/integrations/hono
 - Better Auth Database：https://better-auth.com/docs/concepts/database
 - Better Auth Custom Plugins：https://better-auth.com/docs/beta/concepts/plugins
