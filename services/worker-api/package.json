@@ -36,6 +36,7 @@
     "agent:approve:internal": "bun run scripts/approve-agent-internal.ts",
     "agent:status": "bun run scripts/agent-status.ts",
     "agent:execute": "bun run scripts/execute-agent-actions.ts",
+    "agent:task-lease": "bun run scripts/execute-agent-task-lease.ts",
     "check": "bun run build:web:internal && bun run types:check && bun run db:check && bun run typecheck && bun run lint && bun run test && bun run test:workers && bun run deploy:dry-run"
   },
   "dependencies": {

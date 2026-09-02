@@ -376,6 +376,18 @@ It never prints credentials, private keys, JWTs or Grant payloads. Protocol fail
 bounded Agent Auth error codes such as `AGENT_TASK_LEASE_CONFLICT`; SQL and arbitrary exception
 messages are not exposed.
 
+The reusable `AgentTaskHarnessClient` is transport-independent and keeps request IDs under caller
+control so an exact retry stays idempotent. Local Harnesses can also send one validated command as
+JSON on standard input; the config must belong to an approved Agent that requested `task.execute`:
+
+```bash
+PACA_AGENT_CONFIG='/absolute/path/to/agent.json' \
+bun run agent:task-lease < task-lease-command.json
+```
+
+The CLI reads the ignored local Agent key only to mint a short-lived, one-use Agent JWT. It does not
+copy the key, JWT or full Grant into command output.
+
 ## Deployment and rollback
 
 ```bash
