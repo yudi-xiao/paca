@@ -407,6 +407,17 @@ It never prints credentials, private keys, JWTs or Grant payloads. Protocol fail
 bounded Agent Auth error codes such as `AGENT_TASK_LEASE_CONFLICT`; SQL and arbitrary exception
 messages are not exposed.
 
+The scheduled Host-loss recovery path has a separate database-level smoke. It creates a precise
+synthetic lease using a 15-minute PlanetScale admin role, temporarily expires only that Host's
+heartbeat, waits for the deployed Cron to write an `expire/system` audit event, then deletes the
+lease, restores the original Host runtime values and removes the temporary role:
+
+```bash
+PACA_AGENT_TASK_RECOVERY_CONFIRM=SMOKE_AGENT_TASK_RECOVERY_INTERNAL \
+PACA_PLANETSCALE_ORG='{organization-id}' \
+bun run smoke:agent-task-recovery:internal
+```
+
 The reusable `AgentTaskHarnessClient` is transport-independent and keeps request IDs under caller
 control so an exact retry stays idempotent. Local Harnesses can also send one validated command as
 JSON on standard input; the config must belong to an approved Agent that requested `task.execute`:
