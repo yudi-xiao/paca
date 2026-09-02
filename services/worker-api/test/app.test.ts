@@ -1005,4 +1005,24 @@ describe("worker api", () => {
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toMatchObject({ code: "NOT_FOUND" });
   });
+
+  it("distinguishes a retained Go domain from an unknown API route", async () => {
+    const app = createApp({ log: vi.fn() });
+    const response = await app.request(
+      "/api/v1/projects/project-1/environments/environment-1",
+      {},
+      testBindings(),
+    );
+
+    expect(response.status).toBe(501);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-paca-api-migration-domain")).toBe("environments");
+    await expect(response.json()).resolves.toMatchObject({
+      status: "unavailable",
+      code: "API_DOMAIN_NOT_MIGRATED",
+      domain: "environments",
+      authority: "go-api",
+      retryable: false,
+    });
+  });
 });

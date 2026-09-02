@@ -67,6 +67,7 @@ import {
   type TaskView,
   type ViewTaskPosition,
 } from "./iteration/service";
+import { matchUnmigratedApi } from "./migration/manifest";
 import {
   type OrganizationAccessRuntime,
   organizationAccessRuntime,
@@ -3776,16 +3777,33 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
     });
   });
 
-  app.notFound((context) =>
-    context.json(
+  app.notFound((context) => {
+    const migration = matchUnmigratedApi(context.req.path);
+    if (migration) {
+      context.header("cache-control", "no-store");
+      context.header("x-paca-api-migration-domain", migration.domain);
+      return context.json(
+        {
+          status: "unavailable",
+          code: "API_DOMAIN_NOT_MIGRATED",
+          domain: migration.domain,
+          authority: migration.authority,
+          retryable: false,
+          requestId: context.get("requestId"),
+        },
+        501,
+      );
+    }
+
+    return context.json(
       {
         status: "not_found",
         code: "NOT_FOUND",
         requestId: context.get("requestId"),
       },
       404,
-    ),
-  );
+    );
+  });
 
   app.onError((error, context) => {
     dependencies.log({

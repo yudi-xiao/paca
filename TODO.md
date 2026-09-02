@@ -274,7 +274,7 @@
 
 ## M10：API 与前端逐步切换
 
-- [ ] 按领域模块建立 Go API → Hono Worker 的迁移清单和依赖图。
+- [x] 按领域模块建立 Go API → Hono Worker 的迁移清单和依赖图。`docs/cloudflare-api-migration.md` 记录领域权威、状态、依赖和准入门槛；`services/worker-api/src/migration/manifest.ts` 提供机器可检查的未迁移路由边界。
 - [ ] 优先迁移认证、只读查询和边界清晰的新功能，再迁移复杂事务模块。
 - [ ] 每个迁移模块运行新旧 API contract tests 和数据一致性验证。
 - [x] React Web 保留 TanStack Router/Query/Form；首个认证与首页读取切片已切换，其余领域模块继续逐模块迁移 API client 与 cache invalidation。
@@ -285,8 +285,8 @@
 - [x] 将 Organization 动态角色与成员角色分配 API 迁移到 Worker：成员生命周期不另建第二套表，Paca 角色可多选，权限上限、大小写无关唯一约束、内置角色和最后一名 OWNER 在服务端与事务边界内保护；internal preview 仅开放真实可用的组织权限页面。
 - [x] 将 Task API 迁移到 Worker 的基础、详情、活动、父子层级与关联关系切片：默认类型/状态随项目事务创建，任务列表/搜索/创建/读取/更新/软删除通过 Project `tasks.read`/`tasks.write` 授权，支持项目内递增编号、类型、状态、日期、标签、描述、故事点、多 Assignee、`parent_task_id` 与独立 Task Link；父级写入阻止循环/跨项目/归档目标，关联写入阻止自关联、跨项目和对称重复。任务写入、关系变更与可信动态原子提交，评论按 Better Auth 用户身份限制作者编辑/删除。internal preview 已开放真实列表和详情页，并恢复父级选择、子工作项与关联工作项 UI。
 - [x] 将 Sprint、任务视图、手工任务位置、自定义字段和高级 Task 查询迁移到 Worker：Sprint 完成时在同一事务移动未完成任务，视图保持 Project/Sprint 真实作用域及最后视图保护，自定义字段在任务写入时按服务端定义验证；Task 查询支持现有 `InteractionLayout` 所需的筛选、排序、游标、汇总和手工位置契约。internal preview 已恢复完整 Board/Table/Roadmap UI，任务详情仍使用已迁移的安全页面。
-- [ ] 为 Worker/Go API 混合期定义明确路由、超时、错误格式和回滚开关。
-- [ ] 记录确认长期保留在容器中的模块及原因，不以“暂未迁移”作为永久设计。
+- [x] 为 Worker/Go API 混合期定义明确路由、错误格式和回滚边界：已知容器保留域在 Worker 未实现的路径返回不可缓存的 `501 API_DOMAIN_NOT_MIGRATED` 与稳定 domain header，未知路径仍为 404；Better Auth 与旧 Go principal bridge 未验收前禁止隐式代理，当前只允许按已验证 Worker 版本回滚，因此不存在代理超时的模糊配置。
+- [x] 记录确认当前保留在容器中的模块及原因：Paca Agent CRUD/Conversation 依赖旧 Runner 协议，Static Environment 依赖旧项目主键、容器生命周期和终端网关，Automation 依赖旧 repository/Valkey worker；每项均在迁移清单中有退出依赖，不把“暂未迁移”作为永久理由。
 
 ## M11：旧实时与 Valkey 退役
 
