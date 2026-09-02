@@ -55,6 +55,11 @@ export type AgentTaskDiscoveryItem = {
 
 export type AgentTaskDiscoveryDependencies = {
   authorizeScope(session: AgentSession, scope: AgentTaskGrantScope): Promise<boolean>;
+  matchTasks(
+    session: AgentSession,
+    scopes: readonly AgentTaskGrantScope[],
+    now: Date,
+  ): Promise<Set<string>>;
   findTasks(scopes: readonly AgentTaskGrantScope[]): Promise<AgentTaskDiscoveryTask[]>;
   findActiveLeases(taskIds: readonly string[], now: Date): Promise<AgentTaskDiscoveryLease[]>;
 };
@@ -118,17 +123,21 @@ export async function discoverAgentTasks(
   const scopes = authorization.filter(({ allowed }) => allowed).map(({ scope }) => scope);
   if (scopes.length === 0) return [];
 
+  const matchedTaskIds = await dependencies.matchTasks(session, scopes, now);
+  const matchedScopes = scopes.filter(({ taskId }) => matchedTaskIds.has(taskId));
+  if (matchedScopes.length === 0) return [];
+
   const [tasks, leases] = await Promise.all([
-    dependencies.findTasks(scopes),
+    dependencies.findTasks(matchedScopes),
     dependencies.findActiveLeases(
-      scopes.map(({ taskId }) => taskId),
+      matchedScopes.map(({ taskId }) => taskId),
       now,
     ),
   ]);
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const leaseByTaskId = new Map(leases.map((lease) => [lease.taskId, lease]));
 
-  return scopes.flatMap((scope): AgentTaskDiscoveryItem[] => {
+  return matchedScopes.flatMap((scope): AgentTaskDiscoveryItem[] => {
     const task = taskById.get(scope.taskId);
     if (!task || task.projectId !== scope.projectId) return [];
     const activeLease = leaseByTaskId.get(scope.taskId) ?? null;

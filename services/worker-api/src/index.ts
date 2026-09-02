@@ -1,3 +1,4 @@
+import { recoverAbandonedAgentTaskLeases } from "./agent-task/recovery";
 import { createApp } from "./app";
 import { ATTACHMENT_CLEANUP_CRON, runScheduledAttachmentCleanup } from "./attachment/scheduled";
 import { consumeDocumentMaterializationQueue } from "./document/materialization";
@@ -38,6 +39,10 @@ export default {
   async scheduled(controller, env) {
     if (controller.cron === REALTIME_OUTBOX_CRON) {
       await dispatchAndLog(env, "scheduled");
+      const taskRecovery = await recoverAbandonedAgentTaskLeases(env);
+      if (taskRecovery.expired > 0) {
+        console.log(JSON.stringify({ event: "agent.task_leases.recovered", ...taskRecovery }));
+      }
       return;
     }
     if (controller.cron === ATTACHMENT_CLEANUP_CRON) {

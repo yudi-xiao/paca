@@ -35,6 +35,15 @@ const documentMigrationURL = new URL("../drizzle/0016_busy_changeling.sql", impo
 const documentSnapshotURL = new URL("../drizzle/meta/0016_snapshot.json", import.meta.url);
 const documentSnapshotMigrationURL = new URL("../drizzle/0017_last_toro.sql", import.meta.url);
 const documentSnapshotSnapshotURL = new URL("../drizzle/meta/0017_snapshot.json", import.meta.url);
+const agentHostRuntimeMigrationURL = new URL("../drizzle/0019_volatile_hydra.sql", import.meta.url);
+const agentHostRuntimeSnapshotURL = new URL("../drizzle/meta/0019_snapshot.json", import.meta.url);
+const agentTaskCancelMigrationURL = new URL(
+  "../drizzle/0020_pale_the_santerians.sql",
+  import.meta.url,
+);
+const agentTaskCancelSnapshotURL = new URL("../drizzle/meta/0020_snapshot.json", import.meta.url);
+const agentTaskRecoveryMigrationURL = new URL("../drizzle/0021_neat_dagger.sql", import.meta.url);
+const agentTaskRecoverySnapshotURL = new URL("../drizzle/meta/0021_snapshot.json", import.meta.url);
 
 const applicationTables = [
   "user",
@@ -67,6 +76,8 @@ const applicationTables = [
   "paca_task_activity",
   "paca_task_link",
   "paca_document",
+  "paca_agent_host_runtime",
+  "paca_agent_task_requirement",
 ] as const;
 
 describe("reviewed permission migration", () => {
@@ -250,6 +261,48 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain('ADD COLUMN "yjs_revision" bigint DEFAULT 0 NOT NULL');
     expect(migration).toContain('ADD COLUMN "yjs_snapshot_key" text');
     expect(migration).toContain('CONSTRAINT "paca_document_yjs_revision_check"');
+  });
+
+  it("adds Host presence and task matching labels transactionally", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(agentHostRuntimeMigrationURL, "utf8"),
+      readFile(agentHostRuntimeSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0019_volatile_hydra', '${checksum}')`);
+    expect(migration).toContain('CREATE TABLE "paca_agent_host_runtime"');
+    expect(migration).toContain('CREATE TABLE "paca_agent_task_requirement"');
+    expect(migration).toContain("'[\"task:execute\"]'::jsonb");
+  });
+
+  it("adds trusted manual task lease cancellation audit fields transactionally", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(agentTaskCancelMigrationURL, "utf8"),
+      readFile(agentTaskCancelSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0020_pale_the_santerians', '${checksum}')`);
+    expect(migration).toContain("ADD COLUMN \"actor_type\" text DEFAULT 'agent' NOT NULL");
+    expect(migration).toContain("'cancel_request'");
+  });
+
+  it("adds the system lease expiry audit action transactionally", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(agentTaskRecoveryMigrationURL, "utf8"),
+      readFile(agentTaskRecoverySnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0021_neat_dagger', '${checksum}')`);
+    expect(migration).toContain("'expire'");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

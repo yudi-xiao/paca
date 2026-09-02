@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 const AGENT_ID = "agent-runtime-1";
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
 const IDEMPOTENCY_KEY = "22222222-2222-4222-8222-222222222222";
+const LEASE_ID = "abababab-abab-4bab-8bab-abababababab";
 
 function runInput(overrides: Record<string, unknown> = {}) {
   return {
@@ -123,5 +124,55 @@ describe("AgentCoordinator Durable Object", () => {
         }),
       ),
     ).resolves.toEqual({ success: false, errorCode: "AGENT_COORDINATOR_SCOPE_MISMATCH" });
+  });
+
+  it("persists a bounded Cloudflare task lease mirror monotonically across eviction", async () => {
+    const agentId = "agent-runtime-task-lease";
+    const stub = env.AgentCoordinator.getByName(agentId);
+    const lease = {
+      requestId: "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
+      leaseId: LEASE_ID,
+      organizationId: "organization-1",
+      projectId: "44444444-4444-4444-8444-444444444444",
+      taskId: "56565656-5656-4656-8656-565656565656",
+      agentId,
+      hostId: "host-1",
+      harnessKind: "cloudflare-agent" as const,
+      status: "active" as const,
+      version: 1,
+      lastCheckpointSequence: 0,
+      leaseExpiresAt: Date.now() + 30_000,
+      finishedAt: null,
+      errorCode: null,
+      updatedAt: Date.now(),
+    };
+    await expect(stub.recordTaskLease(lease)).resolves.toMatchObject({
+      success: true,
+      duplicate: false,
+      lease: { leaseId: LEASE_ID, version: 1 },
+    });
+    await expect(stub.recordTaskLease(lease)).resolves.toMatchObject({ duplicate: true });
+
+    const renewed = {
+      ...lease,
+      requestId: "efefefef-efef-4fef-8fef-efefefefefef",
+      version: 2,
+      leaseExpiresAt: lease.leaseExpiresAt + 30_000,
+      updatedAt: lease.updatedAt + 1,
+    };
+    await expect(stub.recordTaskLease(renewed)).resolves.toMatchObject({
+      duplicate: false,
+      lease: { version: 2 },
+    });
+    await evictDurableObject(stub);
+    await expect(stub.getTaskLease(LEASE_ID)).resolves.toMatchObject({
+      requestId: renewed.requestId,
+      version: 2,
+    });
+    await expect(stub.recordTaskLease(lease)).resolves.toMatchObject({
+      success: true,
+      duplicate: true,
+      lease: { version: 2 },
+    });
   });
 });

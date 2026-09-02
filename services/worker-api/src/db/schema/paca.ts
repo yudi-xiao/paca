@@ -462,6 +462,69 @@ export const pacaTasks = pgTable(
 
 export type AgentTaskLeaseStatus = "active" | "cancelled" | "completed" | "expired" | "failed";
 
+export const pacaAgentHostRuntimes = pgTable(
+  "paca_agent_host_runtime",
+  {
+    hostId: text("host_id")
+      .primaryKey()
+      .references(() => agentHost.id, { onDelete: "cascade" }),
+    approvedLabels: jsonb("approved_labels").$type<string[]>().default([]).notNull(),
+    reportedLabels: jsonb("reported_labels").$type<string[]>().default([]).notNull(),
+    reportedHarnessKinds: jsonb("reported_harness_kinds").$type<string[]>().default([]).notNull(),
+    labelsVersion: integer("labels_version").default(1).notNull(),
+    approvedBy: text("approved_by").references(() => user.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
+    heartbeatExpiresAt: timestamp("heartbeat_expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("paca_agent_host_runtime_heartbeat_idx").on(table.heartbeatExpiresAt),
+    check("paca_agent_host_runtime_labels_version_check", sql`${table.labelsVersion} >= 1`),
+    check(
+      "paca_agent_host_runtime_heartbeat_check",
+      sql`(${table.lastHeartbeatAt} is null and ${table.heartbeatExpiresAt} is null) or (${table.lastHeartbeatAt} is not null and ${table.heartbeatExpiresAt} is not null and ${table.heartbeatExpiresAt} > ${table.lastHeartbeatAt})`,
+    ),
+    check(
+      "paca_agent_host_runtime_approved_labels_check",
+      sql`jsonb_typeof(${table.approvedLabels}) = 'array'`,
+    ),
+    check(
+      "paca_agent_host_runtime_reported_labels_check",
+      sql`jsonb_typeof(${table.reportedLabels}) = 'array'`,
+    ),
+    check(
+      "paca_agent_host_runtime_harness_kinds_check",
+      sql`jsonb_typeof(${table.reportedHarnessKinds}) = 'array'`,
+    ),
+  ],
+);
+
+export const pacaAgentTaskRequirements = pgTable(
+  "paca_agent_task_requirement",
+  {
+    taskId: uuid("task_id").primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    requiredLabels: jsonb("required_labels").$type<string[]>().default([]).notNull(),
+    updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.taskId, table.projectId],
+      foreignColumns: [pacaTasks.id, pacaTasks.projectId],
+      name: "paca_agent_task_requirement_task_project_fk",
+    }).onDelete("cascade"),
+    index("paca_agent_task_requirement_project_idx").on(table.projectId),
+    check(
+      "paca_agent_task_requirement_labels_check",
+      sql`jsonb_typeof(${table.requiredLabels}) = 'array'`,
+    ),
+  ],
+);
+
 export const pacaAgentTaskLeases = pgTable(
   "paca_agent_task_lease",
   {
@@ -534,6 +597,8 @@ export const pacaAgentTaskLeaseEvents = pgTable(
     requestId: uuid("request_id").notNull(),
     requestFingerprint: text("request_fingerprint").notNull(),
     action: text("action").notNull(),
+    actorType: text("actor_type").default("agent").notNull(),
+    actorId: text("actor_id"),
     sequence: integer("sequence"),
     checkpointKey: text("checkpoint_key"),
     summary: text("summary"),
@@ -548,7 +613,11 @@ export const pacaAgentTaskLeaseEvents = pgTable(
     index("paca_agent_task_lease_event_lease_created_idx").on(table.leaseId, table.createdAt),
     check(
       "paca_agent_task_lease_event_action_check",
-      sql`${table.action} in ('claim', 'renew', 'checkpoint', 'complete', 'fail', 'cancel_ack')`,
+      sql`${table.action} in ('claim', 'renew', 'checkpoint', 'complete', 'fail', 'cancel_ack', 'cancel_request', 'expire')`,
+    ),
+    check(
+      "paca_agent_task_lease_event_actor_type_check",
+      sql`${table.actorType} in ('agent', 'user', 'system')`,
     ),
     check(
       "paca_agent_task_lease_event_sequence_check",

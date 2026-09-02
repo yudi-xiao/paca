@@ -60,7 +60,7 @@ projections until their domains move to the Worker.
   production traffic, create a least-privilege runtime role, connect it through a separate
   Hyperdrive, and replace only the `env.internal` binding ID.
 - The runtime role must not inherit `postgres`, `pg_read_all_data`, or `pg_write_all_data`.
-  `scripts/sql/grant-runtime-role.sql` grants explicit CRUD on the 39 application tables while
+  `scripts/sql/grant-runtime-role.sql` grants explicit CRUD on the 43 application tables while
   denying schema creation and access to the schema and attachment-migration ledgers;
   `verify-runtime-role.sql` checks
   that boundary. With PlanetScale, use the database role name before the routing-only
@@ -107,8 +107,20 @@ the existing main Hyperdrive remains the rollback path and the new runtime role 
 
 The current internal deployment completed this switch on 2026-08-31. Its dedicated Hyperdrive is
 backed by the `paca/internal` branch and a non-inheriting `paca-worker-internal` role with explicit
-CRUD grants on the 39 runtime business tables. The root/main Hyperdrive remains separate and is
+CRUD grants on the 43 runtime business tables. The root/main Hyperdrive remains separate and is
 not accepted by the internal deployment guard.
+
+Subsequent reviewed internal-only migrations use a separate confirmation gate and a 15-minute
+PlanetScale admin role. The command skips ledger entries already present, reapplies and verifies
+the explicit runtime grants, transfers any newly owned objects to `postgres`, and deletes the
+temporary role without printing credentials:
+
+```bash
+PACA_APPLY_INTERNAL_CONFIRM=APPLY_INTERNAL_MIGRATIONS \
+PACA_PLANETSCALE_ORG='{organization-id}' \
+PACA_POSTGRES_BIN='{directory-containing-psql}' \
+bun run db:migrate:internal
+```
 
 The internal attachment cleanup runs once per day at `10:15 UTC` (`18:15` in Asia/Shanghai). The
 scheduled handler is fail-closed: `ATTACHMENT_CLEANUP_ENABLED` must be exactly `true`, the runtime
@@ -361,9 +373,28 @@ enforce one active lease per task, monotonic lease versions, strictly increasing
 sequences and globally idempotent request IDs. The lease expires no later than its active Grant.
 AgentDO state remains a bounded coordination mirror and cannot replace this durable record.
 
+Each Host sends a short-lived heartbeat before discovery and lease mutation. Server-approved
+labels define the ceiling; effective scheduling labels are the intersection of approved and
+currently reported labels and must include `task:execute`. Project approvers can attach additional
+required labels to a task. A Harness can therefore report `harness:codex` or `tool:shell`, but the
+report alone never grants that capability or broadens an Agent Auth Grant.
+
+For `cloudflare-agent`, a successfully committed lease is idempotently mirrored into the
+`AgentCoordinator` AgentDO keyed by the Better Auth Agent ID. The mirror contains only lease IDs,
+scope, status, versions and timestamps; it excludes credentials, Grants, task content and prompts.
+Local Codex, Claude Code, DeepSeek and custom Harnesses use the same client/protocol without being
+routed into that DO. Worker/Agent tracing observes the RPC boundary while PostgreSQL remains the
+audit and recovery authority.
+
+Task writers can immediately and idempotently terminate an active execution with
+`POST /api/v1/projects/:projectId/tasks/:taskId/agent-lease/cancel`. The one-minute scheduled
+recovery pass marks expired leases and leases whose Host heartbeat has expired as `expired`; both
+manual cancellation and system expiry append trusted actor events.
+
 The internal smoke creates a temporary task and delegated Agent, approves an exact ten-minute
 `task.execute` Grant, executes the protocol as a local Codex Harness, checks duplicate and conflict
-paths, revokes the Grant, archives the fixture, revokes the Agent and signs out:
+paths, restart/checkpoint recovery, short-lease reclaim and idempotent manual cancellation, revokes
+the Grant, archives the fixture, revokes the Agent and signs out:
 
 ```bash
 PACA_APPROVER_EMAIL='operator@example.com' \

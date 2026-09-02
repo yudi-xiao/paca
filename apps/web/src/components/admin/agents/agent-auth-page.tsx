@@ -4,6 +4,7 @@ import {
 	Clock3,
 	KeyRound,
 	Plus,
+	Radio,
 	ServerCog,
 	ShieldCheck,
 	ShieldPlus,
@@ -17,9 +18,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
 	type AgentAuthHostEnrollment,
+	type AgentHostRuntimeProfile,
 	agentAuthAgentsQueryOptions,
 	agentAuthConfigurationQueryOptions,
 	agentAuthHostsQueryOptions,
+	agentHostRuntimesQueryOptions,
+	approveAgentHostLabels,
 	createAgentAuthHost,
 	grantAutonomousProjectRead,
 	revokeAgentAuthAgent,
@@ -27,11 +31,79 @@ import {
 	revokeAutonomousProjectRead,
 } from "@/lib/agent-auth-api";
 
+function HostRuntimeControls({
+	hostId,
+	profile,
+	onSaved,
+}: {
+	hostId: string;
+	profile: AgentHostRuntimeProfile | undefined;
+	onSaved: () => Promise<unknown>;
+}) {
+	const [labels, setLabels] = useState(
+		(profile?.approved_labels ?? ["task:execute"]).join(", "),
+	);
+	const mutation = useMutation({
+		mutationFn: () =>
+			approveAgentHostLabels({
+				hostId,
+				approvedLabels: [
+					...new Set(
+						labels
+							.split(",")
+							.map((label) => label.trim())
+							.filter(Boolean),
+					),
+				],
+			}),
+		onSuccess: onSaved,
+	});
+
+	return (
+		<div className="mt-3 space-y-2 border-t border-border/60 pt-3">
+			<div className="flex flex-wrap items-center gap-2 text-xs">
+				<Badge variant={profile?.online ? "secondary" : "outline"}>
+					<Radio className="mr-1 size-3" />
+					{profile?.online ? "在线" : "离线"}
+				</Badge>
+				{profile?.reported_harness_kinds.map((kind) => (
+					<Badge key={kind} variant="outline">
+						{kind}
+					</Badge>
+				))}
+			</div>
+			<p className="text-xs text-muted-foreground">
+				有效标签：{profile?.effective_labels.join(", ") || "无"}
+			</p>
+			<div className="flex gap-2">
+				<Input
+					value={labels}
+					onChange={(event) => setLabels(event.target.value)}
+					placeholder="task:execute, harness:codex"
+					className="h-8 font-mono text-xs"
+				/>
+				<Button
+					variant="outline"
+					size="sm"
+					disabled={mutation.isPending}
+					onClick={() => mutation.mutate()}
+				>
+					审批标签
+				</Button>
+			</div>
+			{mutation.isError && (
+				<p className="text-xs text-destructive">标签格式或权限校验失败。</p>
+			)}
+		</div>
+	);
+}
+
 export function AgentAuthPage() {
 	const queryClient = useQueryClient();
 	const agentsQuery = useQuery(agentAuthAgentsQueryOptions);
 	const configurationQuery = useQuery(agentAuthConfigurationQueryOptions);
 	const hostsQuery = useQuery(agentAuthHostsQueryOptions);
+	const hostRuntimesQuery = useQuery(agentHostRuntimesQueryOptions);
 	const [hostName, setHostName] = useState("");
 	const [enrollment, setEnrollment] = useState<AgentAuthHostEnrollment | null>(
 		null,
@@ -72,6 +144,9 @@ export function AgentAuthPage() {
 
 	const agents = agentsQuery.data ?? [];
 	const hosts = hostsQuery.data ?? [];
+	const hostRuntimeById = new Map(
+		(hostRuntimesQuery.data ?? []).map((runtime) => [runtime.host_id, runtime]),
+	);
 	const autonomousEnabled =
 		configurationQuery.data?.modes.includes("autonomous") ?? false;
 
@@ -151,40 +226,57 @@ export function AgentAuthPage() {
 							尚未登记 Agent Host。
 						</p>
 					) : (
-						hosts.map((host) => (
-							<Card key={host.id} className="border-border/60">
-								<CardContent className="flex items-start justify-between gap-3 pt-5">
-									<div className="min-w-0 space-y-1">
-										<p className="flex items-center gap-2 font-medium">
-											<ServerCog className="size-4" /> {host.name}
-										</p>
-										<p className="truncate font-mono text-xs text-muted-foreground">
-											{host.id}
-										</p>
-										<Badge variant="outline">{host.status}</Badge>
-									</div>
-									{host.status !== "revoked" && (
-										<Button
-											variant="outline"
-											size="sm"
-											className="text-destructive"
-											disabled={revokeHostMutation.isPending}
-											onClick={() => {
-												if (
-													window.confirm(
-														`确定撤销 Host“${host.name}”及其 Agent 吗？`,
-													)
-												) {
-													revokeHostMutation.mutate(host.id);
-												}
-											}}
-										>
-											<Trash2 className="size-3.5" /> 撤销
-										</Button>
-									)}
-								</CardContent>
-							</Card>
-						))
+						hosts.map((host) => {
+							const runtime = hostRuntimeById.get(host.id);
+							return (
+								<Card
+									key={`${host.id}:${runtime?.labels_version ?? 0}`}
+									className="border-border/60"
+								>
+									<CardContent className="pt-5">
+										<div className="flex items-start justify-between gap-3">
+											<div className="min-w-0 space-y-1">
+												<p className="flex items-center gap-2 font-medium">
+													<ServerCog className="size-4" /> {host.name}
+												</p>
+												<p className="truncate font-mono text-xs text-muted-foreground">
+													{host.id}
+												</p>
+												<Badge variant="outline">{host.status}</Badge>
+											</div>
+											{host.status !== "revoked" && (
+												<Button
+													variant="outline"
+													size="sm"
+													className="text-destructive"
+													disabled={revokeHostMutation.isPending}
+													onClick={() => {
+														if (
+															window.confirm(
+																`确定撤销 Host“${host.name}”及其 Agent 吗？`,
+															)
+														) {
+															revokeHostMutation.mutate(host.id);
+														}
+													}}
+												>
+													<Trash2 className="size-3.5" /> 撤销
+												</Button>
+											)}
+										</div>
+										<HostRuntimeControls
+											hostId={host.id}
+											profile={runtime}
+											onSaved={() =>
+												queryClient.invalidateQueries({
+													queryKey: ["agent-auth", "host-runtimes"],
+												})
+											}
+										/>
+									</CardContent>
+								</Card>
+							);
+						})
 					)}
 				</div>
 			</section>

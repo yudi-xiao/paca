@@ -1,7 +1,8 @@
-import { and, eq, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 
 import type { PacaDatabase } from "../database";
 import {
+  pacaAgentHostRuntimes,
   pacaAgentTaskLeaseEvents,
   pacaAgentTaskLeases,
   pacaProjects,
@@ -197,9 +198,11 @@ export class PostgresAgentTaskLeaseRepository implements AgentTaskLeaseRepositor
             })
             .returning();
           if (!created) throw new Error("AGENT_TASK_LEASE_CREATE_FAILED");
-          await transaction
-            .insert(pacaAgentTaskLeaseEvents)
-            .values(eventValues(created.id, input.command, fingerprint));
+          await transaction.insert(pacaAgentTaskLeaseEvents).values({
+            ...eventValues(created.id, input.command, fingerprint),
+            actorType: "agent",
+            actorId: input.actor.agentId,
+          });
           return { duplicate: false, lease: publicLease(created) };
         }
 
@@ -284,14 +287,169 @@ export class PostgresAgentTaskLeaseRepository implements AgentTaskLeaseRepositor
           .where(eq(pacaAgentTaskLeases.id, current.id))
           .returning();
         if (!updated) throw new Error("AGENT_TASK_LEASE_UPDATE_FAILED");
-        await transaction
-          .insert(pacaAgentTaskLeaseEvents)
-          .values(eventValues(current.id, input.command, fingerprint));
+        await transaction.insert(pacaAgentTaskLeaseEvents).values({
+          ...eventValues(current.id, input.command, fingerprint),
+          actorType: "agent",
+          actorId: input.actor.agentId,
+        });
         return { duplicate: false, lease: publicLease(updated) };
       },
     );
 
     if (typeof outcome === "string") throw new AgentTaskLeaseError(outcome);
     return outcome;
+  }
+
+  async requestCancel(input: {
+    projectId: string;
+    taskId: string;
+    requestedBy: string;
+    requestId: string;
+    reason: string | null;
+    now: Date;
+  }): Promise<AgentTaskLeaseResult> {
+    const fingerprint = JSON.stringify([
+      "cancel_request",
+      input.projectId,
+      input.taskId,
+      input.requestedBy,
+      input.reason,
+    ]);
+    const outcome = await this.database.transaction(
+      async (transaction): Promise<TransactionOutcome> => {
+        const [duplicateEvent] = await transaction
+          .select({
+            leaseId: pacaAgentTaskLeaseEvents.leaseId,
+            requestFingerprint: pacaAgentTaskLeaseEvents.requestFingerprint,
+          })
+          .from(pacaAgentTaskLeaseEvents)
+          .where(eq(pacaAgentTaskLeaseEvents.requestId, input.requestId))
+          .limit(1);
+        if (duplicateEvent) {
+          if (duplicateEvent.requestFingerprint !== fingerprint) {
+            return agentTaskLeaseErrorCodes.idempotencyConflict;
+          }
+          const [lease] = await transaction
+            .select()
+            .from(pacaAgentTaskLeases)
+            .where(eq(pacaAgentTaskLeases.id, duplicateEvent.leaseId))
+            .limit(1);
+          return lease
+            ? { duplicate: true, lease: publicLease(lease) }
+            : agentTaskLeaseErrorCodes.leaseNotFound;
+        }
+
+        const [current] = await transaction
+          .select()
+          .from(pacaAgentTaskLeases)
+          .where(
+            and(
+              eq(pacaAgentTaskLeases.projectId, input.projectId),
+              eq(pacaAgentTaskLeases.taskId, input.taskId),
+              eq(pacaAgentTaskLeases.status, "active"),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (!current) return agentTaskLeaseErrorCodes.leaseNotFound;
+        if (current.leaseExpiresAt.getTime() <= input.now.getTime()) {
+          await transaction
+            .update(pacaAgentTaskLeases)
+            .set({
+              status: "expired",
+              version: sql`${pacaAgentTaskLeases.version} + 1`,
+              finishedAt: input.now,
+              updatedAt: input.now,
+            })
+            .where(eq(pacaAgentTaskLeases.id, current.id));
+          return agentTaskLeaseErrorCodes.leaseExpired;
+        }
+        const [cancelled] = await transaction
+          .update(pacaAgentTaskLeases)
+          .set({
+            status: "cancelled",
+            version: sql`${pacaAgentTaskLeases.version} + 1`,
+            finishedAt: input.now,
+            resultSummary: input.reason,
+            updatedAt: input.now,
+          })
+          .where(eq(pacaAgentTaskLeases.id, current.id))
+          .returning();
+        if (!cancelled) throw new Error("AGENT_TASK_LEASE_CANCEL_FAILED");
+        await transaction.insert(pacaAgentTaskLeaseEvents).values({
+          leaseId: current.id,
+          requestId: input.requestId,
+          requestFingerprint: fingerprint,
+          action: "cancel_request",
+          actorType: "user",
+          actorId: input.requestedBy,
+          summary: input.reason,
+        });
+        return { duplicate: false, lease: publicLease(cancelled) };
+      },
+    );
+    if (typeof outcome === "string") throw new AgentTaskLeaseError(outcome);
+    return outcome;
+  }
+
+  async recoverAbandoned(now: Date, limit: number): Promise<AgentTaskLeaseResult[]> {
+    const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+    return this.database.transaction(async (transaction) => {
+      const candidates = await transaction
+        .select({ lease: pacaAgentTaskLeases })
+        .from(pacaAgentTaskLeases)
+        .leftJoin(
+          pacaAgentHostRuntimes,
+          eq(pacaAgentHostRuntimes.hostId, pacaAgentTaskLeases.hostId),
+        )
+        .where(
+          and(
+            eq(pacaAgentTaskLeases.status, "active"),
+            or(
+              lte(pacaAgentTaskLeases.leaseExpiresAt, now),
+              isNull(pacaAgentHostRuntimes.hostId),
+              isNull(pacaAgentHostRuntimes.heartbeatExpiresAt),
+              lte(pacaAgentHostRuntimes.heartbeatExpiresAt, now),
+            ),
+          ),
+        )
+        .orderBy(pacaAgentTaskLeases.leaseExpiresAt, pacaAgentTaskLeases.id)
+        .limit(safeLimit)
+        .for("update", { of: pacaAgentTaskLeases, skipLocked: true });
+
+      const recovered: AgentTaskLeaseResult[] = [];
+      for (const { lease } of candidates) {
+        const requestId = crypto.randomUUID();
+        const fingerprint = JSON.stringify(["expire", lease.id, lease.version, now.toISOString()]);
+        const [expired] = await transaction
+          .update(pacaAgentTaskLeases)
+          .set({
+            status: "expired",
+            version: sql`${pacaAgentTaskLeases.version} + 1`,
+            finishedAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(pacaAgentTaskLeases.id, lease.id),
+              eq(pacaAgentTaskLeases.status, "active"),
+              eq(pacaAgentTaskLeases.version, lease.version),
+            ),
+          )
+          .returning();
+        if (!expired) continue;
+        await transaction.insert(pacaAgentTaskLeaseEvents).values({
+          leaseId: lease.id,
+          requestId,
+          requestFingerprint: fingerprint,
+          action: "expire",
+          actorType: "system",
+          actorId: null,
+          summary: "Host heartbeat or lease expired",
+        });
+        recovered.push({ duplicate: false, lease: publicLease(expired) });
+      }
+      return recovered;
+    });
   }
 }

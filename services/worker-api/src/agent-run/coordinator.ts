@@ -1,6 +1,9 @@
 import { Agent } from "agents";
 import * as z from "zod";
-
+import {
+  type HostedTaskLeaseMirror,
+  hostedTaskLeaseMirrorSchema,
+} from "../agent-task/cloudflare-adapter";
 import {
   type AgentRunCreate,
   type AgentRunRecord,
@@ -37,6 +40,45 @@ type TransitionRow = {
   toStatus: AgentRunStatus;
   errorCode: string | null;
 };
+
+type TaskLeaseRow = HostedTaskLeaseMirror & {
+  requestFingerprint: string;
+};
+
+export type HostedTaskLeaseMutationResult =
+  | { success: true; duplicate: boolean; lease: HostedTaskLeaseMirror }
+  | {
+      success: false;
+      errorCode:
+        | "AGENT_COORDINATOR_SCOPE_MISMATCH"
+        | "AGENT_TASK_LEASE_MIRROR_CONFLICT"
+        | "AGENT_TASK_LEASE_MIRROR_INPUT_INVALID";
+    };
+
+function taskLeaseFingerprint(input: HostedTaskLeaseMirror): string {
+  return JSON.stringify([
+    input.requestId,
+    input.leaseId,
+    input.organizationId,
+    input.projectId,
+    input.taskId,
+    input.agentId,
+    input.hostId,
+    input.harnessKind,
+    input.status,
+    input.version,
+    input.lastCheckpointSequence,
+    input.leaseExpiresAt,
+    input.finishedAt,
+    input.errorCode,
+    input.updatedAt,
+  ]);
+}
+
+function publicTaskLease(row: TaskLeaseRow): HostedTaskLeaseMirror {
+  const { requestFingerprint: _requestFingerprint, ...lease } = row;
+  return lease;
+}
 
 const pacaAgentRuntimeStateSchema = z
   .object({
@@ -148,6 +190,28 @@ export class AgentCoordinator extends Agent<Env, PacaAgentRuntimeState> {
         );
         CREATE INDEX IF NOT EXISTS paca_agent_run_transition_run_idx
           ON paca_agent_run_transition (run_id, version);
+        CREATE TABLE IF NOT EXISTS paca_agent_task_lease_mirror (
+          lease_id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL,
+          request_fingerprint TEXT NOT NULL,
+          organization_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          agent_id TEXT NOT NULL,
+          host_id TEXT NOT NULL,
+          harness_kind TEXT NOT NULL CHECK (harness_kind = 'cloudflare-agent'),
+          status TEXT NOT NULL CHECK (
+            status IN ('active', 'cancelled', 'completed', 'expired', 'failed')
+          ),
+          version INTEGER NOT NULL CHECK (version >= 1),
+          last_checkpoint_sequence INTEGER NOT NULL CHECK (last_checkpoint_sequence >= 0),
+          lease_expires_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          error_code TEXT,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS paca_agent_task_lease_mirror_updated_idx
+          ON paca_agent_task_lease_mirror (updated_at DESC, lease_id);
       `);
     });
   }
@@ -285,6 +349,94 @@ export class AgentCoordinator extends Agent<Env, PacaAgentRuntimeState> {
       .map(publicRun);
   }
 
+  recordTaskLease(value: HostedTaskLeaseMirror): HostedTaskLeaseMutationResult {
+    const parsed = hostedTaskLeaseMirrorSchema.safeParse(value);
+    if (!parsed.success) {
+      return { success: false, errorCode: "AGENT_TASK_LEASE_MIRROR_INPUT_INVALID" };
+    }
+    const input = parsed.data;
+    if (!this.assertAgentIdentity(input.agentId)) {
+      return { success: false, errorCode: "AGENT_COORDINATOR_SCOPE_MISMATCH" };
+    }
+    const fingerprint = taskLeaseFingerprint(input);
+    const current = this.findTaskLease(input.leaseId);
+    if (current) {
+      if (current.version > input.version) {
+        return { success: true, duplicate: true, lease: publicTaskLease(current) };
+      }
+      if (current.version === input.version) {
+        if (current.requestFingerprint !== fingerprint) {
+          return { success: false, errorCode: "AGENT_TASK_LEASE_MIRROR_CONFLICT" };
+        }
+        return { success: true, duplicate: true, lease: publicTaskLease(current) };
+      }
+      if (
+        current.organizationId !== input.organizationId ||
+        current.projectId !== input.projectId ||
+        current.taskId !== input.taskId ||
+        current.agentId !== input.agentId ||
+        current.hostId !== input.hostId
+      ) {
+        return { success: false, errorCode: "AGENT_TASK_LEASE_MIRROR_CONFLICT" };
+      }
+    }
+
+    this.ctx.storage.sql.exec(
+      `INSERT INTO paca_agent_task_lease_mirror (
+        lease_id, request_id, request_fingerprint, organization_id, project_id,
+        task_id, agent_id, host_id, harness_kind, status, version,
+        last_checkpoint_sequence, lease_expires_at, finished_at, error_code, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (lease_id) DO UPDATE SET
+        request_id = excluded.request_id,
+        request_fingerprint = excluded.request_fingerprint,
+        status = excluded.status,
+        version = excluded.version,
+        last_checkpoint_sequence = excluded.last_checkpoint_sequence,
+        lease_expires_at = excluded.lease_expires_at,
+        finished_at = excluded.finished_at,
+        error_code = excluded.error_code,
+        updated_at = excluded.updated_at`,
+      input.leaseId,
+      input.requestId,
+      fingerprint,
+      input.organizationId,
+      input.projectId,
+      input.taskId,
+      input.agentId,
+      input.hostId,
+      input.harnessKind,
+      input.status,
+      input.version,
+      input.lastCheckpointSequence,
+      input.leaseExpiresAt,
+      input.finishedAt,
+      input.errorCode,
+      input.updatedAt,
+    );
+    const lease = this.findTaskLease(input.leaseId);
+    if (!lease) throw new Error("AGENT_TASK_LEASE_MIRROR_WRITE_FAILED");
+    return { success: true, duplicate: false, lease: publicTaskLease(lease) };
+  }
+
+  getTaskLease(leaseId: string): HostedTaskLeaseMirror | null {
+    const parsed = hostedTaskLeaseMirrorSchema.shape.leaseId.safeParse(leaseId);
+    if (!parsed.success) throw new Error("AGENT_TASK_LEASE_ID_INVALID");
+    const row = this.findTaskLease(parsed.data);
+    return row ? publicTaskLease(row) : null;
+  }
+
+  listTaskLeases(limit = 20): HostedTaskLeaseMirror[] {
+    const safeLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
+    return this.ctx.storage.sql
+      .exec<TaskLeaseRow>(
+        `${this.taskLeaseSelect()} ORDER BY updated_at DESC, lease_id LIMIT ?`,
+        safeLimit,
+      )
+      .toArray()
+      .map(publicTaskLease);
+  }
+
   private assertAgentIdentity(agentId: string): boolean {
     const [identity] = this.ctx.storage.sql
       .exec<{ agentId: string }>(
@@ -332,6 +484,14 @@ export class AgentCoordinator extends Agent<Env, PacaAgentRuntimeState> {
     );
   }
 
+  private findTaskLease(leaseId: string): TaskLeaseRow | null {
+    return (
+      this.ctx.storage.sql
+        .exec<TaskLeaseRow>(`${this.taskLeaseSelect()} WHERE lease_id = ?`, leaseId)
+        .toArray()[0] ?? null
+    );
+  }
+
   private mirrorRunState(run: RunRow): void {
     this.setState({
       schemaVersion: 1,
@@ -349,5 +509,16 @@ export class AgentCoordinator extends Agent<Env, PacaAgentRuntimeState> {
       project_id AS projectId, document_id AS documentId, kind, status, version,
       created_at AS createdAt, updated_at AS updatedAt, finished_at AS finishedAt,
       error_code AS errorCode FROM paca_agent_run`;
+  }
+
+  private taskLeaseSelect(): string {
+    return `SELECT request_id AS requestId, lease_id AS leaseId,
+      request_fingerprint AS requestFingerprint, organization_id AS organizationId,
+      project_id AS projectId, task_id AS taskId, agent_id AS agentId,
+      host_id AS hostId, harness_kind AS harnessKind, status, version,
+      last_checkpoint_sequence AS lastCheckpointSequence,
+      lease_expires_at AS leaseExpiresAt, finished_at AS finishedAt,
+      error_code AS errorCode, updated_at AS updatedAt
+      FROM paca_agent_task_lease_mirror`;
   }
 }

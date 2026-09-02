@@ -6,6 +6,8 @@ import {
 } from "@better-auth/agent-auth";
 import { and, eq, isNull } from "drizzle-orm";
 import * as z from "zod";
+import { mirrorHostedTaskLease } from "../agent-task/cloudflare-adapter";
+import { createPostgresAgentHostRuntimeService } from "../agent-task/host-runtime-runtime";
 import { PostgresAgentTaskLeaseRepository } from "../agent-task/postgres-repository";
 import {
   type AgentTaskLeaseCommand,
@@ -72,6 +74,11 @@ export type PacaAgentExecutionDependencies = {
     command: AgentTaskLeaseCommand,
     authorizationExpiresAt: Date,
   ): Promise<AgentTaskLeaseResult>;
+  matchTaskExecutionHost(hostId: string, taskId: string, now: Date): Promise<boolean>;
+  mirrorHostedTaskLease(
+    command: AgentTaskLeaseCommand,
+    result: AgentTaskLeaseResult,
+  ): Promise<void>;
   findDocumentScope(documentId: string): Promise<DocumentScope | null>;
   readDocument(documentId: string): Promise<DocumentAgentSnapshot>;
   executeDocumentCommand(
@@ -361,8 +368,11 @@ export function createPacaAgentExecutor(
         if (!host || context.agentSession.agent.hostId !== host.id) {
           denied("AGENT_HOST_IDENTITY_MISMATCH");
         }
+        if (!(await dependencies.matchTaskExecutionHost(host.id, input.taskId, new Date()))) {
+          denied("AGENT_HOST_NOT_ELIGIBLE");
+        }
         try {
-          return await dependencies.executeTaskLease(
+          const result = await dependencies.executeTaskLease(
             {
               agentId: context.agentSession.agentId,
               hostId: host.id,
@@ -370,6 +380,8 @@ export function createPacaAgentExecutor(
             input,
             new Date(agentAuthorizationExpiresAt(context.grant)),
           );
+          await dependencies.mirrorHostedTaskLease(input, result);
+          return result;
         } catch (error) {
           return agentTaskLeaseFailure(error);
         }
@@ -448,6 +460,19 @@ function postgresPacaAgentExecutionDependencies(
       taskService.updateAs(projectId, taskId, actor, input),
     executeTaskLease: (actor, command, authorizationExpiresAt) =>
       taskLeaseService.execute(actor, command, authorizationExpiresAt),
+    matchTaskExecutionHost: async (hostId, taskId, now) =>
+      (await createPostgresAgentHostRuntimeService(database).matchTasks(hostId, [taskId], now)).has(
+        taskId,
+      ),
+    mirrorHostedTaskLease: async (command, result) => {
+      if (!env) {
+        if (result.lease.harness.kind === "cloudflare-agent") {
+          denied("AGENT_HOSTED_ADAPTER_UNAVAILABLE");
+        }
+        return;
+      }
+      await mirrorHostedTaskLease(env, command, result);
+    },
     findDocumentScope: async (documentId) => {
       const [scope] = await database
         .select({

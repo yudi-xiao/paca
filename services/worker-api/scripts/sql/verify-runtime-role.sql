@@ -47,6 +47,8 @@ WITH application_tables(table_name) AS (
     ('paca_task_attachment'),
     ('paca_document'),
     ('paca_realtime_outbox'),
+    ('paca_agent_host_runtime'),
+    ('paca_agent_task_requirement'),
     ('paca_agent_task_lease'),
     ('paca_agent_task_lease_event')
 )

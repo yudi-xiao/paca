@@ -43,6 +43,24 @@ export type AgentAuthHostEnrollment = {
 	enrollmentTokenExpiresAt?: string;
 };
 
+export type AgentHostRuntimeProfile = {
+	host_id: string;
+	host_name: string | null;
+	host_status: string;
+	approved_labels: string[];
+	reported_labels: string[];
+	reported_harness_kinds: string[];
+	effective_labels: string[];
+	labels_version: number;
+	approved_by: string | null;
+	approved_at: string | null;
+	last_heartbeat_at: string | null;
+	heartbeat_expires_at: string | null;
+	online: boolean;
+	created_at: string;
+	updated_at: string;
+};
+
 export type AgentAuthConfiguration = {
 	modes: Array<"delegated" | "autonomous">;
 };
@@ -108,6 +126,21 @@ async function agentAuthRequest(path: string, init: RequestInit = {}) {
 	return body;
 }
 
+async function pacaAgentRequest(path: string, init: RequestInit = {}) {
+	const headers = new Headers(init.headers);
+	if (init.body !== undefined) headers.set("content-type", "application/json");
+	const response = await fetch(`/api/v1/agent${path}`, {
+		...init,
+		credentials: "include",
+		headers,
+	});
+	const body = asRecord(await response.json().catch(() => null));
+	if (!response.ok) {
+		throw new AgentAuthApiError(response.status, agentAuthErrorCode(body));
+	}
+	return body;
+}
+
 export async function getAgentAuthConfiguration(): Promise<AgentAuthConfiguration> {
 	const response = await fetch("/.well-known/agent-configuration", {
 		credentials: "include",
@@ -148,6 +181,34 @@ export async function revokeAgentAuthHost(hostId: string): Promise<void> {
 		method: "POST",
 		body: JSON.stringify({ host_id: hostId }),
 	});
+}
+
+export async function listAgentHostRuntimes(): Promise<
+	AgentHostRuntimeProfile[]
+> {
+	const body = asRecord(await pacaAgentRequest("/hosts/runtime"));
+	return Array.isArray(body?.data)
+		? (body.data as AgentHostRuntimeProfile[])
+		: [];
+}
+
+export async function approveAgentHostLabels(input: {
+	hostId: string;
+	approvedLabels: string[];
+}): Promise<AgentHostRuntimeProfile> {
+	const body = asRecord(
+		await pacaAgentRequest(
+			`/hosts/${encodeURIComponent(input.hostId)}/runtime`,
+			{
+				method: "PUT",
+				body: JSON.stringify({ approved_labels: input.approvedLabels }),
+			},
+		),
+	);
+	const data = asRecord(body?.data);
+	if (!data)
+		throw new AgentAuthApiError(502, "AGENT_HOST_RUNTIME_RESPONSE_INVALID");
+	return data as AgentHostRuntimeProfile;
 }
 
 export async function grantAutonomousProjectRead(input: {
@@ -239,6 +300,12 @@ export const agentAuthAgentsQueryOptions = queryOptions({
 export const agentAuthHostsQueryOptions = queryOptions({
 	queryKey: ["agent-auth", "hosts"],
 	queryFn: listAgentAuthHosts,
+	staleTime: 15_000,
+});
+
+export const agentHostRuntimesQueryOptions = queryOptions({
+	queryKey: ["agent-auth", "host-runtimes"],
+	queryFn: listAgentHostRuntimes,
 	staleTime: 15_000,
 });
 

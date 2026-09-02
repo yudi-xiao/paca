@@ -285,6 +285,19 @@ async function main(): Promise<void> {
       "DUPLICATE_CHECKPOINT",
     );
     if (!duplicateCheckpoint.duplicate) throw new Error("CHECKPOINT_NOT_IDEMPOTENT");
+    const restartedHarnessClient = new AgentTaskHarnessClient(
+      delegatedAgentTaskHarnessTransport(registration.config),
+      { kind: "codex", version: "smoke-restarted", instanceId: `local-${runSuffix}-restart` },
+    );
+    const recoveredOwned = await restartedHarnessClient.discover();
+    if (
+      recoveredOwned.length !== 1 ||
+      recoveredOwned[0]?.availability !== "owned" ||
+      recoveredOwned[0]?.lease?.id !== leaseId ||
+      recoveredOwned[0]?.lease?.last_checkpoint_sequence !== 1
+    ) {
+      throw new Error("RESTART_RECOVERY_INVALID");
+    }
     const skippedCheckpointCode = await expectAgentFailure(
       () =>
         execute(registration.config, {
@@ -309,6 +322,74 @@ async function main(): Promise<void> {
     if (completed.lease.status !== "completed" || completed.lease.version !== 4) {
       throw new Error("COMPLETE_STATE_INVALID");
     }
+
+    const expiringClaim = leaseResult(
+      await execute(registration.config, {
+        ...scope,
+        requestId: crypto.randomUUID(),
+        action: "claim",
+        leaseDurationMs: 5_000,
+        harness: { kind: "codex", version: "smoke", instanceId: `local-${runSuffix}` },
+      }),
+      "EXPIRING_CLAIM",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 6_500));
+    const discoveredAfterExpiry = await harnessClient.discover();
+    if (
+      discoveredAfterExpiry.length !== 1 ||
+      discoveredAfterExpiry[0]?.availability !== "claimable"
+    ) {
+      throw new Error("EXPIRED_DISCOVERY_INVALID");
+    }
+    const reclaimed = leaseResult(
+      await execute(registration.config, {
+        ...scope,
+        requestId: crypto.randomUUID(),
+        action: "claim",
+        leaseDurationMs: 60_000,
+        harness: { kind: "codex", version: "smoke", instanceId: `local-${runSuffix}` },
+      }),
+      "RECLAIM",
+    );
+    if (reclaimed.lease.id === expiringClaim.lease.id || reclaimed.lease.status !== "active") {
+      throw new Error("RECLAIM_STATE_INVALID");
+    }
+
+    const cancelRequestId = crypto.randomUUID();
+    const cancelled = await userRequest(
+      baseURL,
+      `/api/v1/projects/${projectId}/tasks/${taskId}/agent-lease/cancel`,
+      cookie,
+      "POST",
+      { request_id: cancelRequestId, reason: "internal Harness smoke manual cancel" },
+    );
+    requireStatus(cancelled.response, 200, cancelled.body, "MANUAL_CANCEL");
+    const cancelledResult = leaseResult(cancelled.body, "MANUAL_CANCEL");
+    if (cancelledResult.lease.status !== "cancelled") {
+      throw new Error("MANUAL_CANCEL_STATE_INVALID");
+    }
+    const duplicateCancel = await userRequest(
+      baseURL,
+      `/api/v1/projects/${projectId}/tasks/${taskId}/agent-lease/cancel`,
+      cookie,
+      "POST",
+      { request_id: cancelRequestId, reason: "internal Harness smoke manual cancel" },
+    );
+    requireStatus(duplicateCancel.response, 200, duplicateCancel.body, "DUPLICATE_MANUAL_CANCEL");
+    if (!leaseResult(duplicateCancel.body, "DUPLICATE_MANUAL_CANCEL").duplicate) {
+      throw new Error("MANUAL_CANCEL_NOT_IDEMPOTENT");
+    }
+    const cancelledRenewCode = await expectAgentFailure(
+      () =>
+        execute(registration.config, {
+          ...scope,
+          leaseId: reclaimed.lease.id,
+          requestId: crypto.randomUUID(),
+          action: "renew",
+          leaseDurationMs: 60_000,
+        }),
+      "CANCELLED_RENEW",
+    );
 
     const revoke = await userRequest(
       baseURL,
@@ -346,9 +427,13 @@ async function main(): Promise<void> {
         duplicateCheckpoint: true,
         discoveryClaimable: true,
         discoveryOwned: true,
+        restartRecovery: true,
+        expiredReclaim: true,
+        manualCancel: true,
         changedRetryCode,
         competingClaimCode,
         skippedCheckpointCode,
+        cancelledRenewCode,
         revokedExecutionCode,
       }),
     );

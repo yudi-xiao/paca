@@ -136,6 +136,32 @@ describe("runtime-independent Agent task Harness client", () => {
     expect(harness.discover).toHaveBeenCalledOnce();
   });
 
+  it("heartbeats the approved Host before discovery and lease mutations", async () => {
+    const heartbeat = vi.fn(async () => ({ success: true }));
+    const execute = vi.fn(async (command: AgentTaskLeaseCommand) => result(command));
+    const discover = vi.fn(async () => ({ data: [] }));
+    const client = new AgentTaskHarnessClient(
+      { execute, discover, heartbeat },
+      { kind: "claude-code", version: "2.0.0", instanceId: "local-2" },
+      ["task:execute", "tool:shell"],
+    );
+
+    await client.discover();
+    await client.claim(scope, { requestId: REQUEST_ID, leaseDurationMs: 60_000 });
+
+    expect(heartbeat).toHaveBeenNthCalledWith(1, {
+      harnesses: [{ kind: "claude-code", version: "2.0.0", instanceId: "local-2" }],
+      labels: ["task:execute", "tool:shell"],
+    });
+    expect(heartbeat).toHaveBeenCalledTimes(2);
+    expect(heartbeat.mock.invocationCallOrder[0]).toBeLessThan(
+      discover.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(heartbeat.mock.invocationCallOrder[1]).toBeLessThan(
+      execute.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
   it("rejects malformed output and a claim that changes the configured Harness identity", async () => {
     const malformed = new AgentTaskHarnessClient(
       { execute: async () => ({ unexpected: true }) },

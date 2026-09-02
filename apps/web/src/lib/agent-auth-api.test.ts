@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
 	type AgentAuthApiError,
+	approveAgentHostLabels,
 	createAgentAuthHost,
 	getAgentAuthConfiguration,
 	grantAutonomousProjectRead,
 	listAgentAuthAgents,
 	listAgentAuthHosts,
+	listAgentHostRuntimes,
 	reauthenticateAndApproveAgent,
 	resolveAgentAuthorization,
 	revokeAgentAuthAgent,
@@ -143,6 +145,50 @@ describe("agent-auth-api", () => {
 			expect.objectContaining({
 				method: "POST",
 				body: JSON.stringify({ host_id: "host-1" }),
+			}),
+		);
+	});
+
+	it("lists Host presence and updates only server-approved labels", async () => {
+		const runtime = {
+			host_id: "host-1",
+			host_name: "Runner",
+			host_status: "active",
+			approved_labels: ["task:execute"],
+			reported_labels: ["task:execute", "harness:codex"],
+			reported_harness_kinds: ["codex"],
+			effective_labels: ["task:execute"],
+			labels_version: 1,
+			online: true,
+		};
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockImplementation(async (input) =>
+				input === "/api/v1/agent/hosts/runtime"
+					? Response.json({ success: true, data: [runtime] })
+					: Response.json({
+							success: true,
+							data: { ...runtime, labels_version: 2 },
+						}),
+			);
+
+		await expect(listAgentHostRuntimes()).resolves.toMatchObject([runtime]);
+		await expect(
+			approveAgentHostLabels({
+				hostId: "host-1",
+				approvedLabels: ["task:execute", "harness:codex"],
+			}),
+		).resolves.toMatchObject({ host_id: "host-1", labels_version: 2 });
+
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			2,
+			"/api/v1/agent/hosts/host-1/runtime",
+			expect.objectContaining({
+				method: "PUT",
+				credentials: "include",
+				body: JSON.stringify({
+					approved_labels: ["task:execute", "harness:codex"],
+				}),
 			}),
 		);
 	});

@@ -134,6 +134,27 @@
       "when": 1788317950635,
       "tag": "0018_magenta_junta",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788321394162,
+      "tag": "0019_volatile_hydra",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788322771871,
+      "tag": "0020_pale_the_santerians",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788323349863,
+      "tag": "0021_neat_dagger",
+      "breakpoints": true
     }
   ]
 }

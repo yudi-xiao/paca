@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   type AgentTaskDiscoveryDependencies,
+  type AgentTaskGrantScope,
   discoverAgentTasks,
 } from "../src/agent-task/discovery";
 
@@ -50,6 +51,10 @@ function session(
 function dependencies(): AgentTaskDiscoveryDependencies {
   return {
     authorizeScope: vi.fn(async () => true),
+    matchTasks: vi.fn(
+      async (_session, scopes: readonly AgentTaskGrantScope[]) =>
+        new Set(scopes.map(({ taskId }) => taskId)),
+    ),
     findTasks: vi.fn(async () => [
       {
         id: TASK_ID,
@@ -160,5 +165,14 @@ describe("Agent task discovery", () => {
       },
     ]);
     await expect(discoverAgentTasks(competing, session(), NOW)).resolves.toEqual([]);
+  });
+
+  it("filters a Grant when the approved Host labels do not match task requirements", async () => {
+    const deps = dependencies();
+    vi.mocked(deps.matchTasks).mockResolvedValue(new Set());
+
+    await expect(discoverAgentTasks(deps, session(), NOW)).resolves.toEqual([]);
+    expect(deps.findTasks).not.toHaveBeenCalled();
+    expect(deps.findActiveLeases).not.toHaveBeenCalled();
   });
 });

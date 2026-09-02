@@ -12,6 +12,7 @@ import {
   type AgentTaskGrantScope,
   discoverAgentTasks,
 } from "./discovery";
+import { createPostgresAgentHostRuntimeService } from "./host-runtime-runtime";
 import { agentHarnessSchema } from "./protocol";
 
 export type AgentTaskDiscoveryRuntime = {
@@ -38,6 +39,14 @@ function postgresDependencies(database: PacaDatabase): AgentTaskDiscoveryDepende
         },
       );
       return decision.scopeExists && decision.allowed;
+    },
+    async matchTasks(session, scopes, now) {
+      if (!session.host || session.agent.hostId !== session.host.id) return new Set();
+      return createPostgresAgentHostRuntimeService(database).matchTasks(
+        session.host.id,
+        scopes.map(({ taskId }) => taskId),
+        now,
+      );
     },
     async findTasks(scopes: readonly AgentTaskGrantScope[]) {
       if (scopes.length === 0) return [];

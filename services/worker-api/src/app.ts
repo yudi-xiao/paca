@@ -16,11 +16,24 @@ import {
 } from "./agent-run/document-workflow-protocol";
 import type { AgentRunRecord } from "./agent-run/protocol";
 import { AgentRunError, type AgentRunRuntime, agentRunRuntime } from "./agent-run/runtime";
+import {
+  type AgentTaskControlRuntime,
+  agentTaskControlRuntime,
+} from "./agent-task/control-runtime";
 import type { AgentTaskDiscoveryItem } from "./agent-task/discovery";
 import {
   type AgentTaskDiscoveryRuntime,
   agentTaskDiscoveryRuntime,
 } from "./agent-task/discovery-runtime";
+import {
+  AgentHostRuntimeError,
+  type AgentHostRuntimeProfile,
+  type AgentTaskRequirement,
+  agentHostRuntimeErrorCodes,
+} from "./agent-task/host-runtime";
+import { type AgentHostRuntime, agentHostRuntime } from "./agent-task/host-runtime-runtime";
+import type { AgentTaskLease } from "./agent-task/protocol";
+import { AgentTaskLeaseError, agentTaskLeaseErrorCodes } from "./agent-task/service";
 import { type AttachmentRuntime, attachmentRuntime } from "./attachment/runtime";
 import {
   AttachmentError,
@@ -136,6 +149,8 @@ type AppDependencies = {
   ) => Promise<Project>;
   agentRuns: AgentRunRuntime;
   agentTasks: AgentTaskDiscoveryRuntime;
+  agentTaskControl: AgentTaskControlRuntime;
+  agentHosts: AgentHostRuntime;
   agentConfigurationHandler: (request: Request, env: AppBindings) => Promise<Response>;
   authHandler: (request: Request, env: AppBindings) => Promise<Response>;
   authorizeOrganizationPermission: AuthorizeOrganizationPermission;
@@ -1077,11 +1092,102 @@ function agentTaskDiscoveryResponse(item: AgentTaskDiscoveryItem) {
   };
 }
 
+function agentTaskLeaseResponse(lease: AgentTaskLease) {
+  return {
+    id: lease.id,
+    organization_id: lease.organizationId,
+    project_id: lease.projectId,
+    task_id: lease.taskId,
+    agent_id: lease.agentId,
+    host_id: lease.hostId,
+    harness: {
+      kind: lease.harness.kind,
+      version: lease.harness.version,
+      instance_id: lease.harness.instanceId,
+    },
+    status: lease.status,
+    version: lease.version,
+    last_checkpoint_sequence: lease.lastCheckpointSequence,
+    lease_expires_at: lease.leaseExpiresAt.toISOString(),
+    claimed_at: lease.claimedAt.toISOString(),
+    finished_at: lease.finishedAt?.toISOString() ?? null,
+    error_code: lease.errorCode,
+    result_summary: lease.resultSummary,
+    created_at: lease.createdAt.toISOString(),
+    updated_at: lease.updatedAt.toISOString(),
+  };
+}
+
+function agentHostRuntimeResponse(profile: AgentHostRuntimeProfile) {
+  return {
+    host_id: profile.hostId,
+    host_name: profile.hostName,
+    host_status: profile.hostStatus,
+    approved_labels: profile.approvedLabels,
+    reported_labels: profile.reportedLabels,
+    reported_harness_kinds: profile.reportedHarnessKinds,
+    effective_labels: profile.effectiveLabels,
+    labels_version: profile.labelsVersion,
+    approved_by: profile.approvedBy,
+    approved_at: profile.approvedAt?.toISOString() ?? null,
+    last_heartbeat_at: profile.lastHeartbeatAt?.toISOString() ?? null,
+    heartbeat_expires_at: profile.heartbeatExpiresAt?.toISOString() ?? null,
+    online: profile.online,
+    created_at: profile.createdAt.toISOString(),
+    updated_at: profile.updatedAt.toISOString(),
+  };
+}
+
+function agentTaskRequirementResponse(
+  projectId: string,
+  taskId: string,
+  requirement: AgentTaskRequirement | null,
+) {
+  return {
+    project_id: projectId,
+    task_id: taskId,
+    required_labels: requirement?.requiredLabels ?? [],
+    updated_by: requirement?.updatedBy ?? null,
+    created_at: requirement?.createdAt.toISOString() ?? null,
+    updated_at: requirement?.updatedAt.toISOString() ?? null,
+  };
+}
+
+function agentHostRuntimeFailure(context: AppContext, error: unknown) {
+  if (!(error instanceof AgentHostRuntimeError)) throw error;
+  switch (error.code) {
+    case agentHostRuntimeErrorCodes.inputInvalid:
+      return legacyFailure(context, 400, error.code, "Agent Host runtime request invalid");
+    case agentHostRuntimeErrorCodes.hostNotFound:
+    case agentHostRuntimeErrorCodes.taskNotFound:
+      return legacyFailure(context, 404, error.code, "Agent Host runtime resource not found");
+    case agentHostRuntimeErrorCodes.hostInactive:
+      return legacyFailure(context, 409, error.code, "Agent Host is not active");
+  }
+}
+
 function agentRunFailure(context: AppContext, error: unknown) {
   if (error instanceof AgentRunError) {
     return legacyFailure(context, error.status, error.code, "Agent run request failed");
   }
   throw error;
+}
+
+function agentTaskControlFailure(context: AppContext, error: unknown) {
+  if (error instanceof z.ZodError) {
+    return legacyFailure(context, 400, "AGENT_TASK_CANCEL_INPUT_INVALID", "Invalid cancel request");
+  }
+  if (!(error instanceof AgentTaskLeaseError)) throw error;
+  switch (error.code) {
+    case agentTaskLeaseErrorCodes.leaseNotFound:
+      return legacyFailure(context, 404, error.code, "No active Agent task lease found");
+    case agentTaskLeaseErrorCodes.leaseExpired:
+    case agentTaskLeaseErrorCodes.leaseTerminal:
+    case agentTaskLeaseErrorCodes.idempotencyConflict:
+      return legacyFailure(context, 409, error.code, "Agent task lease cannot be cancelled");
+    default:
+      return legacyFailure(context, 409, error.code, "Agent task lease request failed");
+  }
 }
 
 const defaultDependencies: AppDependencies = {
@@ -1090,6 +1196,8 @@ const defaultDependencies: AppDependencies = {
     withDatabase(env, (database) => readPostgresProjectAsAgent(database, session, scope)),
   agentRuns: agentRunRuntime,
   agentTasks: agentTaskDiscoveryRuntime,
+  agentTaskControl: agentTaskControlRuntime,
+  agentHosts: agentHostRuntime,
   agentConfigurationHandler: handleAgentConfigurationRequest,
   authHandler: handleAuthRequest,
   authorizeOrganizationPermission,
@@ -1162,6 +1270,52 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
     dependencies.agentConfigurationHandler(context.req.raw, context.env),
   );
 
+  app.post(
+    "/api/v1/agent/host/heartbeat",
+    requireAgentAuthentication(dependencies.currentAgentSession),
+    async (context) => {
+      try {
+        const profile = await dependencies.agentHosts.heartbeat(
+          context.env,
+          context.get("agentSession"),
+          await context.req.json().catch(() => null),
+        );
+        context.header("cache-control", "no-store");
+        return legacySuccess(context, agentHostRuntimeResponse(profile));
+      } catch (error) {
+        return agentHostRuntimeFailure(context, error);
+      }
+    },
+  );
+
+  app.get(
+    "/api/v1/agent/hosts/runtime",
+    requireSystemPermission(dependencies.authorizeSystemPermission, { agents: ["read"] }),
+    async (context) =>
+      legacySuccess(
+        context,
+        (await dependencies.agentHosts.list(context.env)).map(agentHostRuntimeResponse),
+      ),
+  );
+
+  app.put(
+    "/api/v1/agent/hosts/:hostId/runtime",
+    requireSystemPermission(dependencies.authorizeSystemPermission, { agents: ["write"] }),
+    async (context) => {
+      try {
+        const profile = await dependencies.agentHosts.approveLabels(
+          context.env,
+          context.req.param("hostId"),
+          context.get("permissionActorId"),
+          await context.req.json().catch(() => null),
+        );
+        return legacySuccess(context, agentHostRuntimeResponse(profile));
+      } catch (error) {
+        return agentHostRuntimeFailure(context, error);
+      }
+    },
+  );
+
   app.get(
     "/api/v1/agent/tasks/claimable",
     requireAgentAuthentication(dependencies.currentAgentSession),
@@ -1203,6 +1357,68 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
           return legacyFailure(context, 403, error.message, "Agent capability denied");
         }
         return projectFailure(context, error);
+      }
+    },
+  );
+
+  app.get(
+    "/api/v1/projects/:projectId/tasks/:taskId/agent-requirements",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, {
+      agents: ["read"],
+      tasks: ["read"],
+    }),
+    async (context) => {
+      const projectId = context.req.param("projectId");
+      const taskId = context.req.param("taskId");
+      if (!z.uuid().safeParse(taskId).success) {
+        return legacyFailure(context, 400, "BAD_REQUEST", "Invalid task id");
+      }
+      try {
+        return legacySuccess(
+          context,
+          agentTaskRequirementResponse(
+            projectId,
+            taskId,
+            await dependencies.agentHosts.getTaskRequirement(context.env, projectId, taskId),
+          ),
+        );
+      } catch (error) {
+        return agentHostRuntimeFailure(context, error);
+      }
+    },
+  );
+
+  app.put(
+    "/api/v1/projects/:projectId/tasks/:taskId/agent-requirements",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, {
+      agents: ["approveGrant"],
+      tasks: ["read"],
+    }),
+    async (context) => {
+      const projectId = context.req.param("projectId");
+      const taskId = context.req.param("taskId");
+      if (!z.uuid().safeParse(taskId).success) {
+        return legacyFailure(context, 400, "BAD_REQUEST", "Invalid task id");
+      }
+      try {
+        return legacySuccess(
+          context,
+          agentTaskRequirementResponse(
+            projectId,
+            taskId,
+            await dependencies.agentHosts.setTaskRequirement(
+              context.env,
+              projectId,
+              taskId,
+              context.get("permissionActorId"),
+              await context.req.json().catch(() => null),
+            ),
+          ),
+        );
+      } catch (error) {
+        return agentHostRuntimeFailure(context, error);
       }
     },
   );
@@ -2777,6 +2993,44 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
         return legacySuccess(context, taskResponse(task));
       } catch (error) {
         return taskFailure(context, error);
+      }
+    },
+  );
+  app.post(
+    "/api/v1/projects/:projectId/tasks/:taskId/agent-lease/cancel",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, { tasks: ["write"] }),
+    async (context) => {
+      const taskId = context.req.param("taskId");
+      const body = z
+        .object({
+          request_id: z.uuid(),
+          reason: z.string().trim().min(1).max(4_000).nullable().optional(),
+        })
+        .strict()
+        .safeParse(await context.req.json().catch(() => null));
+      if (!z.uuid().safeParse(taskId).success || !body.success) {
+        return legacyFailure(
+          context,
+          400,
+          "AGENT_TASK_CANCEL_INPUT_INVALID",
+          "Invalid cancel request",
+        );
+      }
+      try {
+        const result = await dependencies.agentTaskControl.requestCancel(
+          context.env,
+          context.req.param("projectId"),
+          taskId,
+          context.get("permissionActorId"),
+          { requestId: body.data.request_id, reason: body.data.reason ?? null },
+        );
+        return legacySuccess(context, {
+          duplicate: result.duplicate,
+          lease: agentTaskLeaseResponse(result.lease),
+        });
+      } catch (error) {
+        return agentTaskControlFailure(context, error);
       }
     },
   );

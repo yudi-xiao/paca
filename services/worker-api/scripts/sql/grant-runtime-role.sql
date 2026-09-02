@@ -51,6 +51,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.paca_task_attachment,
   public.paca_document,
   public.paca_realtime_outbox,
+  public.paca_agent_host_runtime,
+  public.paca_agent_task_requirement,
   public.paca_agent_task_lease,
   public.paca_agent_task_lease_event
 TO :"runtime_role";

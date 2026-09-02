@@ -189,6 +189,8 @@ function dependencies(
     executeTaskLease: async () => {
       throw new Error("AGENT_TASK_LEASE_NOT_CONFIGURED");
     },
+    matchTaskExecutionHost: async () => true,
+    mirrorHostedTaskLease: async () => {},
     findDocumentScope: async () => ({
       documentId: DOCUMENT_ID,
       organizationId: "paca-default",
@@ -398,9 +400,10 @@ describe("Paca Agent Auth execution boundary", () => {
         harness: { kind: command.harness.kind, version: null, instanceId: null },
       },
     }));
+    const mirrorHostedTaskLease = vi.fn(async () => {});
     const hasProjectPermission = vi.fn(async () => ({ allowed: true, scopeExists: true }));
     const executor = createPacaAgentExecutor(
-      dependencies({ executeTaskLease, hasProjectPermission }),
+      dependencies({ executeTaskLease, hasProjectPermission, mirrorHostedTaskLease }),
     );
     const constraints = {
       ...scope,
@@ -430,6 +433,7 @@ describe("Paca Agent Auth execution boundary", () => {
     expect(hasProjectPermission).toHaveBeenCalledWith("user-1", PROJECT_ID, {
       tasks: ["read"],
     });
+    expect(mirrorHostedTaskLease).toHaveBeenCalledOnce();
   });
 
   it("exposes bounded task lease protocol errors through Agent Auth", async () => {
@@ -462,6 +466,31 @@ describe("Paca Agent Auth execution boundary", () => {
         message: agentTaskLeaseErrorCodes.leaseConflict,
       },
     });
+  });
+
+  it("rejects task execution before lease mutation when Host labels are offline or unmatched", async () => {
+    const executeTaskLease = vi.fn();
+    const executor = createPacaAgentExecutor(
+      dependencies({ executeTaskLease, matchTaskExecutionHost: async () => false }),
+    );
+    const constraints = {
+      ...scope,
+      taskId: TASK_ID,
+      operationMode: "execute",
+      action: "claim",
+    } satisfies CapabilityConstraints;
+
+    await expect(
+      executor(
+        executeContext("task.execute", agentSession("task.execute", constraints), {
+          ...constraints,
+          requestId: REQUEST_ID,
+          leaseDurationMs: 30_000,
+          harness: { kind: "codex" },
+        }),
+      ),
+    ).rejects.toThrow("AGENT_HOST_NOT_ELIGIBLE");
+    expect(executeTaskLease).not.toHaveBeenCalled();
   });
 
   it("rejects a cross-organization project before any domain read", async () => {

@@ -6,6 +6,11 @@ import {
   fetchWithDelegatedAgent,
 } from "../agent-auth/agent-client";
 import {
+  AGENT_HOST_EXECUTION_LABEL,
+  type AgentHostHeartbeat,
+  agentHostLabelSchema,
+} from "./host-runtime";
+import {
   type AgentHarnessKind,
   type AgentTaskLeaseCommand,
   type AgentTaskLeaseResult,
@@ -98,6 +103,7 @@ export type AgentTaskExecutionScope = {
 export interface AgentTaskHarnessTransport {
   execute(command: AgentTaskLeaseCommand): Promise<unknown>;
   discover?(): Promise<unknown>;
+  heartbeat?(report: AgentHostHeartbeat): Promise<unknown>;
 }
 
 export class AgentTaskHarnessProtocolError extends Error {
@@ -127,12 +133,16 @@ export class AgentTaskHarnessClient {
   constructor(
     private readonly transport: AgentTaskHarnessTransport,
     harness: AgentTaskHarnessIdentity,
+    private readonly labels: readonly string[] = [AGENT_HOST_EXECUTION_LABEL],
   ) {
     const parsed = agentHarnessSchema.safeParse(harness);
     if (!parsed.success) {
       throw new AgentTaskHarnessProtocolError("AGENT_TASK_HARNESS_INPUT_INVALID");
     }
     this.harness = parsed.data;
+    if (!z.array(agentHostLabelSchema).max(32).safeParse(labels).success) {
+      throw new AgentTaskHarnessProtocolError("AGENT_TASK_HARNESS_INPUT_INVALID");
+    }
   }
 
   claim(
@@ -204,6 +214,7 @@ export class AgentTaskHarnessClient {
     if (!this.transport.discover) {
       throw new AgentTaskHarnessProtocolError("AGENT_TASK_HARNESS_DISCOVERY_UNAVAILABLE");
     }
+    await this.heartbeat();
     const result = discoveryResultSchema.safeParse(await this.transport.discover());
     if (!result.success) {
       throw new AgentTaskHarnessProtocolError("AGENT_TASK_HARNESS_RESULT_INVALID");
@@ -224,11 +235,20 @@ export class AgentTaskHarnessClient {
     ) {
       throw new AgentTaskHarnessProtocolError("AGENT_TASK_HARNESS_INPUT_INVALID");
     }
+    await this.heartbeat();
     const result = resultSchema.safeParse(resultValue(await this.transport.execute(command.data)));
     if (!result.success) {
       throw new AgentTaskHarnessProtocolError("AGENT_TASK_HARNESS_RESULT_INVALID");
     }
     return result.data;
+  }
+
+  private async heartbeat(): Promise<void> {
+    if (!this.transport.heartbeat) return;
+    await this.transport.heartbeat({
+      harnesses: [this.harness],
+      labels: [...new Set(this.labels)],
+    });
   }
 }
 
@@ -249,6 +269,24 @@ export function delegatedAgentTaskHarnessTransport(
         config,
         path: "/api/v1/agent/tasks/claimable",
         capabilities: ["task.execute"],
+        fetch,
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new AgentTaskHarnessProtocolError("AGENT_TASK_HARNESS_DISCOVERY_UNAVAILABLE");
+      }
+      return body;
+    },
+    heartbeat: async (report) => {
+      const response = await fetchWithDelegatedAgent({
+        config,
+        path: "/api/v1/agent/host/heartbeat",
+        capabilities: ["task.execute"],
+        init: {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(report),
+        },
         fetch,
       });
       const body = await response.json().catch(() => null);
