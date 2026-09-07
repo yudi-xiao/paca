@@ -123,7 +123,7 @@ The required ones, to get the service to actually start:
 See [`docs/ai-agent/agent-runner-service.md#environment-variables`](../../docs/ai-agent/agent-runner-service.md#environment-variables)
 for the full table, including optional ones (`PACA_AGENT_CONFIG`, `PACA_API_KEY`, `PACA_MCP_DEV_SOURCE_DIR`,
 `PORT_POOL_START`/`PORT_POOL_SIZE`, `WORKER_CONCURRENCY`, `CHAT_SANDBOX_IDLE_TIMEOUT_MINUTES`,
-`HTTP_ADDR`, `LLM_MODELS_PATH`, `LOG_LEVEL`) — kept in one place so the two docs don't drift out of
+`PACA_AGENT_TASK_LEASE_SECONDS`, `HTTP_ADDR`, `LLM_MODELS_PATH`, `LOG_LEVEL`) — kept in one place so the two docs don't drift out of
 sync.
 
 ## Testing

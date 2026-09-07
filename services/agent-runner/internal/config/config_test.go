@@ -38,6 +38,7 @@ func TestLoadAgentAuthPresenceSettings(t *testing.T) {
 	t.Setenv("PACA_AGENT_HARNESS_VERSION", "1.2.3")
 	t.Setenv("PACA_AGENT_HARNESS_INSTANCE_ID", "local-arm64")
 	t.Setenv("PACA_AGENT_HEARTBEAT_SECONDS", "45")
+	t.Setenv("PACA_AGENT_TASK_LEASE_SECONDS", "120")
 
 	settings, err := Load()
 	if err != nil {
@@ -47,7 +48,8 @@ func TestLoadAgentAuthPresenceSettings(t *testing.T) {
 		settings.AgentHarnessKind != "deepseek" ||
 		settings.AgentHarnessVersion != "1.2.3" ||
 		settings.AgentHarnessInstanceID != "local-arm64" ||
-		settings.AgentHeartbeatInterval != 45*time.Second {
+		settings.AgentHeartbeatInterval != 45*time.Second ||
+		settings.AgentTaskLeaseDuration != 120*time.Second {
 		t.Fatalf("Agent Auth settings = %#v", settings)
 	}
 }
@@ -71,6 +73,15 @@ func TestLoadRejectsInvalidAgentAuthPresenceSettings(t *testing.T) {
 			}
 		})
 	}
+	t.Run("lease duration invalid", func(t *testing.T) {
+		setRequiredEnvironment(t)
+		t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
+		t.Setenv("PACA_AGENT_HARNESS_KIND", "codex")
+		t.Setenv("PACA_AGENT_TASK_LEASE_SECONDS", "301")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() error = nil")
+		}
+	})
 }
 
 func setRequiredEnvironment(t *testing.T) {

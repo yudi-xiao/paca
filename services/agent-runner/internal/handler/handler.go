@@ -22,6 +22,7 @@ import (
 	"github.com/Paca-AI/agent-runner/internal/acp"
 	"github.com/Paca-AI/agent-runner/internal/acpbridge"
 	"github.com/Paca-AI/agent-runner/internal/agent"
+	"github.com/Paca-AI/agent-runner/internal/agentauth"
 	"github.com/Paca-AI/agent-runner/internal/bundledskills"
 	"github.com/Paca-AI/agent-runner/internal/chatsandbox"
 	"github.com/Paca-AI/agent-runner/internal/config"
@@ -55,7 +56,11 @@ type Handler struct {
 	// never attach a conversation to an environment, which never reach the
 	// code paths that read it.
 	EnvironmentRepo *postgres.EnvironmentRepository
-	Log             *slog.Logger
+	// TaskLeases is present only after this Runner has been configured with a
+	// delegated Better Auth Agent identity. Task-assignment triggers then need
+	// an exact server-discovered task.execute lease before a sandbox starts.
+	TaskLeases agentauth.TaskLeaseCoordinator
+	Log        *slog.Logger
 
 	// resumeLocks serializes, per conversation_id, Handle's "register
 	// in-flight then read the paused sandbox" sequence against
@@ -219,6 +224,61 @@ func (h *Handler) Handle(ctx context.Context, trigger agent.Trigger) error {
 		h.InFlight.Unregister(trigger.ConversationID, regToken)
 		cancelRun()
 	}()
+
+	var taskLease agentauth.TaskLeaseExecution
+	var stopTaskLeaseRenewal func()
+	leaseFinalized := false
+	leaseControlFailed := make(chan struct{}, 1)
+	if h.TaskLeases != nil && h.TaskLeases.Manages(trigger.AgentID.String()) &&
+		trigger.TriggerType == agent.TriggerTaskAssigned {
+		if trigger.TaskID == nil || trigger.ProjectID == uuid.Nil {
+			errMsg := "task execution scope is incomplete"
+			if err := h.ConvRepo.UpdateStatus(ctx, trigger.ConversationID, "failed", &errMsg); err != nil {
+				h.Log.Warn("agent-runner: failed to record invalid task scope", "error", err)
+			}
+			h.publishTerminalStatus(ctx, trigger.ProjectID, trigger.ConversationID, trigger.ActorUserID, "failed", "agent.conversation.failed")
+			return nil
+		}
+		taskLease, err = h.TaskLeases.Begin(
+			runCtx,
+			trigger.AgentID.String(),
+			trigger.ProjectID.String(),
+			trigger.TaskID.String(),
+		)
+		if err != nil {
+			errMsg := "task execution authorization is unavailable"
+			if statusErr := h.ConvRepo.UpdateStatus(ctx, trigger.ConversationID, "failed", &errMsg); statusErr != nil {
+				h.Log.Warn("agent-runner: failed to record task lease denial", "error", statusErr)
+			}
+			h.publishTerminalStatus(ctx, trigger.ProjectID, trigger.ConversationID, trigger.ActorUserID, "failed", "agent.conversation.failed")
+			h.Log.Warn("agent-runner: task lease denied",
+				"conversation_id", trigger.ConversationID, "task_id", trigger.TaskID, "error", err)
+			return nil
+		}
+		stopTaskLeaseRenewal = taskLease.StartRenewal(runCtx, func(err error) {
+			select {
+			case leaseControlFailed <- struct{}{}:
+			default:
+			}
+			h.Log.Warn("agent-runner: task lease renewal failed",
+				"conversation_id", trigger.ConversationID, "task_id", trigger.TaskID, "error", err)
+			cancelRun()
+		})
+		defer func() {
+			if leaseFinalized {
+				return
+			}
+			if stopTaskLeaseRenewal != nil {
+				stopTaskLeaseRenewal()
+			}
+			finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			if err := taskLease.Fail(finalizeCtx, "AGENT_RUNNER_ABANDONED", "Agent Runner exited before finalizing the task execution."); err != nil {
+				h.Log.Warn("agent-runner: failed to abandon task lease",
+					"conversation_id", trigger.ConversationID, "task_id", trigger.TaskID, "error", err)
+			}
+		}()
+	}
 
 	// Seeded from existing history, not always 0 — event_index is unique for
 	// a conversation's entire lifetime, not just this turn. Only matters
@@ -402,9 +462,50 @@ func (h *Handler) Handle(ctx context.Context, trigger agent.Trigger) error {
 	// events page out of the frontend's loaded window.
 	onReady := func() {
 		persistAndPublish("environment_ready", "system", []byte("{}"))
+		if taskLease != nil {
+			checkpointCtx, cancel := context.WithTimeout(context.WithoutCancel(runCtx), 15*time.Second)
+			defer cancel()
+			if err := taskLease.Checkpoint(checkpointCtx, 1, "Agent sandbox is ready."); err != nil {
+				select {
+				case leaseControlFailed <- struct{}{}:
+				default:
+				}
+				h.Log.Warn("agent-runner: task lease checkpoint failed",
+					"conversation_id", trigger.ConversationID, "task_id", trigger.TaskID, "error", err)
+				cancelRun()
+			}
+		}
 	}
 
 	result, runErr := h.Executor.Run(runCtx, *cfg, trigger, resume, onEvent, onReady)
+	if taskLease != nil {
+		stopTaskLeaseRenewal()
+		finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		if runErr == nil && len(leaseControlFailed) == 0 {
+			if err := taskLease.Complete(finalizeCtx, "Agent Runner completed the assigned task execution."); err != nil {
+				runErr = fmt.Errorf("finalize task execution lease: %w", err)
+			} else {
+				leaseFinalized = true
+			}
+		} else {
+			errorCode := "AGENT_RUNNER_EXECUTION_FAILED"
+			summary := "Agent Runner failed while executing the assigned task."
+			if len(leaseControlFailed) > 0 {
+				errorCode = "AGENT_TASK_LEASE_CONTROL_FAILED"
+				summary = "Agent Runner stopped because its task execution lease could not be maintained."
+			} else if errors.Is(runErr, context.Canceled) {
+				errorCode = "AGENT_RUNNER_INTERRUPTED"
+				summary = "Agent Runner was interrupted while executing the assigned task."
+			}
+			if err := taskLease.Fail(finalizeCtx, errorCode, summary); err != nil {
+				h.Log.Warn("agent-runner: failed to finalize task lease as failed",
+					"conversation_id", trigger.ConversationID, "task_id", trigger.TaskID, "error", err)
+			} else {
+				leaseFinalized = true
+			}
+		}
+		cancel()
+	}
 	// Whatever's still buffered when the turn ends — successfully,
 	// interrupted, or failed — is a genuine partial reply, not scratch
 	// state to discard; flush it unconditionally before any of the

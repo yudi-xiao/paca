@@ -82,7 +82,7 @@ func (client *Client) ExecuteCapability(
 	)
 }
 
-func (client *Client) DiscoverTasks(ctx context.Context) (json.RawMessage, error) {
+func (client *Client) discoverTasks(ctx context.Context) (json.RawMessage, error) {
 	return client.agentRequest(
 		ctx,
 		http.MethodGet,

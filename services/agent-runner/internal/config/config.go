@@ -40,6 +40,7 @@ type Settings struct {
 	AgentHarnessVersion    string
 	AgentHarnessInstanceID string
 	AgentHeartbeatInterval time.Duration
+	AgentTaskLeaseDuration time.Duration
 
 	// PortPoolStart/PortPoolSize size the local-dev host-port pool (see
 	// internal/sandbox/docker.Manager).
@@ -177,6 +178,7 @@ func Load() (Settings, error) {
 		AgentHarnessVersion:             os.Getenv("PACA_AGENT_HARNESS_VERSION"),
 		AgentHarnessInstanceID:          os.Getenv("PACA_AGENT_HARNESS_INSTANCE_ID"),
 		AgentHeartbeatInterval:          time.Duration(envInt("PACA_AGENT_HEARTBEAT_SECONDS", 30)) * time.Second,
+		AgentTaskLeaseDuration:          time.Duration(envInt("PACA_AGENT_TASK_LEASE_SECONDS", 60)) * time.Second,
 		PortPoolStart:                   envInt("PORT_POOL_START", 10000),
 		PortPoolSize:                    envInt("PORT_POOL_SIZE", 100),
 		WorkerConcurrency:               envInt("WORKER_CONCURRENCY", 5),
@@ -243,13 +245,18 @@ func Load() (Settings, error) {
 		default:
 			return Settings{}, fmt.Errorf("config: PACA_AGENT_HARNESS_KIND is invalid")
 		}
-		if raw := os.Getenv("PACA_AGENT_HEARTBEAT_SECONDS"); raw != "" {
-			if _, err := strconv.Atoi(raw); err != nil {
-				return Settings{}, fmt.Errorf("config: PACA_AGENT_HEARTBEAT_SECONDS must be an integer")
+		for _, name := range []string{"PACA_AGENT_HEARTBEAT_SECONDS", "PACA_AGENT_TASK_LEASE_SECONDS"} {
+			if raw := os.Getenv(name); raw != "" {
+				if _, err := strconv.Atoi(raw); err != nil {
+					return Settings{}, fmt.Errorf("config: %s must be an integer", name)
+				}
 			}
 		}
 		if s.AgentHeartbeatInterval < 10*time.Second || s.AgentHeartbeatInterval > 60*time.Second {
 			return Settings{}, fmt.Errorf("config: PACA_AGENT_HEARTBEAT_SECONDS must be between 10 and 60")
+		}
+		if s.AgentTaskLeaseDuration < 10*time.Second || s.AgentTaskLeaseDuration > 5*time.Minute {
+			return Settings{}, fmt.Errorf("config: PACA_AGENT_TASK_LEASE_SECONDS must be between 10 and 300")
 		}
 	}
 

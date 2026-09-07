@@ -70,6 +70,7 @@ func run(log *slog.Logger) error {
 
 	var agentAuthClient *agentauth.Client
 	var agentHeartbeat agentauth.HeartbeatReport
+	var taskLeases agentauth.TaskLeaseCoordinator
 	if settings.AgentAuthConfigPath != "" {
 		identity, err := agentauth.LoadConfig(settings.AgentAuthConfigPath)
 		if err != nil {
@@ -89,6 +90,17 @@ func run(log *slog.Logger) error {
 		}, []string{"task:execute"})
 		if err != nil {
 			return fmt.Errorf("main: create Agent Auth heartbeat: %w", err)
+		}
+		taskLeases, err = agentauth.NewTaskLeaseCoordinator(
+			agentAuthClient,
+			identity.AgentID,
+			identity.HostID,
+			agentHeartbeat.Harnesses[0],
+			agentHeartbeat,
+			settings.AgentTaskLeaseDuration,
+		)
+		if err != nil {
+			return fmt.Errorf("main: create Agent Auth task lease coordinator: %w", err)
 		}
 	}
 
@@ -157,6 +169,7 @@ func run(log *slog.Logger) error {
 		ACPDispatcher:   acpDispatcher,
 		ACPRegistry:     acpRegistry,
 		EnvironmentRepo: envRepo,
+		TaskLeases:      taskLeases,
 		Log:             log,
 	}
 

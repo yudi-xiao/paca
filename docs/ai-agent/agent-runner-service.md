@@ -186,6 +186,14 @@ consumption and all required MCP business tools have been switched to Project-sc
 execution. The heartbeat does not grant access by itself; the Worker intersects reported labels with
 administrator-approved Host labels and rechecks active Grants and constraints.
 
+For a `task_assigned` trigger whose legacy Agent UUID equals the configured Agent Auth identity,
+the runner now discovers the task through `GET /api/v1/agent/tasks/claimable` and refuses to start
+the sandbox unless the Worker returns the exact Project/Task under an active `task.execute` Grant.
+It claims or resumes only its own matching Harness lease, renews it at half the configured lease
+duration, records checkpoint 1 when the sandbox is ready, and submits a bounded `complete` or
+`fail` result. A failed renewal or checkpoint cancels the running turn. Other Agent IDs continue on
+the legacy path during the rollout; one identity cannot accidentally claim another Agent's trigger.
+
 | Variable | Required | Description |
 |---|---|---|
 | `VALKEY_URL` | ✅ | e.g. `redis://valkey:6379/0` |
@@ -198,6 +206,7 @@ administrator-approved Host labels and rechecks active Grants and constraints.
 | `PACA_AGENT_HARNESS_KIND` | when `PACA_AGENT_CONFIG` is set | Execution implementation: `cloudflare-agent`, `codex`, `claude-code`, `deepseek`, or `custom`. Default: `custom`. |
 | `PACA_AGENT_HARNESS_VERSION` / `PACA_AGENT_HARNESS_INSTANCE_ID` | | Optional public runtime metadata included in the heartbeat. |
 | `PACA_AGENT_HEARTBEAT_SECONDS` | | Heartbeat interval from 10 through 60 seconds. Default: `30`. |
+| `PACA_AGENT_TASK_LEASE_SECONDS` | | `task.execute` lease duration from 10 through 300 seconds; renewed halfway through. Default: `60`. |
 | `PACA_API_KEY` | | Credential for the built-in Paca MCP server; omit to disable it entirely |
 | `PACA_API_URL` / `PACA_GATEWAY_URL` | | Internal URLs the Paca MCP server calls out to |
 | `PORT_POOL_START` / `PORT_POOL_SIZE` | | Container port pool. Default: `10000` / `100` |
