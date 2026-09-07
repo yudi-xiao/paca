@@ -155,6 +155,13 @@
       "when": 1788323349863,
       "tag": "0021_neat_dagger",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788766399994,
+      "tag": "0022_fine_molten_man",
+      "breakpoints": true
     }
   ]
 }

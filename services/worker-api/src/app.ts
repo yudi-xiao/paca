@@ -73,6 +73,12 @@ import {
   type ViewTaskPosition,
 } from "./iteration/service";
 import { matchUnmigratedApi } from "./migration/manifest";
+import { type NotificationRuntime, notificationRuntime } from "./notification/runtime";
+import {
+  type Notification,
+  NotificationError,
+  notificationErrorCodes,
+} from "./notification/service";
 import {
   type OrganizationAccessRuntime,
   organizationAccessRuntime,
@@ -172,6 +178,7 @@ type AppDependencies = {
   documents: DocumentRuntime;
   loadSystemPermissions: LoadSystemPermissions;
   log: (event: LogEvent) => void;
+  notifications: NotificationRuntime;
   organizationAccess: OrganizationAccessRuntime;
   projects: ProjectRuntime;
   projectAccess: ProjectAccessRuntime;
@@ -314,6 +321,11 @@ const taskListQuerySchema = z.object({
 
 const assignedTaskListQuerySchema = z.object({
   page_size: z.coerce.number().int().positive().max(100).default(10),
+  cursor: z.string().max(2_048).optional(),
+});
+
+const notificationListQuerySchema = z.object({
+  page_size: z.coerce.number().int().positive().max(50).default(20),
   cursor: z.string().max(2_048).optional(),
 });
 
@@ -724,6 +736,39 @@ function taskPositionResponse(position: ViewTaskPosition) {
     position: position.position,
     group_key: position.groupKey,
   };
+}
+
+function notificationResponse(notification: Notification) {
+  return {
+    id: notification.id,
+    type: notification.type,
+    actor_full_name: notification.actorFullName,
+    actor_username: notification.actorUsername,
+    actor_avatar_url: notification.actorAvatarUrl,
+    actor_avatar_thumb_url: notification.actorAvatarUrl,
+    actor_member_type: notification.actorMemberType,
+    actor_agent_type: notification.actorAgentType,
+    actor_agent_llm_provider: notification.actorAgentLlmProvider,
+    actor_agent_acp_provider: notification.actorAgentAcpProvider,
+    task_id: notification.taskId,
+    task_title: notification.taskTitle,
+    task_number: notification.taskNumber,
+    project_id: notification.projectId,
+    project_name: notification.projectName,
+    read_at: notification.readAt?.toISOString() ?? null,
+    created_at: notification.createdAt.toISOString(),
+  };
+}
+
+function notificationFailure(context: AppContext, error: unknown) {
+  if (!(error instanceof NotificationError)) throw error;
+  switch (error.code) {
+    case notificationErrorCodes.cursorInvalid:
+    case notificationErrorCodes.pageSizeInvalid:
+      return legacyFailure(context, 400, error.code, error.message);
+    case notificationErrorCodes.notFound:
+      return legacyFailure(context, 404, error.code, error.message);
+  }
 }
 
 function iterationFailure(context: AppContext, error: unknown) {
@@ -1261,6 +1306,7 @@ const defaultDependencies: AppDependencies = {
     }
     console.log(serialized);
   },
+  notifications: notificationRuntime,
   organizationAccess: organizationAccessRuntime,
   projects: projectRuntime,
   projectAccess: projectAccessRuntime,
@@ -3805,14 +3851,81 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
       }
     },
   );
-  app.get("/api/v1/users/me/notifications", (context) =>
-    authenticatedPreviewResponse(context, dependencies.currentUserSession, {
-      items: [],
-      page_size: 20,
-      next_cursor: null,
-      unread_count: 0,
-    }),
-  );
+  app.get("/api/v1/users/me/notifications", async (context) => {
+    context.header("cache-control", "no-store");
+    const session = await dependencies.currentUserSession(context.req.raw, context.env);
+    if (!session) {
+      return context.json(
+        {
+          success: false as const,
+          error_code: "AUTH_UNAUTHENTICATED",
+          error: "Authentication required",
+          request_id: context.get("requestId"),
+        },
+        401,
+      );
+    }
+    const parsed = notificationListQuerySchema.safeParse(context.req.query());
+    if (!parsed.success) {
+      return legacyFailure(context, 400, "NOTIFICATION_PAGE_SIZE_INVALID", "Invalid pagination");
+    }
+    try {
+      const result = await dependencies.notifications.list(context.env, session.user.id, {
+        pageSize: parsed.data.page_size,
+        cursor: parsed.data.cursor,
+      });
+      return legacySuccess(context, {
+        items: result.items.map(notificationResponse),
+        page_size: result.pageSize,
+        next_cursor: result.nextCursor,
+        unread_count: result.unreadCount,
+      });
+    } catch (error) {
+      return notificationFailure(context, error);
+    }
+  });
+  app.patch("/api/v1/users/me/notifications/:notificationId/read", async (context) => {
+    context.header("cache-control", "no-store");
+    const session = await dependencies.currentUserSession(context.req.raw, context.env);
+    if (!session) {
+      return context.json(
+        {
+          success: false as const,
+          error_code: "AUTH_UNAUTHENTICATED",
+          error: "Authentication required",
+          request_id: context.get("requestId"),
+        },
+        401,
+      );
+    }
+    const notificationId = context.req.param("notificationId");
+    if (!z.uuid().safeParse(notificationId).success) {
+      return legacyFailure(context, 400, "BAD_REQUEST", "Invalid notification id");
+    }
+    try {
+      await dependencies.notifications.markAsRead(context.env, session.user.id, notificationId);
+      return context.body(null, 204);
+    } catch (error) {
+      return notificationFailure(context, error);
+    }
+  });
+  app.post("/api/v1/users/me/notifications/read-all", async (context) => {
+    context.header("cache-control", "no-store");
+    const session = await dependencies.currentUserSession(context.req.raw, context.env);
+    if (!session) {
+      return context.json(
+        {
+          success: false as const,
+          error_code: "AUTH_UNAUTHENTICATED",
+          error: "Authentication required",
+          request_id: context.get("requestId"),
+        },
+        401,
+      );
+    }
+    await dependencies.notifications.markAllAsRead(context.env, session.user.id);
+    return context.body(null, 204);
+  });
   app.get("/api/v1/plugins", (context) =>
     authenticatedPreviewResponse(context, dependencies.currentUserSession, []),
   );

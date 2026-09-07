@@ -102,7 +102,6 @@ function AuthenticatedLayout() {
 
 	useEffect(() => {
 		if (!user) return;
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") return;
 
 		const socket = connectSocket(user.id);
 

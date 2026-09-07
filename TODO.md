@@ -15,7 +15,7 @@
 
 更新时间：2026-09-07
 
-当前里程碑：**M10 的 Project Agent 只读目录已从 internal preview 重定向切换为 Better Auth Agent Auth 项目投影，并部署为 internal Worker `58536bb3-3e5f-4b7a-99a0-a1bfee6b2bc4`。目录以 `agent`/`agent_host` 为唯一身份，以精确 Project Capability Grant 历史建立可见关联，只返回脱敏 capability、有效期、Host presence 与 Harness 种类；过期、撤销和待审批 Grant 不会被误判为 active 授权。真实 internal PostgreSQL smoke 与真实账号远端 Session 均返回 Demo 项目的 5 个关联 Agent、0 active、0 pending、5 inactive；最终版本已复验健康检查、项目 Agent SPA、未登录 401，以及未迁移 POST/详情的稳定 501。质量门为 Worker 60 个文件/304 项、Workers Runtime 4 个文件/22 项、Web 60 个文件/631 项测试，以及构建、类型、Biome、Drizzle 和 dry-run。安全回滚点为上一已验收 Worker `a06616b6-94fb-4965-972f-31841be7ebb2`；本切片没有 schema 变更。**
+当前里程碑：**M10 的 Notification 已从空投影迁移为 Worker 原生纵向切片，并部署为 internal Worker `8a375061-0b89-4883-ba91-9f4276700432`。`paca/internal` 已应用 additive migration `0022_fine_molten_man.sql`：任务新增负责人和新建结构化 `teamMention` 评论会在业务事务内写入 owner-scoped 通知与 `notification.created` realtime outbox；列表只向仍属于对应项目的接收人返回内容，已读与全部已读仅接受可信 Better Auth Session 用户。隔离 PostgreSQL smoke 已通过通知创建、未读、单条/全部已读、outbox 和清理；真实账号远端 Session 已通过列表 200、非法游标 400、不可见通知 404、空未读 read-all 204、登出，并确认匿名 401/no-store。质量门为 Worker 62 个文件/313 项、Workers Runtime 4 个文件/22 项、Web 60 个文件/631 项测试，以及 production build、类型、Biome、Drizzle 和 dry-run。安全回滚点为上一已验收 Worker `58536bb3-3e5f-4b7a-99a0-a1bfee6b2bc4`；新增表不妨碍旧版本读取既有数据。**
 
 已确认前置条件：
 
@@ -30,11 +30,11 @@
 - [x] 已使用管理页生成的一次性 token 将本机 `Mac codex agent` 注册为 active delegated Agent Host；Host 使用设备本地 Ed25519 身份，私钥仅保存于被 Git 忽略且权限为 `0600` 的 `.paca/agent-host.json`，token 未落盘。该状态只代表 Host 身份已建立，尚未注册 Agent、完成 device approval、取得 Capability Grant 或接入 legacy Agent Runner。
 - [x] 已创建隔离的 PlanetScale PostgreSQL `paca/internal` development branch；确认初始 `public` schema 为 0 张业务表。
 - [x] 用户确认当前环境尚未上线，授权首个 internal 认证预览直接使用原 `paca/main` Hyperdrive；此例外不代表生产架构决策。
-- [x] internal 已退出原 Hyperdrive 的宽权限 role：新建无继承管理角色的 `paca-worker-internal`，现仅显式授予 43 张 runtime 业务表 CRUD，验证其能读取业务表且不能读取 migration ledger；独立 Hyperdrive 已创建并接收 internal 流量。根/main Hyperdrive 仅保留为独立环境与 Wrangler 版本回滚路径。
-- [x] 已固化 runtime role 的显式 41 表 CRUD GRANT 与验权 SQL；目标最小权限 role 无 DDL 和 migration ledger/附件迁移账本权限，PlanetScale 授权时使用去掉路由后缀的真实 role 名。现有宽权限 role 的验权会按预期失败，不能作为生产验收结果。
+- [x] internal 已退出原 Hyperdrive 的宽权限 role：新建无继承管理角色的 `paca-worker-internal`，现仅显式授予 44 张 runtime 业务表 CRUD，验证其能读取业务表且不能读取 migration ledger；独立 Hyperdrive 已创建并接收 internal 流量。根/main Hyperdrive 仅保留为独立环境与 Wrangler 版本回滚路径。
+- [x] 已固化 runtime role 的显式 44 表 CRUD GRANT 与验权 SQL；目标最小权限 role 无 DDL 和 migration ledger/附件迁移账本权限，PlanetScale 授权时使用去掉路由后缀的真实 role 名。现有宽权限 role 的验权会按预期失败，不能作为生产验收结果。
 - [x] `deploy:internal` 强制拒绝与根环境相同的 Hyperdrive；首轮 main 预览例外已移除，不能再通过环境变量绕过隔离守卫。
 - [x] 已创建 `paca-attachments-development`、`paca-attachments-internal` 与 `paca-attachments-production` 三个隔离 R2 bucket；根/internal Wrangler binding 已分别指向 development/internal，部署守卫会同时拒绝数据库和附件 bucket 环境混用。production binding 待生产环境配置时接入。
-- [x] 已实现并实际执行受确认串保护的 `database:provision:internal`：检查 main/internal migration ledger、拒绝分叉目标、以单事务和 `ON CONFLICT DO NOTHING` 初始复制、核对应用表行数与业务表指纹、应用/验证最小权限 role 并创建或更新独立 Hyperdrive；当前清单为 43 张 runtime 表。脚本不输出密码，临时 admin role 15 分钟自动过期；2026-08-31 已完成获批的数据复制与 runtime role 凭据轮换，Task 自引用外键在提交前恢复为 `NOT DEFERRABLE`。
+- [x] 已实现并实际执行受确认串保护的 `database:provision:internal`：检查 main/internal migration ledger、拒绝分叉目标、以单事务和 `ON CONFLICT DO NOTHING` 初始复制、核对应用表行数与业务表指纹、应用/验证最小权限 role 并创建或更新独立 Hyperdrive；当前清单为 44 张 runtime 表。脚本不输出密码，临时 admin role 15 分钟自动过期；2026-08-31 已完成获批的数据复制与 runtime role 凭据轮换，Task 自引用外键在提交前恢复为 `NOT DEFERRABLE`。
 - [x] internal 数据隔离版本 `9ec5c792-3d28-4a5b-8f90-73c9e2a39613` 已部署到 `paca.howlearnwood.com`：Wrangler dry-run/部署输出均确认独立 Hyperdrive 与 `paca-attachments-internal` binding；公开 health 返回 `environment=internal`，真实账号 API 验证完成登录、Session、Demo 项目、12 个任务、登出和旧 Cookie 撤销。
 - [x] 已用只读查询确认此前因 `pscale sql` 间歇性 `EOF` 中断的事务未留下部分 DDL；随后改用 `pscale shell` + `psql` 在单事务中成功应用首版 migration。
 - [x] `paca/internal` 已生成 13 张表，`paca_schema_migration` 中的 migration ID 与 snapshot checksum 均已核验。
@@ -57,6 +57,7 @@
 - [x] 0016/0017 文档投影与 Yjs 快照元数据 migration 已在 `paca/internal` 分别以独立事务应用：新增 `paca_document`、项目实时 outbox trigger、`content_version`、`yjs_revision`、R2 key/SHA-256/字节数/时间元数据和非负约束；两个 ledger checksum、16 列、trigger 与 runtime role 的第 39 张表 CRUD 均已核验。`paca/main` 仍停在 0014，本轮只部署 internal。
 - [x] 0018 Agent Task Lease migration 已在 `paca/internal` 以单事务应用：新增 `paca_agent_task_lease` 与追加式 event 表，ledger checksum 为 `6017b070be9add98482a614f230c7f3ce853263595ffbb4697c792fb1f72bc5c`；临时 migration role 的对象已通过 PlanetScale 官方 reassign 移交给 `postgres`，随后删除，runtime role 的 41 表 CRUD 与无 DDL/ledger 权限边界均已核验。`paca/main` 仍停在 0014。
 - [x] 0019–0021 Harness 调度与恢复 migrations 已在 `paca/internal` 通过受确认串保护的 `db:migrate:internal` 应用：新增 Host runtime/Task requirement 两表，既有 active Host 仅种子审批 `task:execute`；lease event 增加可信 actor 与 `cancel_request`/`expire` 动作。三项 ledger checksum、43 表 runtime CRUD、无 DDL/ledger 权限和临时 role reassign/delete 均已核验。`paca/main` 仍停在 0014。
+- [x] 0022 Notification migration 已在 `paca/internal` 通过同一受控流程应用：新增 owner-scoped 通知表、可信 user/agent actor、Task/Project/Activity 外键、来源幂等键与读取索引；runtime role 已扩为 44 表 CRUD 且仍无 DDL/ledger 权限。隔离数据库 smoke 已验证分配通知、未读、单条/全部已读、realtime outbox 与测试数据清理；`paca/main` 仍停在 0014。
 - [x] Better Auth + React Static Assets 的规范入口已固定为 `paca.howlearnwood.com`；Wrangler internal 环境将 Better Auth URL/可信 Origin 仅绑定到该自定义域名。`workers.dev` 仅保留为诊断/回滚入口，不属于认证可信 Origin。验收版本 `783cbcf7-1d29-41d0-9ae2-afde028af068` 已验证根页面、SPA fallback、public health、API 404 与 Origin 拒绝边界。
 - [x] 远端烟测已通过 public health、Hyperdrive database health、注册/登录、Session、`GET /api/me`、登出和旧 Cookie 服务端撤销；本地一次性 Secret 与测试凭据已清理。
 - [x] React Web 已通过同一 Worker origin 提供；浏览器已验证登录页渲染，远端全链路已验证注册、Session、空工作区读取、登出和会话撤销。
@@ -122,7 +123,7 @@
 - [x] 首先在 `paca/internal` 空 development branch 验证 migration；随后因环境尚未上线且用户明确授权，将同一 migration 应用于 `paca/main` 作为首版内部预览目标。
 - [x] 建立 PostgreSQL Drizzle schema 目录和 `drizzle.config.ts`。
 - [x] `drizzle.config.ts` 仅从本地/CI `DATABASE_URL` 读取直接连接串，不使用 Hyperdrive runtime URL。
-- [x] migration 使用临时 admin role；internal runtime 已切换到持久、无继承管理角色且仅显式 38 表 CRUD 的 `paca-worker-internal` role 与独立 Hyperdrive，migration ledger 不授予 runtime。
+- [x] migration 使用临时 admin role；internal runtime 已切换到持久、无继承管理角色且仅显式 44 表 CRUD 的 `paca-worker-internal` role 与独立 Hyperdrive，migration ledger 不授予 runtime。
 - [x] 生成第一版 Better Auth Core/Organization + Paca Project Permission SQL migration，并人工审查 UUID、索引、复合外键、默认值和 migration ledger。
 - [ ] 建立 migration dry-run/测试数据库流程，禁止生产启动时自动 `push` 或自动迁移。
 - [ ] 建立 PostgreSQL repository contract test 基础设施。
@@ -278,6 +279,8 @@
 
 本切片已完成：internal preview 的 Project Agent 页面已恢复为 Better Auth Agent Auth 项目目录；不新增 schema，数据库无兼容窗口。写入、会话和旧 Runner 配置继续保持关闭。
 
+本切片已完成：Notification 已由空投影替换为 PostgreSQL repository、任务/评论事务生产者和 Queue→UserParty 可靠推送；`0022` 为 additive migration。
+
 - [x] 按领域模块建立 Go API → Hono Worker 的迁移清单和依赖图。`docs/cloudflare-api-migration.md` 记录领域权威、状态、依赖和准入门槛；`services/worker-api/src/migration/manifest.ts` 提供机器可检查的未迁移路由边界。
 - [ ] 优先迁移认证、只读查询和边界清晰的新功能，再迁移复杂事务模块。
 - [ ] 每个迁移模块运行新旧 API contract tests 和数据一致性验证。
@@ -286,6 +289,7 @@
 - [x] 迁移初期曾为首页读取请求提供受 Session 保护的只读空工作区投影；该临时桥接现已由真实查询替换。
 - [x] 将首页“我的工作项”迁移到 Worker：按可信 Session 用户匹配项目成员与负责人，批量复用 `pacaPermission` 的 Project 权限语义，在分页/计数前剔除无 `tasks.read` 权限的项目，排除完成/删除任务，并实现用户绑定的稳定游标。领域、HTTP、真实 internal PostgreSQL smoke、完整质量门和 internal 部署均已通过。
 - [x] 将 Project Agent 只读目录迁移到 Worker：以 Better Auth `agent`/`agent_host` 为唯一身份，以精确 Project Capability Grant 历史为关联来源，并单独计算当前 active/pending/inactive 授权状态；返回脱敏 capability/expiry 摘要并恢复 internal preview 项目 Agent 页面，不复活 legacy Agent CRUD/Conversation。领域/HTTP 测试、真实 internal PostgreSQL smoke、真实账号远端 Session、SPA 深链、未登录 401 和 legacy 501 边界均已通过。
+- [x] 将 Notification 迁移到 Worker：owner-scoped PostgreSQL repository、任务负责人/结构化评论 mention 事务生产者、可靠 realtime outbox、Queue→UserParty 推送与 Session 限定的 list/read/read-all 已实现；完整质量门、真实数据库 smoke、internal 部署和真实账号远端 API 验收均已通过。
 - [x] 将项目基础 API 从空投影替换为真实 PostgreSQL repository：列表、统计、创建、读取、更新、归档均由 Organization/Project 权限边界保护；internal preview 项目页只展示该切片能保证的数据。
 - [x] 将项目角色与人类成员 API 迁移到 Worker：角色和成员变更由 Project 权限边界、服务端 grant ceiling、数据库约束与同事务保护共同执行；Team/Settings 仅开放已迁移能力，Agent 成员等待 Agent Auth。
 - [x] 将 Organization 动态角色与成员角色分配 API 迁移到 Worker：成员生命周期不另建第二套表，Paca 角色可多选，权限上限、大小写无关唯一约束、内置角色和最后一名 OWNER 在服务端与事务边界内保护；internal preview 仅开放真实可用的组织权限页面。

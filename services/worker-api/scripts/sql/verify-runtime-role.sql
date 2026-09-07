@@ -42,6 +42,7 @@ WITH application_tables(table_name) AS (
     ('paca_task'),
     ('paca_task_assignee'),
     ('paca_task_activity'),
+    ('paca_notification'),
     ('paca_task_link'),
     ('paca_file'),
     ('paca_task_attachment'),

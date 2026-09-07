@@ -44,6 +44,8 @@ const agentTaskCancelMigrationURL = new URL(
 const agentTaskCancelSnapshotURL = new URL("../drizzle/meta/0020_snapshot.json", import.meta.url);
 const agentTaskRecoveryMigrationURL = new URL("../drizzle/0021_neat_dagger.sql", import.meta.url);
 const agentTaskRecoverySnapshotURL = new URL("../drizzle/meta/0021_snapshot.json", import.meta.url);
+const notificationMigrationURL = new URL("../drizzle/0022_fine_molten_man.sql", import.meta.url);
+const notificationSnapshotURL = new URL("../drizzle/meta/0022_snapshot.json", import.meta.url);
 
 const applicationTables = [
   "user",
@@ -74,6 +76,7 @@ const applicationTables = [
   "paca_task",
   "paca_task_assignee",
   "paca_task_activity",
+  "paca_notification",
   "paca_task_link",
   "paca_document",
   "paca_agent_host_runtime",
@@ -303,6 +306,22 @@ describe("reviewed permission migration", () => {
     expect(migration.trimEnd()).toMatch(/COMMIT;$/);
     expect(migration).toContain(`VALUES ('0021_neat_dagger', '${checksum}')`);
     expect(migration).toContain("'expire'");
+  });
+
+  it("adds the Better Auth user notification projection transactionally", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(notificationMigrationURL, "utf8"),
+      readFile(notificationSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0022_fine_molten_man', '${checksum}')`);
+    expect(migration).toContain('CREATE TABLE "paca_notification"');
+    expect(migration).toContain('"recipient_user_id" text NOT NULL');
+    expect(migration).toContain('"source_activity_id" uuid NOT NULL');
+    expect(migration).toContain("paca_notification_source_recipient_type_uidx");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

@@ -13,7 +13,12 @@ const runtimeRoleName =
 const postgresBin = process.env.PACA_POSTGRES_BIN?.trim();
 const psql = postgresBin ? resolve(postgresBin, "psql") : "psql";
 const workerDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const migrations = ["0019_volatile_hydra", "0020_pale_the_santerians", "0021_neat_dagger"] as const;
+const migrations = [
+  "0019_volatile_hydra",
+  "0020_pale_the_santerians",
+  "0021_neat_dagger",
+  "0022_fine_molten_man",
+] as const;
 
 type RolePayload = {
   id?: unknown;

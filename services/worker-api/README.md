@@ -45,9 +45,11 @@ Organization roles/member-role assignments, and the Task foundation/detail/activ
 use the real PostgreSQL repository and Paca Permission boundary. Tasks include type/status reads,
 list, search, create, detail update, status change, soft delete, parent/child hierarchy, typed
 task links, trusted activity history, and author-owned comments. Better Auth remains the
-sole owner of Organization member join/remove lifecycle. Assigned-task aggregation,
-notifications, Agent counts, branding, and the plugin registry remain explicit empty/read-only
-projections until their domains move to the Worker.
+sole owner of Organization member join/remove lifecycle. Assigned-task aggregation and
+notifications are Worker-native. Task assignment and structured `teamMention` comments create
+owner-scoped notifications and reliable UserParty events in the same PostgreSQL transaction.
+Agent counts, branding, and the plugin registry remain explicit empty/read-only projections until
+their domains move to the Worker.
 
 ## Database environments and migrations
 
@@ -60,7 +62,7 @@ projections until their domains move to the Worker.
   production traffic, create a least-privilege runtime role, connect it through a separate
   Hyperdrive, and replace only the `env.internal` binding ID.
 - The runtime role must not inherit `postgres`, `pg_read_all_data`, or `pg_write_all_data`.
-  `scripts/sql/grant-runtime-role.sql` grants explicit CRUD on the 43 application tables while
+  `scripts/sql/grant-runtime-role.sql` grants explicit CRUD on the 44 application tables while
   denying schema creation and access to the schema and attachment-migration ledgers;
   `verify-runtime-role.sql` checks
   that boundary. With PlanetScale, use the database role name before the routing-only
@@ -107,7 +109,7 @@ the existing main Hyperdrive remains the rollback path and the new runtime role 
 
 The current internal deployment completed this switch on 2026-08-31. Its dedicated Hyperdrive is
 backed by the `paca/internal` branch and a non-inheriting `paca-worker-internal` role with explicit
-CRUD grants on the 43 runtime business tables. The root/main Hyperdrive remains separate and is
+CRUD grants on the 44 runtime business tables. The root/main Hyperdrive remains separate and is
 not accepted by the internal deployment guard.
 
 Subsequent reviewed internal-only migrations use a separate confirmation gate and a 15-minute
@@ -166,10 +168,25 @@ to `paca/internal`; both checksums, the 16-column table, trigger and runtime-rol
 verified before deploying the DocumentParty slice. The additive schema remains compatible with
 the previous Worker version, which is the first rollback step if the document deployment fails.
 
+`0022_fine_molten_man.sql` adds the owner-scoped Notification projection, actor references,
+idempotent source-activity key and read/query indexes. It is applied only to `paca/internal`;
+the runtime role has explicit CRUD while migration-ledger and DDL access remain denied.
+
 `bun run smoke:task:database` performs a guarded direct-database Task repository smoke test and
 removes its temporary project before exit. It requires a currently valid root `DATABASE_URL`;
 the URL is tooling-only and is never read by the deployed Worker. The current credential needs
 to be refreshed before this smoke test can pass; Hyperdrive connectivity is tracked separately.
+
+`bun run smoke:notification:database` requires an explicit `PACA_SMOKE_DATABASE_URL`. It creates
+an isolated temporary Project and second member, exercises assignment notification creation,
+owner-scoped list/read/read-all and the reliable realtime outbox through the production
+repositories, then deletes the temporary Project and its outbox events.
+
+`bun run smoke:notification:internal` signs in with credentials supplied only through
+`PACA_NOTIFICATION_SMOKE_EMAIL` and `PACA_NOTIFICATION_SMOKE_PASSWORD`, validates anonymous 401,
+authenticated list shape, invalid-cursor 400 and owner-hidden 404, then signs out. It calls
+read-all only when the account already has zero unread notifications, so the smoke never clears
+real user state.
 
 ## Better Auth
 

@@ -3,6 +3,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import type { PacaDatabase } from "../database";
 import { agent, user } from "../db/schema";
 import { pacaProjectMembers, pacaTaskActivities, pacaTasks } from "../db/schema/paca";
+import { createMentionNotifications } from "../notification/postgres-write";
 import {
   type TaskActivity,
   TaskActivityError,
@@ -99,6 +100,13 @@ export class PostgresTaskActivityRepository implements TaskActivityRepository {
         actorAgentId: null,
         actorMemberId,
         activityType: "comment",
+        content,
+      });
+      await createMentionNotifications(transaction, {
+        projectId,
+        taskId,
+        sourceActivityId: id,
+        actor: { type: "user", id: actorUserId },
         content,
       });
     });

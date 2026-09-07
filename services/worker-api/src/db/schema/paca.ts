@@ -899,6 +899,55 @@ export const pacaTaskActivities = pgTable(
   ],
 );
 
+export const pacaNotifications = pgTable(
+  "paca_notification",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    recipientUserId: text("recipient_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    actorType: text("actor_type").notNull(),
+    actorUserId: text("actor_user_id").references(() => user.id, { onDelete: "set null" }),
+    actorAgentId: text("actor_agent_id").references(() => agent.id, { onDelete: "set null" }),
+    type: text("type").notNull(),
+    taskId: uuid("task_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    sourceActivityId: uuid("source_activity_id")
+      .notNull()
+      .references(() => pacaTaskActivities.id, { onDelete: "cascade" }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.taskId, table.projectId],
+      foreignColumns: [pacaTasks.id, pacaTasks.projectId],
+      name: "paca_notification_task_project_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("paca_notification_source_recipient_type_uidx").on(
+      table.sourceActivityId,
+      table.recipientUserId,
+      table.type,
+    ),
+    index("paca_notification_recipient_created_idx").on(
+      table.recipientUserId,
+      table.createdAt,
+      table.id,
+    ),
+    index("paca_notification_recipient_unread_idx")
+      .on(table.recipientUserId, table.createdAt)
+      .where(sql`${table.readAt} is null`),
+    index("paca_notification_project_created_idx").on(table.projectId, table.createdAt),
+    index("paca_notification_task_created_idx").on(table.taskId, table.createdAt),
+    check("paca_notification_type_check", sql`${table.type} in ('assigned', 'mentioned')`),
+    check("paca_notification_actor_type_check", sql`${table.actorType} in ('user', 'agent')`),
+    check(
+      "paca_notification_actor_identity_check",
+      sql`(${table.actorType} = 'user' and ${table.actorAgentId} is null) or (${table.actorType} = 'agent' and ${table.actorUserId} is null)`,
+    ),
+  ],
+);
+
 /**
  * Queryable document projection. The canonical collaborative Yjs state lives in
  * DocumentParty; `content` is the materialized BlockNote JSON view used by list,

@@ -33,6 +33,7 @@ import {
   pacaTaskViews,
   pacaViewTaskPositions,
 } from "../db/schema";
+import { createAssignmentNotifications } from "../notification/postgres-write";
 import {
   type NormalizedTaskListInput,
   type PersistedTaskCreate,
@@ -584,13 +585,21 @@ export class PostgresTaskRepository implements TaskRepository {
           })),
         );
       }
+      const activityId = crypto.randomUUID();
       await transaction.insert(pacaTaskActivities).values({
-        id: crypto.randomUUID(),
+        id: activityId,
         taskId: input.id,
         projectId: input.projectId,
         ...actor,
         activityType: "task.created",
         content: { title: input.title },
+      });
+      await createAssignmentNotifications(transaction, {
+        projectId: input.projectId,
+        taskId: input.id,
+        sourceActivityId: activityId,
+        actor: input.actor,
+        addedAssigneeMemberIds: input.assigneeIds,
       });
       return created;
     });
@@ -665,13 +674,25 @@ export class PostgresTaskRepository implements TaskRepository {
       }
       const changes = await this.buildFieldChanges(transaction, current, currentAssigneeIds, input);
       if (changes.length > 0) {
-        await this.recordActivity(transaction, {
+        const activityId = await this.recordActivity(transaction, {
           projectId,
           taskId,
           actor,
           activityType: "task.updated",
           content: { changes },
         });
+        if (input.assigneeIds !== undefined) {
+          const currentAssignees = new Set(currentAssigneeIds);
+          await createAssignmentNotifications(transaction, {
+            projectId,
+            taskId,
+            sourceActivityId: activityId,
+            actor,
+            addedAssigneeMemberIds: input.assigneeIds.filter(
+              (memberId) => !currentAssignees.has(memberId),
+            ),
+          });
+        }
       }
       return updated;
     });
@@ -794,16 +815,18 @@ export class PostgresTaskRepository implements TaskRepository {
       activityType: "task.updated" | "task.deleted";
       content: Record<string, unknown>;
     },
-  ): Promise<void> {
+  ): Promise<string> {
     const actor = await this.activityActorValues(database, input.projectId, input.actor);
+    const activityId = crypto.randomUUID();
     await database.insert(pacaTaskActivities).values({
-      id: crypto.randomUUID(),
+      id: activityId,
       taskId: input.taskId,
       projectId: input.projectId,
       ...actor,
       activityType: input.activityType,
       content: input.content,
     });
+    return activityId;
   }
 
   private async activityActorValues(

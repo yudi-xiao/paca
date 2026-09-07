@@ -23,7 +23,7 @@
 | Agent Auth、Grant、Host、Task Harness | Worker / PostgreSQL + AgentDO | Worker 原生 | autonomous 总验收、旧 Runner 身份迁移 |
 | Project Agent 只读目录 | Worker / PostgreSQL | Worker 原生 | Agent Auth 身份与精确 Project Grant 历史；不返回 secret/完整 constraints |
 | Document Agent Workflow | Worker / Workflow + AgentDO + DocumentParty | Worker 原生 | 远端 Document E2E 与更多领域执行器 |
-| Notification | Worker 空投影 | Bridge | repository、UserParty 可靠推送与已读写入 |
+| Notification | Worker / PostgreSQL + Queue + UserParty | Worker 原生 | 分配任务与结构化 `teamMention` 评论在业务事务内写通知和 realtime outbox；列表按当前项目成员关系过滤，已读写入按可信 Session 用户隔离 |
 | Plugin 列表 | Worker 空投影 | Bridge | 插件运行时隔离、安装和权限模型 |
 | Legacy Paca Agent 写入、Conversation、Skill、Env Var、MCP Key | Go API | 容器保留 | 迁移到 Agent Auth 身份扩展、Conversation 协议与 Runner 身份切换；不得恢复平行 Agent 身份 |
 | Static Environment、Terminal、SSH、Port Forward | Go API + agent-runner | 容器保留 | `paca_project` scope adapter、`environment.connect` 执行器、版本化 Execution Gateway |

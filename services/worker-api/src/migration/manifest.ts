@@ -1,11 +1,6 @@
 export type ApiMigrationStatus = "worker-native" | "bridge" | "container-retained";
 
-export type ApiMigrationDomain =
-  | "agent-management"
-  | "automations"
-  | "environments"
-  | "notifications"
-  | "plugins";
+export type ApiMigrationDomain = "agent-management" | "automations" | "environments" | "plugins";
 
 export type ApiMigrationEntry = {
   domain: ApiMigrationDomain;
@@ -31,15 +26,6 @@ export type ApiMigrationEntry = {
  * identity bridge exists and has contract tests.
  */
 export const apiMigrationManifest = [
-  {
-    domain: "notifications",
-    status: "bridge",
-    authority: "worker-empty-projection",
-    dependsOn: ["Better Auth Session", "notification repository migration"],
-    owner: "worker",
-    rollback: "worker-version",
-    routePrefixes: ["/api/v1/users/me/notifications"],
-  },
   {
     domain: "plugins",
     status: "bridge",
