@@ -173,6 +173,19 @@ The three internal endpoints require `X-Internal-Token` matching `INTERNAL_API_K
 
 ## Environment Variables
 
+`PACA_AGENT_CONFIG` enables the Worker Agent Auth presence path. The file must be the delegated
+Agent's version-1 private config written with mode `0600`; it is not the Host enrollment token or
+the Host-only identity. At startup the runner validates the origin/endpoints and Ed25519 key pair,
+requires that the registration requested `task.execute`, signs a fresh 45-second Agent JWT, and
+performs a synchronous Host heartbeat. It then refreshes presence periodically. A pending, revoked,
+expired, replayed, or otherwise rejected identity therefore fails closed at the Worker boundary.
+
+This is an incremental migration boundary: the current Valkey conversation consumer and built-in
+MCP server still use the legacy path described above. Do not remove `PACA_API_KEY` until task lease
+consumption and all required MCP business tools have been switched to Project-scoped Capability
+execution. The heartbeat does not grant access by itself; the Worker intersects reported labels with
+administrator-approved Host labels and rechecks active Grants and constraints.
+
 | Variable | Required | Description |
 |---|---|---|
 | `VALKEY_URL` | ✅ | e.g. `redis://valkey:6379/0` |
@@ -181,6 +194,10 @@ The three internal endpoints require `X-Internal-Token` matching `INTERNAL_API_K
 | `AGENT_SERVER_IMAGE` | ✅ | Deliberately no hardcoded default — must be a digest- or tag-pinned reference to `services/agent-server/Dockerfile`, chosen deliberately |
 | `INTERNAL_API_KEY` | ✅ | Shared secret for `services/api`'s calls into the internal HTTP endpoints above; must equal `services/api`'s `AI_AGENT_INTERNAL_KEY` |
 | `AGENT_RUNNER_ALLOWED_AGENT_IDS` | ✅ | Comma-separated agent UUIDs, or `*` for every agent — see `config.Gate`'s doc comment |
+| `PACA_AGENT_CONFIG` | | Path to the delegated Agent's private `0600` config. Enables Agent Auth startup verification and Host presence heartbeats. |
+| `PACA_AGENT_HARNESS_KIND` | when `PACA_AGENT_CONFIG` is set | Execution implementation: `cloudflare-agent`, `codex`, `claude-code`, `deepseek`, or `custom`. Default: `custom`. |
+| `PACA_AGENT_HARNESS_VERSION` / `PACA_AGENT_HARNESS_INSTANCE_ID` | | Optional public runtime metadata included in the heartbeat. |
+| `PACA_AGENT_HEARTBEAT_SECONDS` | | Heartbeat interval from 10 through 60 seconds. Default: `30`. |
 | `PACA_API_KEY` | | Credential for the built-in Paca MCP server; omit to disable it entirely |
 | `PACA_API_URL` / `PACA_GATEWAY_URL` | | Internal URLs the Paca MCP server calls out to |
 | `PORT_POOL_START` / `PORT_POOL_SIZE` | | Container port pool. Default: `10000` / `100` |

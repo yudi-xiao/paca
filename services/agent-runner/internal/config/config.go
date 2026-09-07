@@ -30,6 +30,17 @@ type Settings struct {
 	PacaAPIURL     string
 	PacaGatewayURL string
 
+	// AgentAuthConfigPath opts this legacy conversation runner into the
+	// Worker Agent Auth control plane. It points to a delegated Agent's
+	// private 0600 identity config, not to a Host enrollment token. Presence
+	// is migrated first; task leasing and MCP capability execution remain
+	// separate cutover steps before PACA_API_KEY can be removed.
+	AgentAuthConfigPath    string
+	AgentHarnessKind       string
+	AgentHarnessVersion    string
+	AgentHarnessInstanceID string
+	AgentHeartbeatInterval time.Duration
+
 	// PortPoolStart/PortPoolSize size the local-dev host-port pool (see
 	// internal/sandbox/docker.Manager).
 	PortPoolStart int
@@ -161,6 +172,11 @@ func Load() (Settings, error) {
 		PacaAPIKey:                      os.Getenv("PACA_API_KEY"),
 		PacaAPIURL:                      os.Getenv("PACA_API_URL"),
 		PacaGatewayURL:                  os.Getenv("PACA_GATEWAY_URL"),
+		AgentAuthConfigPath:             os.Getenv("PACA_AGENT_CONFIG"),
+		AgentHarnessKind:                envOr("PACA_AGENT_HARNESS_KIND", "custom"),
+		AgentHarnessVersion:             os.Getenv("PACA_AGENT_HARNESS_VERSION"),
+		AgentHarnessInstanceID:          os.Getenv("PACA_AGENT_HARNESS_INSTANCE_ID"),
+		AgentHeartbeatInterval:          time.Duration(envInt("PACA_AGENT_HEARTBEAT_SECONDS", 30)) * time.Second,
 		PortPoolStart:                   envInt("PORT_POOL_START", 10000),
 		PortPoolSize:                    envInt("PORT_POOL_SIZE", 100),
 		WorkerConcurrency:               envInt("WORKER_CONCURRENCY", 5),
@@ -220,6 +236,21 @@ func Load() (Settings, error) {
 			"config: AGENT_RUNNER_ALLOWED_AGENT_IDS is required — set to a " +
 				"comma-separated list of agent UUIDs, or \"*\" to allow every agent " +
 				"(local dev / a fully cut-over deployment only)")
+	}
+	if s.AgentAuthConfigPath != "" {
+		switch s.AgentHarnessKind {
+		case "cloudflare-agent", "codex", "claude-code", "deepseek", "custom":
+		default:
+			return Settings{}, fmt.Errorf("config: PACA_AGENT_HARNESS_KIND is invalid")
+		}
+		if raw := os.Getenv("PACA_AGENT_HEARTBEAT_SECONDS"); raw != "" {
+			if _, err := strconv.Atoi(raw); err != nil {
+				return Settings{}, fmt.Errorf("config: PACA_AGENT_HEARTBEAT_SECONDS must be an integer")
+			}
+		}
+		if s.AgentHeartbeatInterval < 10*time.Second || s.AgentHeartbeatInterval > 60*time.Second {
+			return Settings{}, fmt.Errorf("config: PACA_AGENT_HEARTBEAT_SECONDS must be between 10 and 60")
+		}
 	}
 
 	switch s.SandboxBackend {

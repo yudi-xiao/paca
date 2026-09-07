@@ -215,7 +215,7 @@
 - [ ] Autonomous Agent 只依赖审批后仍 active 的 Grant 和 constraints。
 - [x] 重新验收 Agent Auth 专用审计持久化：internal 权威表复制前已有 24 条历史记录，覆盖 `agent.created`、`agent.revoked`、`host.created/enrolled`、`capability.approved/executed`；新 `paca-worker-internal` role 显式取得该表 CRUD。部署版本 `44d544c6-fbe2-482a-a75c-23fd56b2f592` 后，以现有 delegated Agent 为 Demo Project 临时授予十分钟 `project.read`、执行只读 Capability 并立即撤销；自定义撤销端点只有在同步等待 `capability.revoked` 审计 INSERT 成功后才返回 200，因此确认新 runtime role 的新鲜写入路径正常，随后 Agent status 仅显示 revoked、无 active Grant。可重复 `smoke:agent-audit:internal` 已纳入工程，失败路径也会尝试撤销；审计 INSERT 失败日志仅保留经过白名单校验的 PostgreSQL SQLSTATE、constraint/table 标识符，不记录连接串、SQL、密码、私钥或原始错误消息。任务 Activity 的可信 Agent actor 写入路径仍正常。
 - [x] 普通 Better Auth API Key 不作为 Agent Runner 身份；当前 Agent UI 和执行边界只调用 Agent Auth。
-- [ ] 将 `services/agent-runner` 从 legacy `PACA_API_KEY` 身份迁移到本机 Agent Host 配置，完成 delegated Agent 注册、device approval、短期 `host+jwt`/Agent JWT 轮换和 Project-scoped Capability 执行；完成前不得把 Host enrollment 宣称为 Runner 已接通。
+- [ ] 将 `services/agent-runner` 从 legacy `PACA_API_KEY` 身份迁移到本机 Agent Host 配置，完成 delegated Agent 注册、device approval、短期 `host+jwt`/Agent JWT 轮换和 Project-scoped Capability 执行；完成前不得把 Host enrollment 宣称为 Runner 已接通。Go Runner 已加入未部署的 Agent Auth 协议客户端与在线状态切片：严格读取 `0600` delegated Agent 配置并验证同源端点/Ed25519 密钥，每次请求生成唯一 `jti` 的 45 秒 Agent JWT，启动时同步验证 `task.execute` 心跳并按 10～60 秒周期上报 `cloudflare-agent`、Codex、Claude Code、DeepSeek 或 custom Harness。任务 lease 消费、MCP 业务工具 Capability 适配与 legacy key 删除仍未完成，因此本项继续保持未勾选。
 
 ### M5 验收
 

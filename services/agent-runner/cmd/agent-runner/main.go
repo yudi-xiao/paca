@@ -23,6 +23,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Paca-AI/agent-runner/internal/acpbridge"
+	"github.com/Paca-AI/agent-runner/internal/agentauth"
 	"github.com/Paca-AI/agent-runner/internal/bundledskills"
 	"github.com/Paca-AI/agent-runner/internal/chatsandbox"
 	"github.com/Paca-AI/agent-runner/internal/config"
@@ -65,6 +66,30 @@ func run(log *slog.Logger) error {
 	settings, err := config.Load()
 	if err != nil {
 		return err
+	}
+
+	var agentAuthClient *agentauth.Client
+	var agentHeartbeat agentauth.HeartbeatReport
+	if settings.AgentAuthConfigPath != "" {
+		identity, err := agentauth.LoadConfig(settings.AgentAuthConfigPath)
+		if err != nil {
+			return fmt.Errorf("main: load Agent Auth identity: %w", err)
+		}
+		if !identity.HasCapability(agentauth.TaskExecutionCapability) {
+			return fmt.Errorf("main: Agent Auth identity did not request task.execute")
+		}
+		agentAuthClient, err = agentauth.NewClient(identity, nil)
+		if err != nil {
+			return fmt.Errorf("main: create Agent Auth client: %w", err)
+		}
+		agentHeartbeat, err = agentauth.NewHeartbeatReport(agentauth.Harness{
+			Kind:       settings.AgentHarnessKind,
+			Version:    settings.AgentHarnessVersion,
+			InstanceID: settings.AgentHarnessInstanceID,
+		}, []string{"task:execute"})
+		if err != nil {
+			return fmt.Errorf("main: create Agent Auth heartbeat: %w", err)
+		}
 	}
 
 	db, err := postgres.Open(settings.DatabaseURL)
@@ -160,6 +185,19 @@ func run(log *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if agentAuthClient != nil {
+		if _, err := agentAuthClient.Heartbeat(ctx, agentHeartbeat); err != nil {
+			return fmt.Errorf("main: initial Agent Auth heartbeat: %w", err)
+		}
+		go agentAuthClient.RunHeartbeatLoop(
+			ctx,
+			settings.AgentHeartbeatInterval,
+			agentHeartbeat,
+			func(err error) {
+				log.Warn("agent-runner: Agent Auth heartbeat failed", "error", err)
+			},
+		)
+	}
 
 	log.Info("agent-runner: starting",
 		"image", settings.AgentServerImage,
@@ -168,6 +206,8 @@ func run(log *slog.Logger) error {
 		"chat_sandbox_idle_timeout", settings.ChatSandboxIdleTimeout,
 		"http_addr", settings.HTTPAddr,
 		"mcp_dev_source_dir", settings.MCPDevSourceDir,
+		"agent_auth_enabled", agentAuthClient != nil,
+		"agent_harness_kind", settings.AgentHarnessKind,
 	)
 	go reapIdleChatSandboxes(ctx, h, chatSandboxes, inFlight, settings.ChatSandboxIdleTimeout, log)
 	go reapIdleEnvironments(ctx, envRepo, sandboxBackend, log)
