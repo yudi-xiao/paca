@@ -15,6 +15,34 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
+function record(value: unknown): JsonRecord | null {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as JsonRecord)
+		: null;
+}
+
+function exactOrEqualConstraint(value: unknown): string | null {
+	const exact = exactConstraint(value);
+	if (exact) return exact;
+	const operator = record(value);
+	return operator && Object.keys(operator).length === 1
+		? exactConstraint(operator.eq)
+		: null;
+}
+
+function constraintAllows(value: unknown, requested: string): boolean {
+	if (exactConstraint(value) === requested) return true;
+	const operator = record(value);
+	if (!operator || Object.keys(operator).length !== 1) return false;
+	if (exactConstraint(operator.eq) === requested) return true;
+	return (
+		Array.isArray(operator.in) &&
+		operator.in.length <= 100 &&
+		operator.in.every((item) => typeof item === "string") &&
+		operator.in.includes(requested)
+	);
+}
+
 const scopeInput = z.object({ projectId: z.string().uuid() }).strict();
 const taskInput = scopeInput.extend({ taskId: z.string().uuid() }).strict();
 const createTaskInput = scopeInput
@@ -43,6 +71,70 @@ const updateTaskInput = taskInput
 		value: z.unknown(),
 	})
 	.strict();
+const documentInput = scopeInput
+	.extend({ documentId: z.string().uuid() })
+	.strict();
+const documentTextStyle = z
+	.object({
+		bold: z.boolean().optional(),
+		italic: z.boolean().optional(),
+		underline: z.boolean().optional(),
+		strike: z.boolean().optional(),
+		code: z.boolean().optional(),
+		textColor: z.string().min(1).max(100).optional(),
+		backgroundColor: z.string().min(1).max(100).optional(),
+	})
+	.strict();
+const documentInlineText = z
+	.object({
+		type: z.literal("text"),
+		text: z.string().max(100_000),
+		styles: documentTextStyle.optional(),
+	})
+	.strict();
+const editDocumentInput = documentInput
+	.extend({
+		requestId: z.string().uuid(),
+		runId: z.string().uuid(),
+		baseRevision: z.number().int().nonnegative().safe(),
+		baseStateVector: z
+			.string()
+			.min(1)
+			.max(400_000)
+			.regex(/^[A-Za-z0-9_-]+$/),
+		operationMode: z.enum(["suggest", "collaborate"]),
+		operations: z
+			.array(
+				z
+					.object({
+						type: z.literal("replace_block_content"),
+						blockId: z.string().min(1).max(255),
+						expectedBlockVersion: z
+							.string()
+							.min(1)
+							.max(400_000)
+							.regex(/^[A-Za-z0-9_-]+$/),
+						content: z.array(documentInlineText).max(500),
+					})
+					.strict(),
+			)
+			.min(1)
+			.max(10),
+	})
+	.strict()
+	.superRefine((value, context) => {
+		const blockIds = new Set<string>();
+		for (const [index, operation] of value.operations.entries()) {
+			if (blockIds.has(operation.blockId)) {
+				context.addIssue({
+					code: "custom",
+					message: "DOCUMENT_AGENT_DUPLICATE_BLOCK_TARGET",
+					path: ["operations", index, "blockId"],
+				});
+			}
+			blockIds.add(operation.blockId);
+		}
+	});
 
 function matchingGrant(
 	config: AgentAuthConfig,
@@ -72,10 +164,35 @@ function scopedGrant(
 	});
 }
 
+function documentGrant(
+	config: AgentAuthConfig,
+	capability: "document.read" | "document.edit",
+	projectId: string,
+	documentId: string,
+	input?: { field: string; action: string; operationMode: string },
+): AgentGrantRequest {
+	return matchingGrant(config, capability, (constraints) => {
+		if (
+			exactOrEqualConstraint(constraints.projectId) !== projectId ||
+			exactOrEqualConstraint(constraints.documentId) !== documentId
+		) {
+			return false;
+		}
+		return (
+			input === undefined ||
+			(constraintAllows(constraints.field, input.field) &&
+				constraintAllows(constraints.action, input.action) &&
+				constraintAllows(constraints.operationMode, input.operationMode))
+		);
+	});
+}
+
 function executionScope(grant: AgentGrantRequest): JsonRecord {
-	const organizationId = exactConstraint(grant.constraints.organizationId);
-	const projectId = exactConstraint(grant.constraints.projectId);
-	const validUntil = exactConstraint(grant.constraints.validUntil);
+	const organizationId = exactOrEqualConstraint(
+		grant.constraints.organizationId,
+	);
+	const projectId = exactOrEqualConstraint(grant.constraints.projectId);
+	const validUntil = exactOrEqualConstraint(grant.constraints.validUntil);
 	if (
 		!organizationId ||
 		!projectId ||
@@ -192,6 +309,107 @@ const tools: Record<string, Tool> = {
 			additionalProperties: false,
 		},
 	},
+	get_document: {
+		name: "get_document",
+		description:
+			"Read one document snapshot with revision, Yjs state vector, block IDs and block versions.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				projectId: { type: "string", format: "uuid" },
+				documentId: { type: "string", format: "uuid" },
+			},
+			required: ["projectId", "documentId"],
+			additionalProperties: false,
+		},
+	},
+	edit_document: {
+		name: "edit_document",
+		description:
+			"Suggest or collaboratively replace content in up to 10 version-checked document blocks.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				projectId: { type: "string", format: "uuid" },
+				documentId: { type: "string", format: "uuid" },
+				requestId: { type: "string", format: "uuid" },
+				runId: { type: "string", format: "uuid" },
+				baseRevision: { type: "integer", minimum: 0 },
+				baseStateVector: {
+					type: "string",
+					minLength: 1,
+					maxLength: 400_000,
+					pattern: "^[A-Za-z0-9_-]+$",
+				},
+				operationMode: { type: "string", enum: ["suggest", "collaborate"] },
+				operations: {
+					type: "array",
+					minItems: 1,
+					maxItems: 10,
+					items: {
+						type: "object",
+						properties: {
+							type: { const: "replace_block_content" },
+							blockId: { type: "string", minLength: 1, maxLength: 255 },
+							expectedBlockVersion: {
+								type: "string",
+								minLength: 1,
+								maxLength: 400_000,
+								pattern: "^[A-Za-z0-9_-]+$",
+							},
+							content: {
+								type: "array",
+								maxItems: 500,
+								items: {
+									type: "object",
+									properties: {
+										type: { const: "text" },
+										text: { type: "string", maxLength: 100_000 },
+										styles: {
+											type: "object",
+											properties: {
+												bold: { type: "boolean" },
+												italic: { type: "boolean" },
+												underline: { type: "boolean" },
+												strike: { type: "boolean" },
+												code: { type: "boolean" },
+												textColor: {
+													type: "string",
+													minLength: 1,
+													maxLength: 100,
+												},
+												backgroundColor: {
+													type: "string",
+													minLength: 1,
+													maxLength: 100,
+												},
+											},
+											additionalProperties: false,
+										},
+									},
+									required: ["type", "text"],
+									additionalProperties: false,
+								},
+							},
+						},
+						required: ["type", "blockId", "expectedBlockVersion", "content"],
+						additionalProperties: false,
+					},
+				},
+			},
+			required: [
+				"projectId",
+				"documentId",
+				"requestId",
+				"runId",
+				"baseRevision",
+				"baseStateVector",
+				"operationMode",
+				"operations",
+			],
+			additionalProperties: false,
+		},
+	},
 };
 
 export function getAgentCapabilityTools(config: AgentAuthConfig): Tool[] {
@@ -206,6 +424,8 @@ export function getAgentCapabilityTools(config: AgentAuthConfig): Tool[] {
 		...(available("task.create") ? [tools.create_task] : []),
 		...(available("task.write") ? [tools.update_task] : []),
 		...(available("task.execute") ? [tools.discover_tasks] : []),
+		...(available("document.read") ? [tools.get_document] : []),
+		...(available("document.edit") ? [tools.edit_document] : []),
 	];
 }
 
@@ -304,6 +524,57 @@ export async function callAgentCapabilityTool(
 			if (!heartbeat) throw new Error("PACA_AGENT_HARNESS_INVALID");
 			await client.heartbeat(heartbeat);
 			return result(await client.discoverTasks());
+		case "get_document": {
+			const input = documentInput.parse(value);
+			requirePin(input.projectId);
+			const grant = documentGrant(
+				client.config,
+				"document.read",
+				input.projectId,
+				input.documentId,
+			);
+			return result(
+				await client.execute("document.read", {
+					...executionScope(grant),
+					documentId: input.documentId,
+				}),
+			);
+		}
+		case "edit_document": {
+			const input = editDocumentInput.parse(value);
+			requirePin(input.projectId);
+			const grant = documentGrant(
+				client.config,
+				"document.edit",
+				input.projectId,
+				input.documentId,
+				{
+					field: "block.content",
+					action: "apply",
+					operationMode: input.operationMode,
+				},
+			);
+			return result(
+				await client.execute("document.edit", {
+					...executionScope(grant),
+					documentId: input.documentId,
+					field: "block.content",
+					action: "apply",
+					requestId: input.requestId,
+					runId: input.runId,
+					baseRevision: input.baseRevision,
+					baseStateVector: input.baseStateVector,
+					operationMode: input.operationMode,
+					operations: input.operations.map((operation) => ({
+						...operation,
+						content: operation.content.map((inline) => ({
+							...inline,
+							styles: inline.styles ?? {},
+						})),
+					})),
+				}),
+			);
+		}
 		default:
 			throw new Error("AGENT_CAPABILITY_TOOL_NOT_FOUND");
 	}

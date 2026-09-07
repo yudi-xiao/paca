@@ -30,6 +30,8 @@ function config(): AgentAuthConfig {
 			"task.write",
 			"task.execute",
 			"task.create",
+			"document.read",
+			"document.edit",
 		],
 		grantRequests: [
 			{
@@ -56,6 +58,27 @@ function config(): AgentAuthConfig {
 				constraints: {
 					organizationId: "org-1",
 					projectId: PROJECT_ID,
+					validUntil: "2099-01-01T00:00:00.000Z",
+				},
+			},
+			{
+				capability: "document.read",
+				constraints: {
+					organizationId: "org-1",
+					projectId: { eq: PROJECT_ID },
+					documentId: "44444444-4444-4444-8444-444444444444",
+					validUntil: "2099-01-01T00:00:00.000Z",
+				},
+			},
+			{
+				capability: "document.edit",
+				constraints: {
+					organizationId: "org-1",
+					projectId: PROJECT_ID,
+					documentId: "44444444-4444-4444-8444-444444444444",
+					field: "block.content",
+					action: { in: ["apply"] },
+					operationMode: { in: ["suggest", "collaborate"] },
 					validUntil: "2099-01-01T00:00:00.000Z",
 				},
 			},
@@ -88,6 +111,8 @@ describe("Agent Auth MCP tools", () => {
 			"get_project",
 			"update_task",
 			"discover_tasks",
+			"get_document",
+			"edit_document",
 		]);
 	});
 
@@ -147,5 +172,65 @@ describe("Agent Auth MCP tools", () => {
 		expect(client.heartbeat.mock.invocationCallOrder[0]).toBeLessThan(
 			client.discoverTasks.mock.invocationCallOrder[0],
 		);
+	});
+
+	it("reads a document through exact or eq Grant constraints", async () => {
+		const client = transport();
+		const documentId = "44444444-4444-4444-8444-444444444444";
+		await callAgentCapabilityTool(client, "get_document", {
+			projectId: PROJECT_ID,
+			documentId,
+		});
+		expect(client.execute).toHaveBeenCalledWith("document.read", {
+			organizationId: "org-1",
+			projectId: PROJECT_ID,
+			documentId,
+			validUntil: "2099-01-01T00:00:00.000Z",
+		});
+	});
+
+	it("submits only version-checked block edits allowed by in constraints", async () => {
+		const client = transport();
+		const documentId = "44444444-4444-4444-8444-444444444444";
+		const requestId = "55555555-5555-4555-8555-555555555555";
+		const runId = "66666666-6666-4666-8666-666666666666";
+		await callAgentCapabilityTool(client, "edit_document", {
+			projectId: PROJECT_ID,
+			documentId,
+			requestId,
+			runId,
+			baseRevision: 7,
+			baseStateVector: "state-vector",
+			operationMode: "collaborate",
+			operations: [
+				{
+					type: "replace_block_content",
+					blockId: "block-1",
+					expectedBlockVersion: "block-version",
+					content: [{ type: "text", text: "Agent edit" }],
+				},
+			],
+		});
+		expect(client.execute).toHaveBeenCalledWith("document.edit", {
+			organizationId: "org-1",
+			projectId: PROJECT_ID,
+			validUntil: "2099-01-01T00:00:00.000Z",
+			documentId,
+			field: "block.content",
+			action: "apply",
+			requestId,
+			runId,
+			baseRevision: 7,
+			baseStateVector: "state-vector",
+			operationMode: "collaborate",
+			operations: [
+				{
+					type: "replace_block_content",
+					blockId: "block-1",
+					expectedBlockVersion: "block-version",
+					content: [{ type: "text", text: "Agent edit", styles: {} }],
+				},
+			],
+		});
 	});
 });
