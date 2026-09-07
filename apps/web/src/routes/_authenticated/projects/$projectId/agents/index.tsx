@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { Bot, Plus } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -9,6 +9,7 @@ import {
 	AcpSetupDialog,
 	CreateAgentDialog,
 } from "@/components/projects/agents/create-agent-dialog";
+import { ProjectAgentDirectory } from "@/components/projects/agents/project-agent-directory";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
@@ -26,26 +27,36 @@ import {
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/agents/",
 )({
-	beforeLoad: ({ params: { projectId } }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
-			throw redirect({
-				to: "/projects/$projectId",
-				params: { projectId },
-			});
-		}
-	},
 	validateSearch: (search: Record<string, unknown>) => ({
 		create: search.create === true || search.create === "true",
 	}),
 	loader: async ({ context: { queryClient }, params: { projectId } }) => {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+			const { projectAgentDirectoryQueryOptions } = await import(
+				"@/lib/agent-auth-api"
+			);
+			await queryClient.ensureQueryData(
+				projectAgentDirectoryQueryOptions(projectId),
+			);
+			return;
+		}
 		await Promise.all([
 			queryClient.ensureQueryData(projectScopedAgentsQueryOptions(projectId)),
 			queryClient.ensureQueryData(projectRolesQueryOptions(projectId)),
 			queryClient.ensureQueryData(llmModelsQueryOptions),
 		]);
 	},
-	component: AgentsPage,
+	component: ProjectAgentsRoute,
 });
+
+function ProjectAgentsRoute() {
+	const { projectId } = Route.useParams();
+	return import.meta.env.VITE_INTERNAL_PREVIEW === "true" ? (
+		<ProjectAgentDirectory projectId={projectId} />
+	) : (
+		<AgentsPage />
+	);
+}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 

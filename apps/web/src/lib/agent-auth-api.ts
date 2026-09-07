@@ -65,6 +65,36 @@ export type AgentAuthConfiguration = {
 	modes: Array<"delegated" | "autonomous">;
 };
 
+export type ProjectAgentAuthorizationStatus = "active" | "pending" | "inactive";
+
+export type ProjectAgentDirectoryGrant = {
+	id: string;
+	capability: string;
+	status: ProjectAgentAuthorizationStatus;
+	valid_until: string | null;
+	expires_at: string | null;
+	created_at: string;
+	updated_at: string;
+};
+
+export type ProjectAgentDirectoryItem = {
+	agent_id: string;
+	name: string;
+	status: string;
+	mode: string;
+	host_id: string;
+	host_name: string | null;
+	host_status: string;
+	host_online: boolean;
+	harness_kinds: string[];
+	authorization_status: ProjectAgentAuthorizationStatus;
+	capability_grants: ProjectAgentDirectoryGrant[];
+	created_at: string;
+	updated_at: string;
+	last_used_at: string | null;
+	expires_at: string | null;
+};
+
 export class AgentAuthApiError extends Error {
 	readonly status: number;
 	readonly code: string | null;
@@ -126,10 +156,10 @@ async function agentAuthRequest(path: string, init: RequestInit = {}) {
 	return body;
 }
 
-async function pacaAgentRequest(path: string, init: RequestInit = {}) {
+async function pacaRequest(path: string, init: RequestInit = {}) {
 	const headers = new Headers(init.headers);
 	if (init.body !== undefined) headers.set("content-type", "application/json");
-	const response = await fetch(`/api/v1/agent${path}`, {
+	const response = await fetch(`/api/v1${path}`, {
 		...init,
 		credentials: "include",
 		headers,
@@ -139,6 +169,10 @@ async function pacaAgentRequest(path: string, init: RequestInit = {}) {
 		throw new AgentAuthApiError(response.status, agentAuthErrorCode(body));
 	}
 	return body;
+}
+
+function pacaAgentRequest(path: string, init: RequestInit = {}) {
+	return pacaRequest(`/agent${path}`, init);
 }
 
 export async function getAgentAuthConfiguration(): Promise<AgentAuthConfiguration> {
@@ -189,6 +223,18 @@ export async function listAgentHostRuntimes(): Promise<
 	const body = asRecord(await pacaAgentRequest("/hosts/runtime"));
 	return Array.isArray(body?.data)
 		? (body.data as AgentHostRuntimeProfile[])
+		: [];
+}
+
+export async function listProjectAgentDirectory(
+	projectId: string,
+): Promise<ProjectAgentDirectoryItem[]> {
+	const body = asRecord(
+		await pacaRequest(`/projects/${encodeURIComponent(projectId)}/agents`),
+	);
+	const data = asRecord(body?.data);
+	return Array.isArray(data?.items)
+		? (data.items as ProjectAgentDirectoryItem[])
 		: [];
 }
 
@@ -314,3 +360,10 @@ export const agentAuthConfigurationQueryOptions = queryOptions({
 	queryFn: getAgentAuthConfiguration,
 	staleTime: 5 * 60_000,
 });
+
+export const projectAgentDirectoryQueryOptions = (projectId: string) =>
+	queryOptions({
+		queryKey: ["agent-auth", "projects", projectId, "agents"],
+		queryFn: () => listProjectAgentDirectory(projectId),
+		staleTime: 15_000,
+	});

@@ -11,6 +11,11 @@ import {
   requireAgentCapability,
 } from "./agent-auth/http";
 import {
+  type ProjectAgentDirectoryRuntime,
+  projectAgentDirectoryRuntime,
+} from "./agent-directory/runtime";
+import type { ProjectAgentDirectoryItem } from "./agent-directory/service";
+import {
   DOCUMENT_AGENT_WORKFLOW_ID,
   documentAgentWorkflowStartSchema,
 } from "./agent-run/document-workflow-protocol";
@@ -153,6 +158,7 @@ type AppDependencies = {
   agentTasks: AgentTaskDiscoveryRuntime;
   agentTaskControl: AgentTaskControlRuntime;
   agentHosts: AgentHostRuntime;
+  projectAgentDirectory: ProjectAgentDirectoryRuntime;
   agentConfigurationHandler: (request: Request, env: AppBindings) => Promise<Response>;
   authHandler: (request: Request, env: AppBindings) => Promise<Response>;
   authorizeOrganizationPermission: AuthorizeOrganizationPermission;
@@ -1146,6 +1152,34 @@ function agentHostRuntimeResponse(profile: AgentHostRuntimeProfile) {
   };
 }
 
+function projectAgentDirectoryResponse(item: ProjectAgentDirectoryItem) {
+  return {
+    agent_id: item.agentId,
+    name: item.name,
+    status: item.status,
+    mode: item.mode,
+    host_id: item.hostId,
+    host_name: item.hostName,
+    host_status: item.hostStatus,
+    host_online: item.hostOnline,
+    harness_kinds: item.harnessKinds,
+    authorization_status: item.authorizationStatus,
+    capability_grants: item.capabilityGrants.map((grant) => ({
+      id: grant.id,
+      capability: grant.capability,
+      status: grant.status,
+      valid_until: grant.validUntil?.toISOString() ?? null,
+      expires_at: grant.expiresAt?.toISOString() ?? null,
+      created_at: grant.createdAt.toISOString(),
+      updated_at: grant.updatedAt.toISOString(),
+    })),
+    created_at: item.createdAt.toISOString(),
+    updated_at: item.updatedAt.toISOString(),
+    last_used_at: item.lastUsedAt?.toISOString() ?? null,
+    expires_at: item.expiresAt?.toISOString() ?? null,
+  };
+}
+
 function agentTaskRequirementResponse(
   projectId: string,
   taskId: string,
@@ -1206,6 +1240,7 @@ const defaultDependencies: AppDependencies = {
   agentTasks: agentTaskDiscoveryRuntime,
   agentTaskControl: agentTaskControlRuntime,
   agentHosts: agentHostRuntime,
+  projectAgentDirectory: projectAgentDirectoryRuntime,
   agentConfigurationHandler: handleAgentConfigurationRequest,
   authHandler: handleAuthRequest,
   authorizeOrganizationPermission,
@@ -1802,6 +1837,17 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
         return projectFailure(context, error);
       }
     },
+  );
+  app.get(
+    "/api/v1/projects/:projectId/agents",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, { agents: ["read"] }),
+    async (context) =>
+      legacySuccess(context, {
+        items: (
+          await dependencies.projectAgentDirectory.list(context.env, context.req.param("projectId"))
+        ).map(projectAgentDirectoryResponse),
+      }),
   );
   app.patch(
     "/api/v1/projects/:projectId",
@@ -3808,7 +3854,7 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
   });
 
   app.notFound((context) => {
-    const migration = matchUnmigratedApi(context.req.path);
+    const migration = matchUnmigratedApi(context.req.path, context.req.method);
     if (migration) {
       context.header("cache-control", "no-store");
       context.header("x-paca-api-migration-domain", migration.domain);

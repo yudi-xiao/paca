@@ -9,6 +9,7 @@ import {
 	listAgentAuthAgents,
 	listAgentAuthHosts,
 	listAgentHostRuntimes,
+	listProjectAgentDirectory,
 	reauthenticateAndApproveAgent,
 	resolveAgentAuthorization,
 	revokeAgentAuthAgent,
@@ -190,6 +191,31 @@ describe("agent-auth-api", () => {
 					approved_labels: ["task:execute", "harness:codex"],
 				}),
 			}),
+		);
+	});
+
+	it("lists the Project Agent Auth directory from the Worker API", async () => {
+		const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			Response.json({
+				success: true,
+				data: {
+					items: [
+						{
+							agent_id: "agent-1",
+							name: "Codex",
+							authorization_status: "active",
+						},
+					],
+				},
+			}),
+		);
+
+		await expect(listProjectAgentDirectory("project/unsafe")).resolves.toMatchObject([
+			{ agent_id: "agent-1", authorization_status: "active" },
+		]);
+		expect(fetchMock).toHaveBeenCalledWith(
+			"/api/v1/projects/project%2Funsafe/agents",
+			expect.objectContaining({ credentials: "include" }),
 		);
 	});
 

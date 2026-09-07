@@ -15,6 +15,10 @@ export type ApiMigrationEntry = {
   owner: "worker" | "go-api";
   rollback: "worker-version";
   routePrefixes: readonly string[];
+  workerNativeRoutes?: readonly {
+    method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+    path: string;
+  }[];
 };
 
 /**
@@ -49,10 +53,14 @@ export const apiMigrationManifest = [
     domain: "agent-management",
     status: "container-retained",
     authority: "go-api",
-    dependsOn: ["Agent CRUD migration", "conversation protocol migration"],
+    dependsOn: [
+      "Agent Auth-backed writes and configuration migration",
+      "conversation protocol migration",
+    ],
     owner: "go-api",
     rollback: "worker-version",
     routePrefixes: ["/api/v1/projects/:projectId/agents", "/api/v1/admin/agents"],
+    workerNativeRoutes: [{ method: "GET", path: "/api/v1/projects/:projectId/agents" }],
   },
   {
     domain: "environments",
@@ -96,10 +104,32 @@ function pathMatchesPrefix(path: string, prefix: string): boolean {
   });
 }
 
-export function matchUnmigratedApi(path: string): UnmigratedApiMatch | null {
+function pathMatchesRoute(path: string, pattern: string): boolean {
+  const pathSegments = path.split("/").filter(Boolean);
+  const patternSegments = pattern.split("/").filter(Boolean);
+  return (
+    pathSegments.length === patternSegments.length &&
+    patternSegments.every((segment, index) => {
+      if (segment.startsWith(":") && segment.length > 1) {
+        return Boolean(pathSegments[index]?.length);
+      }
+      return pathSegments[index] === segment;
+    })
+  );
+}
+
+export function matchUnmigratedApi(path: string, method = "GET"): UnmigratedApiMatch | null {
   for (const entry of apiMigrationManifest) {
     if (entry.status !== "container-retained") continue;
     if (!entry.routePrefixes.some((prefix) => pathMatchesPrefix(path, prefix))) continue;
+    const workerNativeRoutes = "workerNativeRoutes" in entry ? entry.workerNativeRoutes : undefined;
+    if (
+      workerNativeRoutes?.some(
+        (route) => route.method === method && pathMatchesRoute(path, route.path),
+      )
+    ) {
+      continue;
+    }
     return {
       domain: entry.domain,
       status: entry.status,

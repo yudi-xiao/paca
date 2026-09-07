@@ -28,5 +28,10 @@ describe("API migration manifest", () => {
   it("does not classify Worker-owned bridge routes as retained Go routes", () => {
     expect(matchUnmigratedApi("/api/v1/users/me/notifications")).toBeNull();
     expect(matchUnmigratedApi("/api/v1/plugins")).toBeNull();
+    expect(matchUnmigratedApi("/api/v1/projects/project-1/agents", "GET")).toBeNull();
+    expect(matchUnmigratedApi("/api/v1/projects/project-1/agents", "POST")).toMatchObject({
+      domain: "agent-management",
+      status: "container-retained",
+    });
   });
 });

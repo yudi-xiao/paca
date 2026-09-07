@@ -21,6 +21,7 @@ describe("internal preview route availability", () => {
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8",
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/",
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/team",
+		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/agents",
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/tasks",
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/tasks/c9d8cdf1-b208-4c87-b71f-cf4cdf2d373a",
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/docs/c9d8cdf1-b208-4c87-b71f-cf4cdf2d373a",

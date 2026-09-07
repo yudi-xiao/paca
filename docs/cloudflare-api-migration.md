@@ -21,10 +21,11 @@
 | Sprint、View、Custom Field、任务位置 | Worker / PostgreSQL | Worker 原生 | 真实登录浏览器 E2E |
 | Document、Yjs、实时协作 | Worker / PostgreSQL + DO + Queue + R2 | Worker 原生 | BlockNote 浏览器恢复证据与并发压测 |
 | Agent Auth、Grant、Host、Task Harness | Worker / PostgreSQL + AgentDO | Worker 原生 | autonomous 总验收、旧 Runner 身份迁移 |
+| Project Agent 只读目录 | Worker / PostgreSQL | Worker 原生 | Agent Auth 身份与精确 Project Grant 历史；不返回 secret/完整 constraints |
 | Document Agent Workflow | Worker / Workflow + AgentDO + DocumentParty | Worker 原生 | 远端 Document E2E 与更多领域执行器 |
 | Notification | Worker 空投影 | Bridge | repository、UserParty 可靠推送与已读写入 |
 | Plugin 列表 | Worker 空投影 | Bridge | 插件运行时隔离、安装和权限模型 |
-| Paca Agent CRUD、Conversation、Skill、Env Var、MCP Key | Go API | 容器保留 | repository/API 迁移、Conversation 协议与 Runner 身份切换 |
+| Legacy Paca Agent 写入、Conversation、Skill、Env Var、MCP Key | Go API | 容器保留 | 迁移到 Agent Auth 身份扩展、Conversation 协议与 Runner 身份切换；不得恢复平行 Agent 身份 |
 | Static Environment、Terminal、SSH、Port Forward | Go API + agent-runner | 容器保留 | `paca_project` scope adapter、`environment.connect` 执行器、版本化 Execution Gateway |
 | Automation、Webhook | Go API + Valkey worker | 容器保留 | repository 迁移、Queue/Workflow 事件与幂等契约 |
 

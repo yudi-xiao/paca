@@ -15,7 +15,7 @@
 
 更新时间：2026-09-07
 
-当前里程碑：**M10 的首页“我的工作项”已从临时空投影切换为真实跨项目 PostgreSQL 查询，并部署为 internal Worker `a06616b6-94fb-4965-972f-31841be7ebb2`。查询按 Better Auth 用户解析项目成员身份，在读取任务正文和计算总数前批量执行 `pacaPermission` 的 `tasks.read` 判定，排除已删除和 done 工作项，并以 importance/created_at/id 稳定游标分页。真实 internal 数据库 smoke 已覆盖隔离项目、负责人、done 排除与清理；质量门为 58 个文件/299 项单元测试、4 个文件/22 项 Workers Runtime 测试、Web build、类型、Biome、Drizzle、dry-run 和远端认证边界。根目录旧 `DATABASE_URL` 已失效，真实 smoke 改用短期临时角色且退出即清理。安全回滚点为上一已验收 Worker `d585395a-e432-4a13-855a-ebfc803ec5f9`；本切片没有 schema 变更。**
+当前里程碑：**M10 的 Project Agent 只读目录已从 internal preview 重定向切换为 Better Auth Agent Auth 项目投影，并部署为 internal Worker `58536bb3-3e5f-4b7a-99a0-a1bfee6b2bc4`。目录以 `agent`/`agent_host` 为唯一身份，以精确 Project Capability Grant 历史建立可见关联，只返回脱敏 capability、有效期、Host presence 与 Harness 种类；过期、撤销和待审批 Grant 不会被误判为 active 授权。真实 internal PostgreSQL smoke 与真实账号远端 Session 均返回 Demo 项目的 5 个关联 Agent、0 active、0 pending、5 inactive；最终版本已复验健康检查、项目 Agent SPA、未登录 401，以及未迁移 POST/详情的稳定 501。质量门为 Worker 60 个文件/304 项、Workers Runtime 4 个文件/22 项、Web 60 个文件/631 项测试，以及构建、类型、Biome、Drizzle 和 dry-run。安全回滚点为上一已验收 Worker `a06616b6-94fb-4965-972f-31841be7ebb2`；本切片没有 schema 变更。**
 
 已确认前置条件：
 
@@ -276,6 +276,8 @@
 
 当前切片已完成：`GET /api/v1/users/me/tasks` 已替换临时空投影；不新增 schema，数据库无兼容窗口。
 
+本切片已完成：internal preview 的 Project Agent 页面已恢复为 Better Auth Agent Auth 项目目录；不新增 schema，数据库无兼容窗口。写入、会话和旧 Runner 配置继续保持关闭。
+
 - [x] 按领域模块建立 Go API → Hono Worker 的迁移清单和依赖图。`docs/cloudflare-api-migration.md` 记录领域权威、状态、依赖和准入门槛；`services/worker-api/src/migration/manifest.ts` 提供机器可检查的未迁移路由边界。
 - [ ] 优先迁移认证、只读查询和边界清晰的新功能，再迁移复杂事务模块。
 - [ ] 每个迁移模块运行新旧 API contract tests 和数据一致性验证。
@@ -283,6 +285,7 @@
 - [x] internal preview 已由同一 Worker origin 提供 React Static Assets 与 `/api/*`，并以 SPA fallback 处理前端路由、Worker-first 处理 API/health/internal/ws 路由；若未来拆分 Pages/API 域名，仍必须使用同站点自定义域名、精确 CORS 和 credentials，不依赖跨站第三方 Cookie。
 - [x] 迁移初期曾为首页读取请求提供受 Session 保护的只读空工作区投影；该临时桥接现已由真实查询替换。
 - [x] 将首页“我的工作项”迁移到 Worker：按可信 Session 用户匹配项目成员与负责人，批量复用 `pacaPermission` 的 Project 权限语义，在分页/计数前剔除无 `tasks.read` 权限的项目，排除完成/删除任务，并实现用户绑定的稳定游标。领域、HTTP、真实 internal PostgreSQL smoke、完整质量门和 internal 部署均已通过。
+- [x] 将 Project Agent 只读目录迁移到 Worker：以 Better Auth `agent`/`agent_host` 为唯一身份，以精确 Project Capability Grant 历史为关联来源，并单独计算当前 active/pending/inactive 授权状态；返回脱敏 capability/expiry 摘要并恢复 internal preview 项目 Agent 页面，不复活 legacy Agent CRUD/Conversation。领域/HTTP 测试、真实 internal PostgreSQL smoke、真实账号远端 Session、SPA 深链、未登录 401 和 legacy 501 边界均已通过。
 - [x] 将项目基础 API 从空投影替换为真实 PostgreSQL repository：列表、统计、创建、读取、更新、归档均由 Organization/Project 权限边界保护；internal preview 项目页只展示该切片能保证的数据。
 - [x] 将项目角色与人类成员 API 迁移到 Worker：角色和成员变更由 Project 权限边界、服务端 grant ceiling、数据库约束与同事务保护共同执行；Team/Settings 仅开放已迁移能力，Agent 成员等待 Agent Auth。
 - [x] 将 Organization 动态角色与成员角色分配 API 迁移到 Worker：成员生命周期不另建第二套表，Paca 角色可多选，权限上限、大小写无关唯一约束、内置角色和最后一名 OWNER 在服务端与事务边界内保护；internal preview 仅开放真实可用的组织权限页面。
