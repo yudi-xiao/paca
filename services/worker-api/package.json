@@ -35,6 +35,7 @@
     "smoke:project-agent-directory:internal": "bun run scripts/smoke-project-agent-directory-internal.ts",
     "smoke:notification:database": "bun run scripts/smoke-notification-database.ts",
     "smoke:notification:internal": "bun run scripts/smoke-notification-internal.ts",
+    "smoke:branding:internal": "bun run scripts/smoke-branding-internal.ts",
     "smoke:task:database": "bun run scripts/smoke-task-database.ts",
     "agent-host:enroll": "bun run scripts/enroll-agent-host.ts",
     "agent:register:demo": "bun run scripts/register-demo-agent.ts",

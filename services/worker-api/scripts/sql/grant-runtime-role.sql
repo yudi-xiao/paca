@@ -47,6 +47,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.paca_task_assignee,
   public.paca_task_activity,
   public.paca_notification,
+  public.paca_branding_upload,
+  public.paca_workspace_settings,
   public.paca_task_link,
   public.paca_file,
   public.paca_task_attachment,

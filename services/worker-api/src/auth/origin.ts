@@ -41,7 +41,7 @@ export const protectAuthOrigin: MiddlewareHandler<{
 
     context.header("access-control-allow-origin", origin);
     context.header("access-control-allow-credentials", "true");
-    context.header("access-control-allow-methods", "GET, POST, OPTIONS");
+    context.header("access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
     context.header("access-control-allow-headers", "Content-Type, Authorization");
     context.header("access-control-max-age", "600");
     context.header("vary", "Origin");

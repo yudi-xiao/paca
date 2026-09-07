@@ -55,6 +55,13 @@ import {
   readCurrentUserSession,
 } from "./auth/runtime";
 import type { AppBindings, AppVariables } from "./bindings";
+import { type BrandingRuntime, brandingRuntime } from "./branding/runtime";
+import {
+  BrandingError,
+  type BrandingSettings,
+  type BrandingSlot,
+  brandingErrorCodes,
+} from "./branding/service";
 import { type CustomFieldRuntime, customFieldRuntime } from "./custom-field/runtime";
 import {
   type CustomFieldDefinition,
@@ -155,6 +162,7 @@ type LogEvent = {
 
 type AppDependencies = {
   attachments: AttachmentRuntime;
+  branding: BrandingRuntime;
   agentProject: (
     env: AppBindings,
     session: AgentSession,
@@ -256,6 +264,24 @@ const projectUpdateBodySchema = projectCreateBodySchema
   .omit({ name: true })
   .extend({ name: z.string().optional() })
   .refine((body) => Object.keys(body).length > 0);
+
+const brandingUpdateBodySchema = z
+  .object({
+    brand_name: z.string().nullable(),
+    primary_color_light: z.string().nullable(),
+    primary_color_dark: z.string().nullable(),
+  })
+  .strict();
+
+const brandingUploadInitiateBodySchema = z
+  .object({
+    file_name: z.string(),
+    content_type: z.string(),
+    file_size: z.number(),
+  })
+  .strict();
+
+const brandingUploadCompleteBodySchema = z.object({ file_id: z.uuid() }).strict();
 
 const projectListQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -892,6 +918,50 @@ function attachmentFailure(context: AppContext, error: unknown) {
   }
 }
 
+function brandingImageUrl(slot: BrandingSlot, fileId: string): string {
+  return `/api/v1/branding/images/${slot}/${fileId}`;
+}
+
+function brandingResponse(settings: BrandingSettings) {
+  const logoUrl = settings.logo ? brandingImageUrl("logo", settings.logo.id) : null;
+  const faviconUrl = settings.favicon ? brandingImageUrl("favicon", settings.favicon.id) : null;
+  return {
+    logo_url: logoUrl,
+    logo_thumb_url: logoUrl,
+    favicon_url: faviconUrl,
+    favicon_thumb_url: faviconUrl,
+    brand_name: settings.brandName,
+    primary_color_light: settings.primaryColorLight,
+    primary_color_dark: settings.primaryColorDark,
+  };
+}
+
+function brandingAvatarResponse(settings: BrandingSettings, slot: BrandingSlot) {
+  const upload = slot === "logo" ? settings.logo : settings.favicon;
+  const url = upload ? brandingImageUrl(slot, upload.id) : null;
+  return { avatar_url: url, avatar_thumb_url: url };
+}
+
+function brandingFailure(context: AppContext, error: unknown) {
+  if (!(error instanceof BrandingError)) throw error;
+  switch (error.code) {
+    case brandingErrorCodes.brandNameInvalid:
+    case brandingErrorCodes.colorInvalid:
+    case brandingErrorCodes.contentTypeInvalid:
+    case brandingErrorCodes.fileNameInvalid:
+    case brandingErrorCodes.imageInvalid:
+      return legacyFailure(context, 400, error.code, error.message);
+    case brandingErrorCodes.uploadSizeMismatch:
+    case brandingErrorCodes.sizeInvalid:
+      return legacyFailure(context, 413, error.code, error.message);
+    case brandingErrorCodes.imageNotFound:
+    case brandingErrorCodes.uploadNotFound:
+      return legacyFailure(context, 404, error.code, error.message);
+    case brandingErrorCodes.uploadNotPending:
+      return legacyFailure(context, 409, error.code, error.message);
+  }
+}
+
 function contentLength(request: Request): number | null {
   const raw = request.headers.get("content-length");
   if (!raw || !/^\d+$/.test(raw)) return null;
@@ -1279,6 +1349,7 @@ function agentTaskControlFailure(context: AppContext, error: unknown) {
 
 const defaultDependencies: AppDependencies = {
   attachments: attachmentRuntime,
+  branding: brandingRuntime,
   agentProject: (env, session, scope) =>
     withDatabase(env, (database) => readPostgresProjectAsAgent(database, session, scope)),
   agentRuns: agentRunRuntime,
@@ -1355,6 +1426,8 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
   app.on(["GET", "POST"], "/api/auth/*", (context) =>
     dependencies.authHandler(context.req.raw, context.env),
   );
+
+  app.use("/api/v1/*", protectAuthOrigin);
 
   app.get("/.well-known/agent-configuration", (context) =>
     dependencies.agentConfigurationHandler(context.req.raw, context.env),
@@ -1622,9 +1695,160 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
     });
   });
 
+  app.get("/api/v1/branding", async (context) => {
+    context.header("cache-control", "public, max-age=60");
+    try {
+      return legacySuccess(context, brandingResponse(await dependencies.branding.get(context.env)));
+    } catch (error) {
+      return brandingFailure(context, error);
+    }
+  });
+  app.get("/api/v1/branding/images/:slot/:fileId", async (context) => {
+    const slot = context.req.param("slot");
+    const fileId = context.req.param("fileId");
+    if ((slot !== "logo" && slot !== "favicon") || !z.uuid().safeParse(fileId).success) {
+      return legacyFailure(context, 404, "BRANDING_IMAGE_NOT_FOUND", "Branding image not found");
+    }
+    try {
+      const object = await dependencies.branding.image(context.env, slot, fileId);
+      return new Response(object.body, {
+        headers: {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-length": String(object.size),
+          "content-type": object.contentType,
+          etag: object.etag,
+          "x-content-type-options": "nosniff",
+        },
+      });
+    } catch (error) {
+      return brandingFailure(context, error);
+    }
+  });
+  app.patch(
+    "/api/v1/admin/settings",
+    requireSystemPermission(dependencies.authorizeSystemPermission, { settings: ["write"] }),
+    async (context) => {
+      const parsed = brandingUpdateBodySchema.safeParse(await context.req.json().catch(() => null));
+      if (!parsed.success)
+        return legacyFailure(context, 400, "BAD_REQUEST", "Invalid branding settings");
+      try {
+        const settings = await dependencies.branding.update(
+          context.env,
+          {
+            brandName: parsed.data.brand_name,
+            primaryColorLight: parsed.data.primary_color_light,
+            primaryColorDark: parsed.data.primary_color_dark,
+          },
+          context.get("permissionActorId"),
+        );
+        return legacySuccess(context, brandingResponse(settings));
+      } catch (error) {
+        return brandingFailure(context, error);
+      }
+    },
+  );
+  for (const slot of ["logo", "favicon"] as const) {
+    const basePath = `/api/v1/admin/settings/${slot}/avatar`;
+    app.post(
+      `${basePath}/initiate-upload`,
+      requireSystemPermission(dependencies.authorizeSystemPermission, { settings: ["write"] }),
+      async (context) => {
+        const parsed = brandingUploadInitiateBodySchema.safeParse(
+          await context.req.json().catch(() => null),
+        );
+        if (!parsed.success)
+          return legacyFailure(context, 400, "BAD_REQUEST", "Invalid branding upload");
+        try {
+          const session = await dependencies.branding.initiate(
+            context.env,
+            slot,
+            context.get("permissionActorId"),
+            {
+              fileName: parsed.data.file_name,
+              contentType: parsed.data.content_type,
+              fileSize: parsed.data.file_size,
+            },
+            `${basePath}/uploads`,
+          );
+          return context.json(
+            {
+              success: true as const,
+              data: { file_id: session.fileId, upload_url: session.uploadUrl },
+              request_id: context.get("requestId"),
+            },
+            201,
+          );
+        } catch (error) {
+          return brandingFailure(context, error);
+        }
+      },
+    );
+    app.put(
+      `${basePath}/uploads/:fileId`,
+      requireSystemPermission(dependencies.authorizeSystemPermission, { settings: ["write"] }),
+      async (context) => {
+        const fileId = context.req.param("fileId");
+        const lengthHeader = context.req.header("content-length");
+        const contentLength =
+          lengthHeader && /^\d+$/.test(lengthHeader) ? Number(lengthHeader) : null;
+        if (!z.uuid().safeParse(fileId).success) {
+          return legacyFailure(context, 400, "BAD_REQUEST", "Invalid branding upload id");
+        }
+        try {
+          const uploaded = await dependencies.branding.upload(
+            context.env,
+            fileId,
+            context.get("permissionActorId"),
+            contentLength,
+            context.req.raw.body,
+          );
+          context.header("etag", uploaded.etag);
+          return context.body(null, 204);
+        } catch (error) {
+          return brandingFailure(context, error);
+        }
+      },
+    );
+    app.post(
+      `${basePath}/complete-upload`,
+      requireSystemPermission(dependencies.authorizeSystemPermission, { settings: ["write"] }),
+      async (context) => {
+        const parsed = brandingUploadCompleteBodySchema.safeParse(
+          await context.req.json().catch(() => null),
+        );
+        if (!parsed.success)
+          return legacyFailure(context, 400, "BAD_REQUEST", "Invalid branding upload id");
+        try {
+          const settings = await dependencies.branding.complete(
+            context.env,
+            parsed.data.file_id,
+            context.get("permissionActorId"),
+          );
+          return legacySuccess(context, brandingAvatarResponse(settings, slot));
+        } catch (error) {
+          return brandingFailure(context, error);
+        }
+      },
+    );
+    app.delete(
+      basePath,
+      requireSystemPermission(dependencies.authorizeSystemPermission, { settings: ["write"] }),
+      async (context) => {
+        try {
+          const settings = await dependencies.branding.remove(
+            context.env,
+            slot,
+            context.get("permissionActorId"),
+          );
+          return legacySuccess(context, brandingAvatarResponse(settings, slot));
+        } catch (error) {
+          return brandingFailure(context, error);
+        }
+      },
+    );
+  }
   // Temporary internal-preview bridge for React surfaces whose domain implementations have not
   // moved yet. Authentication still uses Better Auth as the sole authority.
-  app.get("/api/v1/branding", (context) => legacySuccess(context, {}));
   app.get("/api/v1/version", (context) =>
     legacySuccess(context, { current: "cloudflare-internal-preview" }),
   );

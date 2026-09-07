@@ -18,6 +18,7 @@ const migrations = [
   "0020_pale_the_santerians",
   "0021_neat_dagger",
   "0022_fine_molten_man",
+  "0023_worried_paibok",
 ] as const;
 
 type RolePayload = {

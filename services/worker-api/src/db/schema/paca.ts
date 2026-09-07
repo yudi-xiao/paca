@@ -73,6 +73,62 @@ export const pacaUserSystemRoles = pgTable(
   ],
 );
 
+export const pacaBrandingUploads = pgTable(
+  "paca_branding_upload",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    slot: text("slot").notNull(),
+    storageKey: text("storage_key").notNull().unique(),
+    fileName: text("file_name").notNull(),
+    contentType: text("content_type").notNull(),
+    declaredSize: bigint("declared_size", { mode: "number" }).notNull(),
+    actualSize: bigint("actual_size", { mode: "number" }),
+    etag: text("etag"),
+    status: text("status").default("pending").notNull(),
+    uploadedBy: text("uploaded_by").references(() => user.id, { onDelete: "set null" }),
+    cleanupClaimedAt: timestamp("cleanup_claimed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("paca_branding_upload_cleanup_idx").on(
+      table.status,
+      table.cleanupClaimedAt,
+      table.createdAt,
+    ),
+    index("paca_branding_upload_actor_idx").on(table.uploadedBy, table.createdAt),
+    check("paca_branding_upload_slot_check", sql`${table.slot} in ('logo', 'favicon')`),
+    check(
+      "paca_branding_upload_status_check",
+      sql`${table.status} in ('pending', 'uploaded', 'active', 'obsolete')`,
+    ),
+    check("paca_branding_upload_declared_size_check", sql`${table.declaredSize} > 0`),
+    check(
+      "paca_branding_upload_actual_size_check",
+      sql`${table.actualSize} is null or ${table.actualSize} > 0`,
+    ),
+  ],
+);
+
+export const pacaWorkspaceSettings = pgTable(
+  "paca_workspace_settings",
+  {
+    id: boolean("id").default(true).primaryKey(),
+    logoUploadId: uuid("logo_upload_id").references(() => pacaBrandingUploads.id, {
+      onDelete: "set null",
+    }),
+    faviconUploadId: uuid("favicon_upload_id").references(() => pacaBrandingUploads.id, {
+      onDelete: "set null",
+    }),
+    primaryColorLight: text("primary_color_light"),
+    primaryColorDark: text("primary_color_dark"),
+    brandName: text("brand_name"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+  },
+  (table) => [check("paca_workspace_settings_singleton_check", sql`${table.id} = true`)],
+);
+
 export const pacaOrganizationRoles = pgTable(
   "paca_organization_role",
   {

@@ -1,6 +1,7 @@
 import { recoverAbandonedAgentTaskLeases } from "./agent-task/recovery";
 import { createApp } from "./app";
 import { ATTACHMENT_CLEANUP_CRON, runScheduledAttachmentCleanup } from "./attachment/scheduled";
+import { runScheduledBrandingCleanup } from "./branding/scheduled";
 import { consumeDocumentMaterializationQueue } from "./document/materialization";
 import { consumeRealtimeQueue } from "./realtime/consumer";
 import { dispatchRealtimeOutbox } from "./realtime/outbox";
@@ -46,8 +47,12 @@ export default {
       return;
     }
     if (controller.cron === ATTACHMENT_CLEANUP_CRON) {
-      const result = await runScheduledAttachmentCleanup(controller, env);
-      console.log(JSON.stringify({ event: "attachment.cleanup.completed", ...result }));
+      const [attachmentResult, brandingResult] = await Promise.all([
+        runScheduledAttachmentCleanup(controller, env),
+        runScheduledBrandingCleanup(env, controller.scheduledTime),
+      ]);
+      console.log(JSON.stringify({ event: "attachment.cleanup.completed", ...attachmentResult }));
+      console.log(JSON.stringify({ event: "branding.cleanup.completed", ...brandingResult }));
       return;
     }
     console.warn(JSON.stringify({ event: "scheduled.unknown_cron", cron: controller.cron }));

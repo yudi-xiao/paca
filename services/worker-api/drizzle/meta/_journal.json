@@ -162,6 +162,13 @@
       "when": 1788766399994,
       "tag": "0022_fine_molten_man",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788772124581,
+      "tag": "0023_worried_paibok",
+      "breakpoints": true
     }
   ]
 }

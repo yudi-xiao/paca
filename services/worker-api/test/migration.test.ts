@@ -46,6 +46,8 @@ const agentTaskRecoveryMigrationURL = new URL("../drizzle/0021_neat_dagger.sql",
 const agentTaskRecoverySnapshotURL = new URL("../drizzle/meta/0021_snapshot.json", import.meta.url);
 const notificationMigrationURL = new URL("../drizzle/0022_fine_molten_man.sql", import.meta.url);
 const notificationSnapshotURL = new URL("../drizzle/meta/0022_snapshot.json", import.meta.url);
+const brandingMigrationURL = new URL("../drizzle/0023_worried_paibok.sql", import.meta.url);
+const brandingSnapshotURL = new URL("../drizzle/meta/0023_snapshot.json", import.meta.url);
 
 const applicationTables = [
   "user",
@@ -77,6 +79,8 @@ const applicationTables = [
   "paca_task_assignee",
   "paca_task_activity",
   "paca_notification",
+  "paca_branding_upload",
+  "paca_workspace_settings",
   "paca_task_link",
   "paca_document",
   "paca_agent_host_runtime",
@@ -322,6 +326,22 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain('"recipient_user_id" text NOT NULL');
     expect(migration).toContain('"source_activity_id" uuid NOT NULL');
     expect(migration).toContain("paca_notification_source_recipient_type_uidx");
+  });
+
+  it("adds singleton workspace branding and immutable upload state transactionally", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(brandingMigrationURL, "utf8"),
+      readFile(brandingSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0023_worried_paibok', '${checksum}')`);
+    expect(migration).toContain('CREATE TABLE "paca_branding_upload"');
+    expect(migration).toContain('CREATE TABLE "paca_workspace_settings"');
+    expect(migration).toContain('INSERT INTO "paca_workspace_settings" ("id") VALUES (true)');
+    expect(migration).toContain("paca_branding_upload_status_check");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {
