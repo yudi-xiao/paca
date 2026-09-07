@@ -32,6 +32,7 @@ function config(): AgentAuthConfig {
 			"task.create",
 			"document.read",
 			"document.edit",
+			"workflow.execute",
 		],
 		grantRequests: [
 			{
@@ -82,6 +83,16 @@ function config(): AgentAuthConfig {
 					validUntil: "2099-01-01T00:00:00.000Z",
 				},
 			},
+			{
+				capability: "workflow.execute",
+				constraints: {
+					organizationId: "org-1",
+					projectId: PROJECT_ID,
+					workflowId: "00000000-0000-4000-8000-000000000201",
+					operationMode: "execute",
+					validUntil: "2099-01-01T00:00:00.000Z",
+				},
+			},
 		],
 		registeredAt: "2026-09-01T00:00:00.000Z",
 	};
@@ -96,12 +107,14 @@ function transport(): AgentCapabilityTransport & {
 	execute: ReturnType<typeof vi.fn>;
 	discoverTasks: ReturnType<typeof vi.fn>;
 	heartbeat: ReturnType<typeof vi.fn>;
+	requestAgent: ReturnType<typeof vi.fn>;
 } {
 	return {
 		config: config(),
 		execute: vi.fn(async () => ({ ok: true })),
 		discoverTasks: vi.fn(async () => [{ task_id: TASK_ID }]),
 		heartbeat: vi.fn(async () => ({ online: true })),
+		requestAgent: vi.fn(async () => ({ status: "queued" })),
 	};
 }
 
@@ -113,6 +126,9 @@ describe("Agent Auth MCP tools", () => {
 			"discover_tasks",
 			"get_document",
 			"edit_document",
+			"start_document_workflow",
+			"get_agent_run",
+			"cancel_agent_run",
 		]);
 	});
 
@@ -232,5 +248,72 @@ describe("Agent Auth MCP tools", () => {
 				},
 			],
 		});
+	});
+
+	it("starts a durable document workflow with both required capabilities", async () => {
+		const client = transport();
+		const documentId = "44444444-4444-4444-8444-444444444444";
+		const requestId = "55555555-5555-4555-8555-555555555555";
+		const runId = "66666666-6666-4666-8666-666666666666";
+		await callAgentCapabilityTool(client, "start_document_workflow", {
+			projectId: PROJECT_ID,
+			documentId,
+			requestId,
+			runId,
+			baseRevision: 7,
+			baseStateVector: "state-vector",
+			operationMode: "suggest",
+			operations: [
+				{
+					type: "replace_block_content",
+					blockId: "block-1",
+					expectedBlockVersion: "block-version",
+					content: [{ type: "text", text: "Suggestion" }],
+				},
+			],
+		});
+
+		expect(client.requestAgent).toHaveBeenCalledOnce();
+		const [path, capabilities, init] = client.requestAgent.mock.calls[0];
+		expect(path).toBe(
+			`/api/v1/agent/projects/${PROJECT_ID}/workflows/00000000-0000-4000-8000-000000000201/runs`,
+		);
+		expect(capabilities).toEqual(["workflow.execute", "document.edit"]);
+		expect(init).toMatchObject({ method: "POST" });
+		expect(JSON.parse(init.body as string)).toMatchObject({
+			organizationId: "org-1",
+			documentId,
+			command: {
+				action: "apply",
+				requestId,
+				runId,
+				operationMode: "suggest",
+			},
+		});
+	});
+
+	it("reads and cancels only runs owned through the scoped workflow Grant", async () => {
+		const client = transport();
+		const runId = "66666666-6666-4666-8666-666666666666";
+		await callAgentCapabilityTool(client, "get_agent_run", {
+			projectId: PROJECT_ID,
+			runId,
+		});
+		await callAgentCapabilityTool(client, "cancel_agent_run", {
+			projectId: PROJECT_ID,
+			runId,
+		});
+		expect(client.requestAgent).toHaveBeenNthCalledWith(
+			1,
+			`/api/v1/agent/projects/${PROJECT_ID}/workflows/00000000-0000-4000-8000-000000000201/runs/${runId}`,
+			["workflow.execute"],
+			{ method: "GET" },
+		);
+		expect(client.requestAgent).toHaveBeenNthCalledWith(
+			2,
+			`/api/v1/agent/projects/${PROJECT_ID}/workflows/00000000-0000-4000-8000-000000000201/runs/${runId}`,
+			["workflow.execute"],
+			{ method: "DELETE" },
+		);
 	});
 });

@@ -159,6 +159,25 @@ describe("Agent Auth MCP client", () => {
 		);
 	});
 
+	it("rejects Agent API paths that could escape the enrolled origin boundary", async () => {
+		const fixture = await writeConfig();
+		const request = vi.fn();
+		const client = new AgentAuthClient(
+			await loadAgentAuthConfig(fixture.path),
+			request as typeof fetch,
+		);
+		await expect(
+			client.requestAgent(
+				"//attacker.example/api/v1/agent/run",
+				["project.read"],
+				{
+					method: "GET",
+				},
+			),
+		).rejects.toMatchObject({ code: "AGENT_REQUEST_PATH_INVALID" });
+		expect(request).not.toHaveBeenCalled();
+	});
+
 	it("reports local harness identity without changing business permissions", () => {
 		expect(
 			createAgentHeartbeatReport({

@@ -377,24 +377,42 @@ export class AgentAuthClient {
 		});
 	}
 
+	async requestAgent(
+		path: string,
+		capabilities: string[],
+		init: RequestInit,
+	): Promise<unknown> {
+		if (
+			!path.startsWith("/api/v1/agent/") ||
+			path.includes("//") ||
+			path.includes("?") ||
+			path.includes("#")
+		) {
+			throw new AgentAuthClientError("AGENT_REQUEST_PATH_INVALID");
+		}
+		const target = new URL(path, this.config.providerOrigin);
+		if (target.origin !== this.config.providerOrigin) {
+			throw new AgentAuthClientError("AGENT_REQUEST_PATH_INVALID");
+		}
+		return this.jsonRequest(target.toString(), capabilities, init);
+	}
+
 	async discoverTasks(): Promise<unknown> {
-		return this.jsonRequest(
-			`${this.config.providerOrigin}/api/v1/agent/tasks/claimable`,
+		return this.requestAgent(
+			"/api/v1/agent/tasks/claimable",
 			["task.execute"],
-			{ method: "GET" },
+			{
+				method: "GET",
+			},
 		);
 	}
 
 	async heartbeat(report: AgentHeartbeatReport): Promise<unknown> {
-		return this.jsonRequest(
-			`${this.config.providerOrigin}/api/v1/agent/host/heartbeat`,
-			["task.execute"],
-			{
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(report),
-			},
-		);
+		return this.requestAgent("/api/v1/agent/host/heartbeat", ["task.execute"], {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(report),
+		});
 	}
 }
 

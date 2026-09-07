@@ -14,6 +14,7 @@ import {
 } from "./client.js";
 
 type JsonRecord = Record<string, unknown>;
+const DOCUMENT_AGENT_WORKFLOW_ID = "00000000-0000-4000-8000-000000000201";
 
 function record(value: unknown): JsonRecord | null {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -135,6 +136,7 @@ const editDocumentInput = documentInput
 			blockIds.add(operation.blockId);
 		}
 	});
+const agentRunInput = scopeInput.extend({ runId: z.string().uuid() }).strict();
 
 function matchingGrant(
 	config: AgentAuthConfig,
@@ -187,6 +189,19 @@ function documentGrant(
 	});
 }
 
+function workflowGrant(
+	config: AgentAuthConfig,
+	projectId: string,
+): AgentGrantRequest {
+	return matchingGrant(config, "workflow.execute", (constraints) =>
+		Boolean(
+			exactOrEqualConstraint(constraints.projectId) === projectId &&
+				constraintAllows(constraints.workflowId, DOCUMENT_AGENT_WORKFLOW_ID) &&
+				constraintAllows(constraints.operationMode, "execute"),
+		),
+	);
+}
+
 function executionScope(grant: AgentGrantRequest): JsonRecord {
 	const organizationId = exactOrEqualConstraint(
 		grant.constraints.organizationId,
@@ -209,6 +224,11 @@ export interface AgentCapabilityTransport {
 	execute(capability: string, arguments_: JsonRecord): Promise<unknown>;
 	discoverTasks(): Promise<unknown>;
 	heartbeat(report: AgentHeartbeatReport): Promise<unknown>;
+	requestAgent(
+		path: string,
+		capabilities: string[],
+		init: RequestInit,
+	): Promise<unknown>;
 }
 
 function result(value: unknown) {
@@ -410,6 +430,41 @@ const tools: Record<string, Tool> = {
 			additionalProperties: false,
 		},
 	},
+	get_agent_run: {
+		name: "get_agent_run",
+		description:
+			"Read one durable Agent workflow run owned by the current Agent.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				projectId: { type: "string", format: "uuid" },
+				runId: { type: "string", format: "uuid" },
+			},
+			required: ["projectId", "runId"],
+			additionalProperties: false,
+		},
+	},
+	cancel_agent_run: {
+		name: "cancel_agent_run",
+		description:
+			"Request cancellation of one durable Agent workflow run; this does not promise content rollback.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				projectId: { type: "string", format: "uuid" },
+				runId: { type: "string", format: "uuid" },
+			},
+			required: ["projectId", "runId"],
+			additionalProperties: false,
+		},
+	},
+};
+
+tools.start_document_workflow = {
+	name: "start_document_workflow",
+	description:
+		"Start a durable Cloudflare Workflow for a version-checked document edit and return its Agent run.",
+	inputSchema: tools.edit_document.inputSchema,
 };
 
 export function getAgentCapabilityTools(config: AgentAuthConfig): Tool[] {
@@ -418,6 +473,17 @@ export function getAgentCapabilityTools(config: AgentAuthConfig): Tool[] {
 	);
 	const available = (capability: string) =>
 		config.capabilities.includes(capability) && requested.has(capability);
+	const documentWorkflowAvailable =
+		available("workflow.execute") &&
+		config.grantRequests.some(
+			(request) =>
+				request.capability === "workflow.execute" &&
+				constraintAllows(
+					request.constraints.workflowId,
+					DOCUMENT_AGENT_WORKFLOW_ID,
+				) &&
+				constraintAllows(request.constraints.operationMode, "execute"),
+		);
 	return [
 		...(available("project.read") ? [tools.get_project] : []),
 		...(available("task.read") ? [tools.get_task] : []),
@@ -426,6 +492,12 @@ export function getAgentCapabilityTools(config: AgentAuthConfig): Tool[] {
 		...(available("task.execute") ? [tools.discover_tasks] : []),
 		...(available("document.read") ? [tools.get_document] : []),
 		...(available("document.edit") ? [tools.edit_document] : []),
+		...(documentWorkflowAvailable && available("document.edit")
+			? [tools.start_document_workflow]
+			: []),
+		...(documentWorkflowAvailable
+			? [tools.get_agent_run, tools.cancel_agent_run]
+			: []),
 	];
 }
 
@@ -573,6 +645,69 @@ export async function callAgentCapabilityTool(
 						})),
 					})),
 				}),
+			);
+		}
+		case "start_document_workflow": {
+			const input = editDocumentInput.parse(value);
+			requirePin(input.projectId);
+			const workflow = workflowGrant(client.config, input.projectId);
+			const document = documentGrant(
+				client.config,
+				"document.edit",
+				input.projectId,
+				input.documentId,
+				{
+					field: "block.content",
+					action: "apply",
+					operationMode: input.operationMode,
+				},
+			);
+			const workflowScope = executionScope(workflow);
+			const documentScope = executionScope(document);
+			if (workflowScope.organizationId !== documentScope.organizationId) {
+				throw new Error("AGENT_CAPABILITY_SCOPE_INVALID");
+			}
+			return result(
+				await client.requestAgent(
+					`/api/v1/agent/projects/${input.projectId}/workflows/${DOCUMENT_AGENT_WORKFLOW_ID}/runs`,
+					["workflow.execute", "document.edit"],
+					{
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({
+							organizationId: workflowScope.organizationId,
+							documentId: input.documentId,
+							command: {
+								action: "apply",
+								requestId: input.requestId,
+								runId: input.runId,
+								baseRevision: input.baseRevision,
+								baseStateVector: input.baseStateVector,
+								operationMode: input.operationMode,
+								operations: input.operations.map((operation) => ({
+									...operation,
+									content: operation.content.map((inline) => ({
+										...inline,
+										styles: inline.styles ?? {},
+									})),
+								})),
+							},
+						}),
+					},
+				),
+			);
+		}
+		case "get_agent_run":
+		case "cancel_agent_run": {
+			const input = agentRunInput.parse(value);
+			requirePin(input.projectId);
+			executionScope(workflowGrant(client.config, input.projectId));
+			return result(
+				await client.requestAgent(
+					`/api/v1/agent/projects/${input.projectId}/workflows/${DOCUMENT_AGENT_WORKFLOW_ID}/runs/${input.runId}`,
+					["workflow.execute"],
+					{ method: name === "cancel_agent_run" ? "DELETE" : "GET" },
+				),
 			);
 		}
 		default:
