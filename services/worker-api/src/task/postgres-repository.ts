@@ -94,7 +94,7 @@ function statusFromRow(row: typeof pacaTaskStatuses.$inferSelect): TaskStatus {
   };
 }
 
-function taskFromRow(row: TaskRow, assigneeIds: string[]): Task {
+export function taskFromRow(row: TaskRow, assigneeIds: string[]): Task {
   return {
     id: row.id,
     projectId: row.projectId,

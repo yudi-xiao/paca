@@ -60,6 +60,27 @@ describe("PacaPermissionService", () => {
     ).resolves.toMatchObject({ allowed: false });
   });
 
+  it("evaluates bulk project grant sets through the same permission semantics", async () => {
+    const service = new PacaPermissionService(
+      fakeStore({
+        listProjectGrantSets: async () =>
+          new Map([
+            ["project-a", [{ resource: "tasks", action: "read" }]],
+            ["project-b", [{ resource: "docs", action: "read" }]],
+          ]),
+      }),
+    );
+
+    const decisions = await service.hasProjectPermissions(
+      "user-1",
+      ["project-a", "project-b", "missing"],
+      { tasks: ["read"] },
+    );
+    expect(decisions.get("project-a")).toMatchObject({ allowed: true, scopeExists: true });
+    expect(decisions.get("project-b")).toMatchObject({ allowed: false, scopeExists: true });
+    expect(decisions.get("missing")).toEqual({ allowed: false, grants: [], scopeExists: false });
+  });
+
   it("does not treat an unknown project as an authorization success", async () => {
     const service = new PacaPermissionService(
       fakeStore({ findProjectOrganization: async () => null }),

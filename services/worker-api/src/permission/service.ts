@@ -8,6 +8,10 @@ export interface PacaPermissionStore {
   listProjectGrants(userId: string, projectId: string): Promise<PermissionGrant[]>;
   organizationExists(organizationId: string): Promise<boolean>;
   findProjectOrganization(projectId: string): Promise<string | null>;
+  listProjectGrantSets?(
+    userId: string,
+    projectIds: string[],
+  ): Promise<Map<string, PermissionGrant[]>>;
 }
 
 export type PermissionDecision = {
@@ -28,10 +32,10 @@ export class PacaPermissionService {
     organizationId: string,
   ): Promise<PermissionGrant[] | null> {
     if (!(await this.store.organizationExists(organizationId))) return null;
-    const [system, organization] = await Promise.all([
-      this.store.listSystemGrants(userId),
-      this.store.listOrganizationGrants(userId, organizationId),
-    ]);
+    // Runtime repositories share one request-scoped pg.Client. Keep reads
+    // sequential: pg 9 removes concurrent client.query() calls.
+    const system = await this.store.listSystemGrants(userId);
+    const organization = await this.store.listOrganizationGrants(userId, organizationId);
     return uniquePermissionGrants([...system, ...organization]);
   }
 
@@ -42,11 +46,9 @@ export class PacaPermissionService {
     const organizationId = await this.store.findProjectOrganization(projectId);
     if (!organizationId) return null;
 
-    const [system, organization, project] = await Promise.all([
-      this.store.listSystemGrants(userId),
-      this.store.listOrganizationGrants(userId, organizationId),
-      this.store.listProjectGrants(userId, projectId),
-    ]);
+    const system = await this.store.listSystemGrants(userId);
+    const organization = await this.store.listOrganizationGrants(userId, organizationId);
+    const project = await this.store.listProjectGrants(userId, projectId);
     return uniquePermissionGrants([...system, ...organization, ...project]);
   }
 
@@ -81,5 +83,36 @@ export class PacaPermissionService {
       return { allowed: false, grants: [], scopeExists: false };
     }
     return { allowed: hasEveryPermission(grants, required), grants, scopeExists: true };
+  }
+
+  async hasProjectPermissions(
+    userId: string,
+    projectIds: string[],
+    request: PermissionRequest,
+  ): Promise<Map<string, PermissionDecision>> {
+    const required = validatePermissionRequest("project", request);
+    if (this.store.listProjectGrantSets) {
+      const grantSets = await this.store.listProjectGrantSets(userId, projectIds);
+      return new Map(
+        projectIds.map((projectId) => {
+          const grants = grantSets.get(projectId);
+          return [
+            projectId,
+            grants
+              ? {
+                  allowed: hasEveryPermission(grants, required),
+                  grants: uniquePermissionGrants(grants),
+                  scopeExists: true,
+                }
+              : { allowed: false, grants: [], scopeExists: false },
+          ];
+        }),
+      );
+    }
+    const decisions = new Map<string, PermissionDecision>();
+    for (const projectId of projectIds) {
+      decisions.set(projectId, await this.hasProjectPermission(userId, projectId, request));
+    }
+    return decisions;
   }
 }

@@ -117,6 +117,7 @@ import {
   TaskActivityError,
   taskActivityErrorCodes,
 } from "./task/activity-service";
+import { type AssignedTaskRuntime, assignedTaskRuntime } from "./task/assigned-runtime";
 import { type TaskLinkRuntime, taskLinkRuntime } from "./task/link-runtime";
 import { type TaskLink, TaskLinkError, taskLinkErrorCodes } from "./task/link-service";
 import { type TaskRuntime, taskRuntime } from "./task/runtime";
@@ -170,6 +171,7 @@ type AppDependencies = {
   projectAccess: ProjectAccessRuntime;
   systemRoles: SystemRoleRuntime;
   taskActivities: TaskActivityRuntime;
+  assignedTasks: AssignedTaskRuntime;
   taskLinks: TaskLinkRuntime;
   tasks: TaskRuntime;
 };
@@ -302,6 +304,11 @@ const taskListQuerySchema = z.object({
   story_points_max: z.coerce.number().int().min(0).max(1_000_000).optional(),
   importance_ranges: z.string().max(2_000).optional(),
   tags: z.string().max(5_000).optional(),
+});
+
+const assignedTaskListQuerySchema = z.object({
+  page_size: z.coerce.number().int().positive().max(100).default(10),
+  cursor: z.string().max(2_048).optional(),
 });
 
 const customFieldFilterSchema = z.object({
@@ -1224,6 +1231,7 @@ const defaultDependencies: AppDependencies = {
   projectAccess: projectAccessRuntime,
   systemRoles: systemRoleRuntime,
   taskActivities: taskActivityRuntime,
+  assignedTasks: assignedTaskRuntime,
   taskLinks: taskLinkRuntime,
   tasks: taskRuntime,
 };
@@ -3548,14 +3556,36 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
       }
     },
   );
-  app.get("/api/v1/users/me/tasks", (context) =>
-    authenticatedPreviewResponse(context, dependencies.currentUserSession, {
-      items: [],
-      page_size: 10,
-      next_cursor: null,
-      total_count: 0,
-    }),
-  );
+  app.get("/api/v1/users/me/tasks", async (context) => {
+    const session = await dependencies.currentUserSession(context.req.raw, context.env);
+    if (!session) {
+      return context.json(
+        {
+          success: false as const,
+          error_code: "AUTH_UNAUTHENTICATED",
+          error: "Authentication required",
+          request_id: context.get("requestId"),
+        },
+        401,
+      );
+    }
+    const parsed = assignedTaskListQuerySchema.safeParse(context.req.query());
+    if (!parsed.success) return legacyFailure(context, 400, "BAD_REQUEST", "Invalid task query");
+    try {
+      const result = await dependencies.assignedTasks.list(context.env, session.user.id, {
+        pageSize: parsed.data.page_size,
+        cursor: parsed.data.cursor,
+      });
+      return legacySuccess(context, {
+        items: result.items.map(taskResponse),
+        page_size: result.pageSize,
+        next_cursor: result.nextCursor,
+        total_count: result.totalCount,
+      });
+    } catch (error) {
+      return taskFailure(context, error);
+    }
+  });
   app.get("/api/v1/users/me/global-permissions", async (context) => {
     context.header("cache-control", "no-store");
     const snapshot = await dependencies.loadSystemPermissions(context.req.raw, context.env);

@@ -1,4 +1,4 @@
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, count, eq, inArray, sql } from "drizzle-orm";
 
 import type { PacaDatabase } from "../database";
 import {
@@ -109,6 +109,94 @@ export class PostgresPacaPermissionStore implements PacaPermissionStore {
       );
 
     return permissionRows(rows);
+  }
+
+  async listProjectGrantSets(
+    userId: string,
+    projectIds: string[],
+  ): Promise<Map<string, PermissionGrant[]>> {
+    if (projectIds.length === 0) return new Map();
+    const projects = await this.database
+      .select({ id: pacaProjects.id, organizationId: pacaProjects.organizationId })
+      .from(pacaProjects)
+      .where(and(inArray(pacaProjects.id, projectIds), eq(pacaProjects.status, "active")));
+    if (projects.length === 0) return new Map();
+
+    const system = await this.listSystemGrants(userId);
+    const organizationIds = [...new Set(projects.map(({ organizationId }) => organizationId))];
+    const organizationRows = await this.database
+      .select({
+        organizationId: member.organizationId,
+        resource: pacaOrganizationRolePermissions.resource,
+        action: pacaOrganizationRolePermissions.action,
+      })
+      .from(member)
+      .innerJoin(
+        pacaOrganizationMemberRoles,
+        and(
+          eq(member.id, pacaOrganizationMemberRoles.memberId),
+          eq(member.organizationId, pacaOrganizationMemberRoles.organizationId),
+        ),
+      )
+      .innerJoin(
+        pacaOrganizationRoles,
+        and(
+          eq(pacaOrganizationMemberRoles.roleId, pacaOrganizationRoles.id),
+          eq(pacaOrganizationMemberRoles.organizationId, pacaOrganizationRoles.organizationId),
+        ),
+      )
+      .innerJoin(
+        pacaOrganizationRolePermissions,
+        eq(pacaOrganizationRoles.id, pacaOrganizationRolePermissions.roleId),
+      )
+      .where(and(eq(member.userId, userId), inArray(member.organizationId, organizationIds)));
+    const projectRows = await this.database
+      .select({
+        projectId: pacaProjectMembers.projectId,
+        resource: pacaRolePermissions.resource,
+        action: pacaRolePermissions.action,
+      })
+      .from(pacaProjectMembers)
+      .innerJoin(
+        pacaProjectMemberRoles,
+        and(
+          eq(pacaProjectMembers.id, pacaProjectMemberRoles.memberId),
+          eq(pacaProjectMembers.projectId, pacaProjectMemberRoles.projectId),
+        ),
+      )
+      .innerJoin(pacaRolePermissions, eq(pacaProjectMemberRoles.roleId, pacaRolePermissions.roleId))
+      .where(
+        and(
+          eq(pacaProjectMembers.userId, userId),
+          inArray(
+            pacaProjectMembers.projectId,
+            projects.map(({ id }) => id),
+          ),
+        ),
+      );
+
+    const organizationGrants = new Map<string, PermissionGrant[]>();
+    for (const row of organizationRows) {
+      const grants = organizationGrants.get(row.organizationId) ?? [];
+      grants.push(...permissionRows([row]));
+      organizationGrants.set(row.organizationId, grants);
+    }
+    const projectGrants = new Map<string, PermissionGrant[]>();
+    for (const row of projectRows) {
+      const grants = projectGrants.get(row.projectId) ?? [];
+      grants.push(...permissionRows([row]));
+      projectGrants.set(row.projectId, grants);
+    }
+    return new Map(
+      projects.map(({ id, organizationId }) => [
+        id,
+        [
+          ...system,
+          ...(organizationGrants.get(organizationId) ?? []),
+          ...(projectGrants.get(id) ?? []),
+        ],
+      ]),
+    );
   }
 
   async organizationExists(organizationId: string): Promise<boolean> {
