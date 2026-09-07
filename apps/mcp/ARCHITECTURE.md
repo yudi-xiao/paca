@@ -12,13 +12,32 @@
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                       index.ts (Entry)                          │
-│  - Load configuration (PACA_API_KEY, PACA_API_URL)             │
-│  - Initialize PacaAPIClient                                     │
-│  - Create MCP Server (async — loads plugin modules)            │
-│  - Connect to stdio transport                                   │
+│  - Select exactly one authentication mode                     │
+│  - PACA_AGENT_CONFIG → constrained Agent Capability server    │
+│  - PACA_API_KEY → legacy API/plugin server                    │
+│  - Connect to stdio transport                                  │
 └────────────────────────┬────────────────────────────────────────┘
                          │
-                         ▼
+             ┌───────────┴───────────┐
+             ▼                       ▼
+┌──────────────────────────┐  ┌───────────────────────────────────┐
+│ agent-auth/server.ts     │  │ server.ts (legacy compatibility) │
+│ - Grant-scoped tools     │  │ - API/plugin tools               │
+│ - Host heartbeat         │  │ - cached permission filtering    │
+│ - Agent JWT per request  │  │ - X-API-Key                      │
+└────────────┬─────────────┘  └────────────────┬──────────────────┘
+             │                                 │
+             ▼                                 ▼
+ Paca Agent Capability API              Existing Paca HTTP API
+```
+
+Agent Auth mode is deliberately smaller than the legacy API-key surface. A local Harness only receives tools represented by both its enrolled capability catalogue and requested Grant scopes. The Paca server remains authoritative for active Grant status, exact constraints, delegated user permission intersection, replay protection, and audit. Local checks only fail closed earlier.
+
+The Agent private key stays on its controlled Host. A managed Computer/Sandbox must not receive `PACA_AGENT_CONFIG`; it will use a separate short-lived capability broker. Harness kind and version are scheduling/presence metadata and never add business permissions.
+
+## Legacy Compatibility Architecture
+
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                        server.ts  (async)                       │
 │  - Load plugins: GET /api/v1/plugins → import(remoteEntryUrl)  │

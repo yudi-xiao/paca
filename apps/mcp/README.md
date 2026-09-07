@@ -10,7 +10,7 @@ Connect your AI assistant (Claude, Cursor, VS Code Copilot, etc.) to your Paca w
 
 - Node.js 18+
 - A running Paca instance (local or deployed)
-- A Paca API key (generate one in your Paca user settings)
+- A delegated Agent Auth enrollment file, or a legacy Paca API key
 
 ## Setup
 
@@ -20,7 +20,11 @@ No installation or build step required. Configure your AI agent client to use th
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `PACA_API_KEY` | ✅ | — | API key for authentication (see below) |
+| `PACA_AGENT_CONFIG` | One auth mode | — | Absolute path to a local delegated Agent enrollment file; it must be a regular, non-symlink `0600` file |
+| `PACA_AGENT_HARNESS_KIND` | ❌ | `custom` | `cloudflare-agent`, `codex`, `claude-code`, `deepseek`, or `custom`; presence metadata only, not a permission source |
+| `PACA_AGENT_HARNESS_VERSION` | ❌ | — | Harness version reported with Host presence |
+| `PACA_AGENT_HARNESS_INSTANCE_ID` | ❌ | — | Local Harness instance identifier reported with Host presence |
+| `PACA_API_KEY` | One auth mode | — | Legacy user/integration API key; mutually exclusive with `PACA_AGENT_CONFIG` |
 | `PACA_API_URL` | ❌ | `http://localhost:8080` | URL of your Paca API instance |
 | `PACA_AGENT_ID` | ❌ | — | Agent UUID — set to connect as a specific ACP agent instead of yourself (see Agent Mode below) |
 | `PACA_PROJECT_ID` | ❌ | — | Project UUID to pin every tool call to a single project. Optional even when `PACA_AGENT_ID` is set — a global agent left unset here runs "unpinned" across every project it's invited into |
@@ -90,6 +94,7 @@ For a full setup walkthrough, see the [MCP Server Setup Guide](../../docs/guides
 
 ## Features
 
+- **Agent Auth mode**: Short-lived, per-request Ed25519 Agent JWTs and exact Capability Grant constraints for local Harnesses
 - **API Key Authentication**: Secure access using Paca API keys
 - **Agent-Specific Permissions**: MCP tools are filtered based on agent's project permissions at startup
 - **Comprehensive Project Management**: Full project lifecycle with member and role management
@@ -104,7 +109,36 @@ For a full setup walkthrough, see the [MCP Server Setup Guide](../../docs/guides
 
 ## Agent & User Permissions
 
-The MCP server automatically filters available tools based on permissions, whether you're using it as an agent or as a regular user.
+The MCP server supports two mutually exclusive authentication paths. Agent Auth is the preferred path for a local Codex, Claude Code, DeepSeek, or custom Harness. The API-key path remains for users and legacy integrations during migration.
+
+### Agent Auth Harness Mode
+
+Set `PACA_AGENT_CONFIG` to the delegated Agent configuration written by the Paca Host enrollment flow. Do not set `PACA_API_KEY` in the same process.
+
+```json
+{
+  "name": "paca",
+  "command": "node",
+  "args": ["/absolute/path/to/paca/apps/mcp/build/index.js"],
+  "env": {
+    "PACA_AGENT_CONFIG": "/absolute/path/to/delegated-agent.json",
+    "PACA_AGENT_HARNESS_KIND": "codex",
+    "PACA_AGENT_HARNESS_VERSION": "1.0.0",
+    "PACA_AGENT_HARNESS_INSTANCE_ID": "local-machine-1",
+    "PACA_PROJECT_ID": "project-uuid"
+  }
+}
+```
+
+In this mode:
+
+1. The enrollment file is rejected unless it is a private regular file with mode `0600`; symlinks, malformed endpoints, mismatched Ed25519 keys, and oversized files fail closed.
+2. Each request receives a new 45-second Agent JWT with a unique `jti`. Redirects are refused, and the token audience is pinned to the enrolled Capability endpoint.
+3. Only tools represented by both the enrolled capability list and a requested Grant scope are exposed. Current tools cover exact project reads, task reads, single-field task writes, constrained task creation, and executable-task discovery.
+4. Project, task, field, operation mode, Organization, and validity constraints are checked locally before the request and authoritatively checked again by Paca against the current active Grant. Delegated execution remains intersected with the user's current Paca permissions.
+5. `discover_tasks` reports Host/Harness presence before discovery so server-side matching can use approved labels and current online state.
+
+The private enrollment file belongs only on the controlled Host. Do not copy or mount it into a Cloudflare Computer/Sandbox workload. Managed sandboxes will use a separate short-lived capability broker; until that broker is complete, the Runner's sandbox MCP path remains on the legacy key compatibility mode.
 
 ### Agent Mode vs. User Mode
 
@@ -419,9 +453,9 @@ The MCP server automatically handles conversion between Markdown and BlockNote J
 
 This allows AI assistants to work with familiar Markdown format while the API stores content in BlockNote's rich text format.
 
-## API Key Authentication
+## Legacy API Key Authentication
 
-All tools authenticate via the `X-API-Key` header. Generate an API key in your Paca user settings and set it as `PACA_API_KEY` in your MCP client configuration.
+Legacy tools authenticate via the `X-API-Key` header. Generate an API key in your Paca user settings and set it as `PACA_API_KEY` in your MCP client configuration. This mode must not be used as the long-term identity for an Agent Runner.
 
 ## Examples
 
@@ -483,4 +517,3 @@ For detailed information about the codebase structure, how to add new tools, and
 ## License
 
 Apache License 2.0
-

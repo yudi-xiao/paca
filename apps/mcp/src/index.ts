@@ -2,6 +2,12 @@
 
 import { createRequire } from "node:module";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+	AgentAuthClient,
+	createAgentHeartbeatReport,
+	loadAgentAuthConfig,
+} from "./agent-auth/client.js";
+import { createAgentCapabilityServer } from "./agent-auth/server.js";
 import { createServer } from "./server.js";
 import type { PacaConfig } from "./types/index.js";
 
@@ -21,6 +27,7 @@ async function main() {
 
 	// Get configuration from environment variables
 	const apiKey = process.env.PACA_API_KEY;
+	const agentConfigPath = process.env.PACA_AGENT_CONFIG?.trim();
 	const baseURL = process.env.PACA_API_URL || "http://localhost:8080";
 	const gatewayURL = process.env.PACA_GATEWAY_URL || undefined;
 	const agentId = process.env.PACA_AGENT_ID || undefined;
@@ -33,7 +40,31 @@ async function main() {
 		? process.env.PACA_REPO_PLUGIN_IDS.split(",").filter(Boolean)
 		: undefined;
 
-	// Validate required configuration
+	if (apiKey && agentConfigPath) {
+		console.error(
+			"PACA_AUTH_MODE_AMBIGUOUS: set PACA_AGENT_CONFIG or PACA_API_KEY, not both.",
+		);
+		process.exit(1);
+	}
+	if (agentConfigPath) {
+		const config = await loadAgentAuthConfig(agentConfigPath);
+		const heartbeat = createAgentHeartbeatReport({
+			kind: process.env.PACA_AGENT_HARNESS_KIND?.trim() || "custom",
+			version: process.env.PACA_AGENT_HARNESS_VERSION?.trim() || undefined,
+			instanceId:
+				process.env.PACA_AGENT_HARNESS_INSTANCE_ID?.trim() || undefined,
+		});
+		const server = createAgentCapabilityServer(
+			new AgentAuthClient(config),
+			projectId,
+			heartbeat,
+		);
+		const transport = new StdioServerTransport();
+		await server.connect(transport);
+		return;
+	}
+
+	// Validate required legacy configuration
 	if (!apiKey) {
 		console.error(
 			"PACA_API_KEY environment variable is required. Please set it to your Paca API key.",
