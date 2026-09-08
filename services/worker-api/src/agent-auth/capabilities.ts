@@ -451,8 +451,9 @@ export const pacaCapabilities = [
       {
         environmentId: { type: "string", format: "uuid" },
         operationMode: { type: "string", enum: ["read", "execute"] },
+        requestId: { type: "string", format: "uuid" },
       },
-      ["environmentId", "operationMode"],
+      ["environmentId", "operationMode", "requestId"],
     ),
   },
   {

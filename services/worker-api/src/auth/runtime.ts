@@ -193,6 +193,7 @@ export function createAuth(
 
   const agentAuthPlugin = pacaAgentAuth({
     autonomousHostEnrollmentSecret: env.AUTONOMOUS_HOST_ENROLLMENT_SECRET,
+    environmentGatewayAvailable: Boolean(env.ENVIRONMENT_GATEWAY),
     onEvent: (event) => recordAgentAuthEvent(db, event),
     onExecute: createPostgresPacaAgentExecutor(db, env),
   });

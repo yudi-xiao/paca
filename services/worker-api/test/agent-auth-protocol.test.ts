@@ -326,6 +326,13 @@ describe("Better Auth Agent Auth protocol", () => {
     );
   });
 
+  it("keeps environment connections blocked until the private Gateway binding is available", () => {
+    expect(pacaAgentAuth().options?.blockedCapabilities).toEqual(["environment.connect"]);
+    expect(
+      pacaAgentAuth({ environmentGatewayAvailable: true }).options?.blockedCapabilities,
+    ).toEqual([]);
+  });
+
   it("completes Host enrollment, delegated registration, approval, JWT execution, and replay rejection", async () => {
     const harness = await createProtocolHarness();
     const token = await agentJwt(harness, { jti: "execute-once" });

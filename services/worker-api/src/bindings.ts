@@ -8,6 +8,7 @@ type RuntimeConfigBindings = {
   AUTONOMOUS_HOST_ENROLLMENT_SECRET?: string;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
+  ENVIRONMENT_GATEWAY?: Fetcher;
   ENVIRONMENT?: string;
   INTERNAL_HEALTH_TOKEN?: string;
   TRUSTED_ORIGINS?: string;

@@ -48,6 +48,8 @@ const notificationMigrationURL = new URL("../drizzle/0022_fine_molten_man.sql", 
 const notificationSnapshotURL = new URL("../drizzle/meta/0022_snapshot.json", import.meta.url);
 const brandingMigrationURL = new URL("../drizzle/0023_worried_paibok.sql", import.meta.url);
 const brandingSnapshotURL = new URL("../drizzle/meta/0023_snapshot.json", import.meta.url);
+const environmentScopeMigrationURL = new URL("../drizzle/0024_deep_nomad.sql", import.meta.url);
+const environmentScopeSnapshotURL = new URL("../drizzle/meta/0024_snapshot.json", import.meta.url);
 
 const applicationTables = [
   "user",
@@ -68,6 +70,7 @@ const applicationTables = [
   "paca_role_permission",
   "paca_project_member",
   "paca_project_member_role",
+  "paca_environment_scope",
   "paca_task_type",
   "paca_task_status",
   "paca_task_counter",
@@ -342,6 +345,22 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain('CREATE TABLE "paca_workspace_settings"');
     expect(migration).toContain('INSERT INTO "paca_workspace_settings" ("id") VALUES (true)');
     expect(migration).toContain("paca_branding_upload_status_check");
+  });
+
+  it("adds the explicit environment-to-project scope adapter transactionally", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(environmentScopeMigrationURL, "utf8"),
+      readFile(environmentScopeSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0024_deep_nomad', '${checksum}')`);
+    expect(migration).toContain('CREATE TABLE "paca_environment_scope"');
+    expect(migration).toContain("paca_environment_scope_project_id_paca_project_id_fk");
+    expect(migration).toContain("paca_environment_scope_backend_check");
+    expect(migration).not.toContain("secret");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

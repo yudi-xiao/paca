@@ -29,6 +29,13 @@ import {
   documentAgentCommandSchema,
 } from "../document/agent-operations";
 import type { DocumentScope } from "../document/postgres-scope-repository";
+import { PostgresEnvironmentScopeRepository } from "../environment/postgres-repository";
+import {
+  type EnvironmentConnection,
+  EnvironmentConnectionService,
+  type EnvironmentOperationMode,
+} from "../environment/service";
+import { ServiceBindingEnvironmentConnectionGateway } from "../environment/service-binding-gateway";
 import { PostgresPacaPermissionStore } from "../permission/postgres-store";
 import { PacaPermissionService } from "../permission/service";
 import type { PermissionRequest } from "../permission/statement";
@@ -87,6 +94,15 @@ export type PacaAgentExecutionDependencies = {
     input: DocumentAgentCommand,
     authorizationExpiresAt: number,
   ): Promise<DocumentAgentCommandResult>;
+  connectEnvironment(input: {
+    requestId: string;
+    organizationId: string;
+    projectId: string;
+    environmentId: string;
+    operationMode: EnvironmentOperationMode;
+    actor: { agentId: string; hostId: string };
+    authorizationExpiresAt: Date;
+  }): Promise<EnvironmentConnection>;
 };
 
 const scopeSchema = z.object({
@@ -129,6 +145,11 @@ const documentCommandEnvelopeSchema = scopeSchema
     operationMode: z.enum(["suggest", "collaborate", "exclusive"]),
   })
   .passthrough();
+const environmentConnectSchema = scopeSchema.extend({
+  environmentId: z.uuid(),
+  operationMode: z.enum(["read", "execute"]),
+  requestId: z.uuid(),
+});
 
 function denied(code: string): never {
   throw new Error(code);
@@ -215,6 +236,7 @@ function requireGrant(
     projectId: string;
     taskId?: string;
     documentId?: string;
+    environmentId?: string;
     field?: string;
     operationMode?: string;
     action?: string;
@@ -225,6 +247,7 @@ function requireGrant(
     projectId: input.projectId,
     taskId: "taskId" in input ? input.taskId : undefined,
     documentId: "documentId" in input ? input.documentId : undefined,
+    environmentId: "environmentId" in input ? input.environmentId : undefined,
     field: "field" in input ? input.field : undefined,
     operationMode: "operationMode" in input ? input.operationMode : undefined,
     action: "action" in input ? input.action : undefined,
@@ -423,6 +446,40 @@ export function createPacaAgentExecutor(
           agentAuthorizationExpiresAt(context.grant),
         );
       }
+      case "environment.connect": {
+        const input = environmentConnectSchema.parse(context.arguments);
+        requireGrant(context.grant, "environment.connect", input);
+        await requireAgentProjectAccess(
+          dependencies,
+          context.agentSession,
+          input.organizationId,
+          input.projectId,
+          input.operationMode === "read"
+            ? { environments: ["read"] }
+            : { environments: ["connect"] },
+        );
+        const host = context.agentSession.host;
+        if (!host || context.agentSession.agent.hostId !== host.id) {
+          denied("AGENT_HOST_IDENTITY_MISMATCH");
+        }
+        const {
+          validUntil: _validUntil,
+          requestId,
+          organizationId,
+          projectId,
+          environmentId,
+          operationMode,
+        } = input;
+        return dependencies.connectEnvironment({
+          requestId,
+          organizationId,
+          projectId,
+          environmentId,
+          operationMode,
+          actor: { agentId: context.agentSession.agentId, hostId: host.id },
+          authorizationExpiresAt: new Date(agentAuthorizationExpiresAt(context.grant)),
+        });
+      }
       default:
         denied("AGENT_CAPABILITY_NOT_EXECUTABLE");
     }
@@ -447,6 +504,10 @@ function postgresPacaAgentExecutionDependencies(
   const taskService = new TaskService(new PostgresTaskRepository(database));
   const taskLeaseService = new AgentTaskLeaseService(
     new PostgresAgentTaskLeaseRepository(database),
+  );
+  const environmentConnectionService = new EnvironmentConnectionService(
+    new PostgresEnvironmentScopeRepository(database),
+    new ServiceBindingEnvironmentConnectionGateway(env?.ENVIRONMENT_GATEWAY),
   );
 
   return {
@@ -504,6 +565,7 @@ function postgresPacaAgentExecutionDependencies(
         authorizationExpiresAt,
       );
     },
+    connectEnvironment: (input) => environmentConnectionService.connect(input),
   };
 }
 

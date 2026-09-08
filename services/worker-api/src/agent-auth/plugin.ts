@@ -8,6 +8,7 @@ const AGENT_SESSION_TTL_SECONDS = 60 * 60;
 
 export type PacaAgentAuthPluginOptions = {
   autonomousHostEnrollmentSecret?: string;
+  environmentGatewayAvailable?: boolean;
   onEvent?: (event: AgentAuthEvent) => void | Promise<void>;
   onExecute?: AgentAuthOptions["onExecute"];
 };
@@ -63,10 +64,12 @@ export function pacaAgentAuth(options: PacaAgentAuthPluginOptions = {}) {
     absoluteLifetime: 0,
     maxAgentsPerUser: 25,
     freshSessionWindow: 5 * 60,
-    // environment.connect remains blocked until its execution boundary exists.
+    // environment.connect is only discoverable when its private Gateway binding
+    // exists. The executor itself still revalidates scope, Grant, delegated
+    // permission, Host identity, and the Gateway's short-lived response.
     // workflow.execute is enabled because every public run route now enforces
     // a concrete Workflow definition plus a second domain Capability Grant.
-    blockedCapabilities: ["environment.connect"],
+    blockedCapabilities: options.environmentGatewayAvailable ? [] : ["environment.connect"],
     jtiCacheStorage: "secondary-storage",
     jwksCacheStorage: "secondary-storage",
     dangerouslySkipJtiCheck: false,

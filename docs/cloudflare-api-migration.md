@@ -26,7 +26,7 @@
 | Notification | Worker / PostgreSQL + Queue + UserParty | Worker 原生 | 分配任务与结构化 `teamMention` 评论在业务事务内写通知和 realtime outbox；列表按当前项目成员关系过滤，已读写入按可信 Session 用户隔离 |
 | Plugin 列表 | Worker 空投影 | Bridge | 插件运行时隔离、安装和权限模型 |
 | Legacy Paca Agent 写入、Conversation、Skill、Env Var、MCP Key | Go API | 容器保留 | 迁移到 Agent Auth 身份扩展、Conversation 协议与 Runner 身份切换；不得恢复平行 Agent 身份 |
-| Static Environment、Terminal、SSH、Port Forward | Go API + agent-runner | 容器保留 | `paca_project` scope adapter、`environment.connect` 执行器、版本化 Execution Gateway |
+| Static Environment、Terminal、SSH、Port Forward | Go API + agent-runner | 容器保留 | 已完成 `paca_project` scope adapter 与 `environment.connect` Worker 候选；仍需实现并绑定版本化私有 Execution Gateway、迁移实际环境资源及完成远端 E2E |
 | Automation、Webhook | Go API + Valkey worker | 容器保留 | repository 迁移、Queue/Workflow 事件与幂等契约 |
 
 ```text
@@ -36,7 +36,7 @@ Better Auth Session / Agent Auth
         │
         ├── Agent Grant ────── Task Harness/Document Workflow（Worker 原生）
         │                            │
-        │                            └── Environment Gateway（待实现）
+        │                            └── Environment Gateway（接口已定，provider/绑定待实现）
         │
         └── Principal Bridge（尚未实现，故禁止隐式代理）
                                      │

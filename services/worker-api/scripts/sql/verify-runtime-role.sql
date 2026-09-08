@@ -32,6 +32,7 @@ WITH application_tables(table_name) AS (
     ('paca_role_permission'),
     ('paca_project_member'),
     ('paca_project_member_role'),
+    ('paca_environment_scope'),
     ('paca_task_type'),
     ('paca_task_status'),
     ('paca_task_counter'),

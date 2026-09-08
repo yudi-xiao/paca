@@ -1,0 +1,130 @@
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  EnvironmentConnectionError,
+  type EnvironmentConnectionGateway,
+  environmentConnectionErrorCodes,
+} from "../src/environment/service";
+import { ServiceBindingEnvironmentConnectionGateway } from "../src/environment/service-binding-gateway";
+
+const NOW = new Date("2026-09-08T05:00:00.000Z");
+const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
+const ENVIRONMENT_ID = "88888888-8888-4888-8888-888888888888";
+const REQUEST_ID = "55555555-5555-4555-8555-555555555555";
+
+function input(): Parameters<EnvironmentConnectionGateway["issue"]>[0] {
+  return {
+    requestId: REQUEST_ID,
+    scope: {
+      environmentId: ENVIRONMENT_ID,
+      organizationId: "paca-default",
+      projectId: PROJECT_ID,
+      backend: "cloudflare-computer",
+      gatewayReference: "workspace-1",
+    },
+    operationMode: "execute",
+    actor: { agentId: "agent-1", hostId: "host-1" },
+    authorizationExpiresAt: new Date(NOW.getTime() + 45_000),
+  };
+}
+
+function gatewayResponse(): Record<string, unknown> {
+  return {
+    protocolVersion: "paca.environment.connection.v1",
+    requestId: REQUEST_ID,
+    environmentId: ENVIRONMENT_ID,
+    operationMode: "execute",
+    transport: "websocket",
+    url: "wss://environment-gateway.paca.test/v1/connect",
+    accessToken: "short-lived-ticket",
+    expiresAt: new Date(NOW.getTime() + 30_000).toISOString(),
+  };
+}
+
+function fetcher(fetch: Fetcher["fetch"]): Fetcher {
+  return {
+    fetch,
+    connect: () => {
+      throw new Error("not implemented in test");
+    },
+  };
+}
+
+describe("ServiceBindingEnvironmentConnectionGateway", () => {
+  it("fails closed when the private Service Binding is absent", async () => {
+    const gateway = new ServiceBindingEnvironmentConnectionGateway();
+    await expect(gateway.issue(input())).rejects.toMatchObject({
+      code: environmentConnectionErrorCodes.gatewayUnavailable,
+    });
+  });
+
+  it("sends only the versioned, scoped request and parses a bounded response", async () => {
+    const fetch = vi.fn<Fetcher["fetch"]>(async (requestInfo, init) => {
+      expect(String(requestInfo)).toBe("https://environment-gateway.internal/v1/connections");
+      expect(init?.method).toBe("POST");
+      expect(init?.redirect).toBe("manual");
+      expect(new Headers(init?.headers).get("x-paca-environment-gateway-protocol")).toBe(
+        "paca.environment.gateway.v1",
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({
+        protocolVersion: "paca.environment.gateway.v1",
+        requestId: REQUEST_ID,
+        environment: {
+          id: ENVIRONMENT_ID,
+          organizationId: "paca-default",
+          projectId: PROJECT_ID,
+          backend: "cloudflare-computer",
+          reference: "workspace-1",
+        },
+        operationMode: "execute",
+        actor: { type: "agent", agentId: "agent-1", hostId: "host-1" },
+        authorizationExpiresAt: new Date(NOW.getTime() + 45_000).toISOString(),
+      });
+      return Response.json(gatewayResponse());
+    });
+    const gateway = new ServiceBindingEnvironmentConnectionGateway(fetcher(fetch));
+
+    await expect(gateway.issue(input())).resolves.toMatchObject({
+      environmentId: ENVIRONMENT_ID,
+      expiresAt: new Date(NOW.getTime() + 30_000),
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    () => new Response("not json", { status: 200, headers: { "content-type": "text/plain" } }),
+    () => Response.json({ ...gatewayResponse(), unexpected: true }),
+    () =>
+      new Response(JSON.stringify(gatewayResponse()), {
+        headers: { "content-type": "application/json", "content-length": "999999" },
+      }),
+  ])("rejects malformed and oversized gateway responses", async (response) => {
+    const gateway = new ServiceBindingEnvironmentConnectionGateway(fetcher(async () => response()));
+    await expect(gateway.issue(input())).rejects.toBeInstanceOf(EnvironmentConnectionError);
+    await expect(gateway.issue(input())).rejects.toMatchObject({
+      code: environmentConnectionErrorCodes.gatewayResponseInvalid,
+    });
+  });
+
+  it("rejects a chunked response after the configured byte limit", async () => {
+    const oversized = new Uint8Array(32 * 1_024 + 1);
+    const gateway = new ServiceBindingEnvironmentConnectionGateway(
+      fetcher(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(oversized);
+                controller.close();
+              },
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+
+    await expect(gateway.issue(input())).rejects.toMatchObject({
+      code: environmentConnectionErrorCodes.gatewayResponseInvalid,
+    });
+  });
+});

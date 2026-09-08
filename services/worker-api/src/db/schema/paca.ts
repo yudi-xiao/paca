@@ -223,6 +223,45 @@ export const pacaProjects = pgTable(
   ],
 );
 
+export type PacaEnvironmentBackend = "cloudflare-computer" | "legacy-agent-runner";
+
+/**
+ * Stable Worker-side scope mapping for execution environments.
+ *
+ * Backend lifecycle and secrets remain owned by the versioned Environment
+ * Gateway. This table only records the Paca Project boundary and the opaque
+ * backend reference required to revalidate every environment.connect call.
+ */
+export const pacaEnvironmentScopes = pgTable(
+  "paca_environment_scope",
+  {
+    environmentId: uuid("environment_id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => pacaProjects.id, { onDelete: "cascade" }),
+    backend: text("backend").$type<PacaEnvironmentBackend>().notNull(),
+    gatewayReference: text("gateway_reference").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("paca_environment_scope_environment_project_unique").on(
+      table.environmentId,
+      table.projectId,
+    ),
+    index("paca_environment_scope_project_idx").on(table.projectId),
+    check(
+      "paca_environment_scope_backend_check",
+      sql`${table.backend} in ('cloudflare-computer', 'legacy-agent-runner')`,
+    ),
+    check(
+      "paca_environment_scope_gateway_reference_check",
+      sql`length(${table.gatewayReference}) between 1 and 500`,
+    ),
+  ],
+);
+
 export const pacaProjectRoles = pgTable(
   "paca_project_role",
   {

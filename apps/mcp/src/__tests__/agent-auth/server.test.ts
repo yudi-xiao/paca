@@ -11,6 +11,7 @@ import {
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const TASK_ID = "22222222-2222-4222-8222-222222222222";
+const ENVIRONMENT_ID = "33333333-3333-4333-8333-333333333333";
 
 function config(): AgentAuthConfig {
 	return {
@@ -32,6 +33,7 @@ function config(): AgentAuthConfig {
 			"task.create",
 			"document.read",
 			"document.edit",
+			"environment.connect",
 			"workflow.execute",
 		],
 		grantRequests: [
@@ -84,6 +86,16 @@ function config(): AgentAuthConfig {
 				},
 			},
 			{
+				capability: "environment.connect",
+				constraints: {
+					organizationId: "org-1",
+					projectId: { eq: PROJECT_ID },
+					environmentId: ENVIRONMENT_ID,
+					operationMode: { in: ["read", "execute"] },
+					validUntil: "2099-01-01T00:00:00.000Z",
+				},
+			},
+			{
 				capability: "workflow.execute",
 				constraints: {
 					organizationId: "org-1",
@@ -126,6 +138,7 @@ describe("Agent Auth MCP tools", () => {
 			"discover_tasks",
 			"get_document",
 			"edit_document",
+			"connect_environment",
 			"start_document_workflow",
 			"get_agent_run",
 			"cancel_agent_run",
@@ -290,6 +303,40 @@ describe("Agent Auth MCP tools", () => {
 				operationMode: "suggest",
 			},
 		});
+	});
+
+	it("requests an environment connection with exact Grant scope and a fresh request ID", async () => {
+		const client = transport();
+		await callAgentCapabilityTool(client, "connect_environment", {
+			projectId: PROJECT_ID,
+			environmentId: ENVIRONMENT_ID,
+			operationMode: "execute",
+		});
+		expect(client.execute).toHaveBeenCalledOnce();
+		const [capability, arguments_] = client.execute.mock.calls[0];
+		expect(capability).toBe("environment.connect");
+		expect(arguments_).toMatchObject({
+			organizationId: "org-1",
+			projectId: PROJECT_ID,
+			environmentId: ENVIRONMENT_ID,
+			operationMode: "execute",
+			validUntil: "2099-01-01T00:00:00.000Z",
+		});
+		expect(arguments_.requestId).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+		);
+	});
+
+	it("refuses an environment outside the approved Grant before the network", async () => {
+		const client = transport();
+		await expect(
+			callAgentCapabilityTool(client, "connect_environment", {
+				projectId: PROJECT_ID,
+				environmentId: "77777777-7777-4777-8777-777777777777",
+				operationMode: "read",
+			}),
+		).rejects.toThrow("AGENT_CAPABILITY_SCOPE_NOT_REQUESTED");
+		expect(client.execute).not.toHaveBeenCalled();
 	});
 
 	it("reads and cancels only runs owned through the scoped workflow Grant", async () => {

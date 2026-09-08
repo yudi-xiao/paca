@@ -4,6 +4,7 @@ import {
 	ListToolsRequestSchema,
 	type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { markdownToBlocknote } from "../utils/index.js";
 import {
@@ -137,6 +138,12 @@ const editDocumentInput = documentInput
 		}
 	});
 const agentRunInput = scopeInput.extend({ runId: z.string().uuid() }).strict();
+const environmentInput = scopeInput
+	.extend({
+		environmentId: z.string().uuid(),
+		operationMode: z.enum(["read", "execute"]),
+	})
+	.strict();
 
 function matchingGrant(
 	config: AgentAuthConfig,
@@ -198,6 +205,21 @@ function workflowGrant(
 			exactOrEqualConstraint(constraints.projectId) === projectId &&
 				constraintAllows(constraints.workflowId, DOCUMENT_AGENT_WORKFLOW_ID) &&
 				constraintAllows(constraints.operationMode, "execute"),
+		),
+	);
+}
+
+function environmentGrant(
+	config: AgentAuthConfig,
+	projectId: string,
+	environmentId: string,
+	operationMode: "read" | "execute",
+): AgentGrantRequest {
+	return matchingGrant(config, "environment.connect", (constraints) =>
+		Boolean(
+			exactOrEqualConstraint(constraints.projectId) === projectId &&
+				exactOrEqualConstraint(constraints.environmentId) === environmentId &&
+				constraintAllows(constraints.operationMode, operationMode),
 		),
 	);
 }
@@ -458,6 +480,21 @@ const tools: Record<string, Tool> = {
 			additionalProperties: false,
 		},
 	},
+	connect_environment: {
+		name: "connect_environment",
+		description:
+			"Request a short-lived connection to one explicitly authorized Paca environment. Returned credentials must remain in memory and must not be logged or persisted.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				projectId: { type: "string", format: "uuid" },
+				environmentId: { type: "string", format: "uuid" },
+				operationMode: { type: "string", enum: ["read", "execute"] },
+			},
+			required: ["projectId", "environmentId", "operationMode"],
+			additionalProperties: false,
+		},
+	},
 };
 
 tools.start_document_workflow = {
@@ -492,6 +529,7 @@ export function getAgentCapabilityTools(config: AgentAuthConfig): Tool[] {
 		...(available("task.execute") ? [tools.discover_tasks] : []),
 		...(available("document.read") ? [tools.get_document] : []),
 		...(available("document.edit") ? [tools.edit_document] : []),
+		...(available("environment.connect") ? [tools.connect_environment] : []),
 		...(documentWorkflowAvailable && available("document.edit")
 			? [tools.start_document_workflow]
 			: []),
@@ -644,6 +682,24 @@ export async function callAgentCapabilityTool(
 							styles: inline.styles ?? {},
 						})),
 					})),
+				}),
+			);
+		}
+		case "connect_environment": {
+			const input = environmentInput.parse(value);
+			requirePin(input.projectId);
+			const grant = environmentGrant(
+				client.config,
+				input.projectId,
+				input.environmentId,
+				input.operationMode,
+			);
+			return result(
+				await client.execute("environment.connect", {
+					...executionScope(grant),
+					environmentId: input.environmentId,
+					operationMode: input.operationMode,
+					requestId: randomUUID(),
 				}),
 			);
 		}

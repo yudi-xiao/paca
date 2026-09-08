@@ -169,6 +169,13 @@
       "when": 1788772124581,
       "tag": "0023_worried_paibok",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788859564724,
+      "tag": "0024_deep_nomad",
+      "breakpoints": true
     }
   ]
 }

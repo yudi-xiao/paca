@@ -21,6 +21,7 @@ import type { Task, TaskActor } from "../src/task/service";
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const TASK_ID = "22222222-2222-4222-8222-222222222222";
 const DOCUMENT_ID = "44444444-4444-4444-8444-444444444444";
+const ENVIRONMENT_ID = "88888888-8888-4888-8888-888888888888";
 const REQUEST_ID = "55555555-5555-4555-8555-555555555555";
 const RUN_ID = "66666666-6666-4666-8666-666666666666";
 const NOW = new Date();
@@ -198,6 +199,9 @@ function dependencies(
     }),
     readDocument: async () => documentSnapshot,
     executeDocumentCommand: async () => documentEditResult,
+    connectEnvironment: async () => {
+      throw new Error("AGENT_ENVIRONMENT_GATEWAY_NOT_CONFIGURED");
+    },
     ...overrides,
   };
 }
@@ -210,7 +214,8 @@ function executeContext(
     | "task.create"
     | "task.execute"
     | "document.read"
-    | "document.edit",
+    | "document.edit"
+    | "environment.connect",
   session: AgentSession,
   args: Record<string, unknown>,
   grantConstraints = session.agent.capabilityGrants[0]?.constraints ?? null,
@@ -746,5 +751,78 @@ describe("Paca Agent Auth execution boundary", () => {
         }),
       ),
     ).rejects.toThrow("AGENT_GRANT_CONSTRAINT_MISMATCH");
+  });
+
+  it.each([
+    ["read", { environments: ["read"] }],
+    ["execute", { environments: ["connect"] }],
+  ] as const)("connects an exact environment in %s mode after current delegated permission checks", async (operationMode, permission) => {
+    const expiresAt = new Date(Date.now() + 30_000);
+    const connectEnvironment = vi.fn(async () => ({
+      protocolVersion: "paca.environment.connection.v1" as const,
+      requestId: REQUEST_ID,
+      environmentId: ENVIRONMENT_ID,
+      operationMode,
+      transport: "websocket" as const,
+      url: "wss://environment-gateway.paca.test/v1/connect",
+      accessToken: "short-lived-ticket",
+      expiresAt,
+    }));
+    const hasProjectPermission = vi.fn(async () => ({ allowed: true, scopeExists: true }));
+    const executor = createPacaAgentExecutor(
+      dependencies({ connectEnvironment, hasProjectPermission }),
+    );
+    const constraints = {
+      ...scope,
+      environmentId: ENVIRONMENT_ID,
+      operationMode,
+    } satisfies CapabilityConstraints;
+    const session = agentSession("environment.connect", constraints);
+
+    await expect(
+      executor(
+        executeContext("environment.connect", session, {
+          ...scope,
+          environmentId: ENVIRONMENT_ID,
+          operationMode,
+          requestId: REQUEST_ID,
+        }),
+      ),
+    ).resolves.toMatchObject({ environmentId: ENVIRONMENT_ID, operationMode });
+    expect(hasProjectPermission).toHaveBeenCalledWith("user-1", PROJECT_ID, permission);
+    expect(connectEnvironment).toHaveBeenCalledWith({
+      requestId: REQUEST_ID,
+      organizationId: "paca-default",
+      projectId: PROJECT_ID,
+      environmentId: ENVIRONMENT_ID,
+      operationMode,
+      actor: { agentId: "agent-1", hostId: "host-1" },
+      authorizationExpiresAt: expect.any(Date),
+    });
+  });
+
+  it("rejects environment access before the gateway when the delegated permission is revoked", async () => {
+    const connectEnvironment = vi.fn();
+    const executor = createPacaAgentExecutor(
+      dependencies({
+        connectEnvironment,
+        hasProjectPermission: async () => ({ allowed: false, scopeExists: true }),
+      }),
+    );
+    const constraints = {
+      ...scope,
+      environmentId: ENVIRONMENT_ID,
+      operationMode: "execute",
+    } satisfies CapabilityConstraints;
+
+    await expect(
+      executor(
+        executeContext("environment.connect", agentSession("environment.connect", constraints), {
+          ...constraints,
+          requestId: REQUEST_ID,
+        }),
+      ),
+    ).rejects.toThrow("AGENT_DELEGATED_PERMISSION_DENIED");
+    expect(connectEnvironment).not.toHaveBeenCalled();
   });
 });

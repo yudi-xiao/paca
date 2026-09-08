@@ -36,6 +36,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.paca_role_permission,
   public.paca_project_member,
   public.paca_project_member_role,
+  public.paca_environment_scope,
   public.paca_task_type,
   public.paca_task_status,
   public.paca_task_counter,
