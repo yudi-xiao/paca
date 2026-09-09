@@ -31,6 +31,7 @@
     "smoke:agent-workflow:internal": "bun run scripts/smoke-agent-workflow-internal.ts",
     "smoke:agent-task-harness:internal": "bun run scripts/smoke-agent-task-harness-internal.ts",
     "smoke:agent-task-recovery:internal": "bun run scripts/smoke-agent-task-recovery-internal.ts",
+    "smoke:environment:internal": "bun run scripts/smoke-environment-internal.ts",
     "smoke:project-agent-directory:database": "bun run scripts/smoke-project-agent-directory-database.ts",
     "smoke:project-agent-directory:internal": "bun run scripts/smoke-project-agent-directory-internal.ts",
     "smoke:notification:database": "bun run scripts/smoke-notification-database.ts",

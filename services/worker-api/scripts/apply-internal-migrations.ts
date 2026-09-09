@@ -20,6 +20,7 @@ const migrations = [
   "0022_fine_molten_man",
   "0023_worried_paibok",
   "0024_deep_nomad",
+  "0025_moaning_wild_pack",
 ] as const;
 
 type RolePayload = {

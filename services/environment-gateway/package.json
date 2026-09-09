@@ -1,0 +1,28 @@
+{
+  "name": "@paca/environment-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy:internal": "wrangler deploy --env internal --containers-rollout=immediate",
+    "deploy:dry-run": "wrangler deploy --dry-run --env internal",
+    "types": "wrangler types worker-configuration.d.ts --env internal",
+    "types:check": "wrangler types worker-configuration.d.ts --env internal --check",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "vitest run",
+    "check": "bun run types:check && bun run typecheck && bun run lint && bun run test && bun run deploy:dry-run"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "0.12.9",
+    "hono": "4.13.5",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.12",
+    "typescript": "5.9.3",
+    "@types/node": "26.4.0",
+    "vitest": "4.1.11",
+    "wrangler": "4.126.0"
+  }
+}

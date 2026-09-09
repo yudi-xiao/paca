@@ -1,0 +1,74 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "paca-environment-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-09",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    }
+  },
+  "vars": {
+    "ENVIRONMENT": "development",
+    "PUBLIC_ORIGIN": "https://paca-env.howlearnwood.com"
+  },
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "docker.io/cloudflare/sandbox@sha256:4a56a37a3cfd9b38d65bb4b5d0b341e6490a3a4c0226274ae4c1cca4948e85fe",
+      "instance_type": "lite",
+      "max_instances": 5
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "SANDBOXES", "class_name": "Sandbox" },
+      { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1-sandbox-and-connection-tickets",
+      "new_sqlite_classes": ["Sandbox", "ConnectionTicketDO"]
+    }
+  ],
+  "env": {
+    "internal": {
+      "name": "paca-environment-gateway-internal",
+      "workers_dev": false,
+      "routes": [
+        {
+          "pattern": "paca-env.howlearnwood.com",
+          "custom_domain": true
+        }
+      ],
+      "vars": {
+        "ENVIRONMENT": "internal",
+        "PUBLIC_ORIGIN": "https://paca-env.howlearnwood.com"
+      },
+      "containers": [
+        {
+          "class_name": "Sandbox",
+          "image": "docker.io/cloudflare/sandbox@sha256:4a56a37a3cfd9b38d65bb4b5d0b341e6490a3a4c0226274ae4c1cca4948e85fe",
+          "instance_type": "lite",
+          "max_instances": 5
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          { "name": "SANDBOXES", "class_name": "Sandbox" },
+          { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" }
+        ]
+      }
+    }
+  }
+}

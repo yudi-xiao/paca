@@ -176,6 +176,13 @@
       "when": 1788859564724,
       "tag": "0024_deep_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788920520236,
+      "tag": "0025_moaning_wild_pack",
+      "breakpoints": true
     }
   ]
 }

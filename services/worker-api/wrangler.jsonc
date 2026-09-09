@@ -138,6 +138,12 @@
           "id": "ec828e1b80664166ab38aa511cfd1f82"
         }
       ],
+      "services": [
+        {
+          "binding": "ENVIRONMENT_GATEWAY",
+          "service": "paca-environment-gateway-internal"
+        }
+      ],
       "r2_buckets": [
         {
           "binding": "TASK_ATTACHMENTS",

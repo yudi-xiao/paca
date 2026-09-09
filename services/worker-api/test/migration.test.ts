@@ -50,6 +50,14 @@ const brandingMigrationURL = new URL("../drizzle/0023_worried_paibok.sql", impor
 const brandingSnapshotURL = new URL("../drizzle/meta/0023_snapshot.json", import.meta.url);
 const environmentScopeMigrationURL = new URL("../drizzle/0024_deep_nomad.sql", import.meta.url);
 const environmentScopeSnapshotURL = new URL("../drizzle/meta/0024_snapshot.json", import.meta.url);
+const environmentBackendMigrationURL = new URL(
+  "../drizzle/0025_moaning_wild_pack.sql",
+  import.meta.url,
+);
+const environmentBackendSnapshotURL = new URL(
+  "../drizzle/meta/0025_snapshot.json",
+  import.meta.url,
+);
 
 const applicationTables = [
   "user",
@@ -361,6 +369,21 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain("paca_environment_scope_project_id_paca_project_id_fk");
     expect(migration).toContain("paca_environment_scope_backend_check");
     expect(migration).not.toContain("secret");
+  });
+
+  it("adds the Cloudflare Sandbox provider without relabeling the Computer backend", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(environmentBackendMigrationURL, "utf8"),
+      readFile(environmentBackendSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0025_moaning_wild_pack', '${checksum}')`);
+    expect(migration).toContain("'cloudflare-sandbox'");
+    expect(migration).toContain("'cloudflare-computer'");
+    expect(migration).toContain("'legacy-agent-runner'");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

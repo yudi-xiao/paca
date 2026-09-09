@@ -2,7 +2,10 @@ export const environmentConnectionProtocol = "paca.environment.connection.v1" as
 export const ENVIRONMENT_CONNECTION_MAX_TTL_MS = 60_000;
 
 export type EnvironmentOperationMode = "read" | "execute";
-export type EnvironmentBackend = "cloudflare-computer" | "legacy-agent-runner";
+export type EnvironmentBackend =
+  | "cloudflare-sandbox"
+  | "cloudflare-computer"
+  | "legacy-agent-runner";
 
 export type EnvironmentScope = {
   environmentId: string;

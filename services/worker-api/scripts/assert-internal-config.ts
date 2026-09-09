@@ -13,6 +13,7 @@ const expectedDevelopmentRealtimeQueue = "paca-realtime-events-development";
 const expectedInternalRealtimeQueue = "paca-realtime-events-internal";
 const expectedDevelopmentDocumentQueue = "paca-document-materialization-development";
 const expectedInternalDocumentQueue = "paca-document-materialization-internal";
+const expectedInternalEnvironmentGateway = "paca-environment-gateway-internal";
 const expectedPartyBindings = new Map([
   ["ProjectParty", "ProjectParty"],
   ["UserParty", "UserParty"],
@@ -128,6 +129,14 @@ function assertDocumentQueue(record: JsonRecord, label: string, expectedQueue: s
   }
 }
 
+function assertEnvironmentGateway(record: JsonRecord): void {
+  const services = asRecordArray(record.services, "INTERNAL_SERVICES");
+  const binding = services.find((entry) => entry.binding === "ENVIRONMENT_GATEWAY");
+  if (!binding || binding.service !== expectedInternalEnvironmentGateway) {
+    throw new Error("INTERNAL_ENVIRONMENT_GATEWAY_INVALID");
+  }
+}
+
 async function main(): Promise<void> {
   const source = await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8");
   const parsed: unknown = JSON.parse(source);
@@ -151,6 +160,7 @@ async function main(): Promise<void> {
   assertRealtimeQueue(internal, "INTERNAL", expectedInternalRealtimeQueue);
   assertDocumentQueue(config, "ROOT", expectedDevelopmentDocumentQueue);
   assertDocumentQueue(internal, "INTERNAL", expectedInternalDocumentQueue);
+  assertEnvironmentGateway(internal);
 
   if (usesRootDatabase) {
     throw new Error("INTERNAL_HYPERDRIVE_MUST_NOT_MATCH_ROOT");
