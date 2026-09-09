@@ -43,6 +43,32 @@ export function classifyEnvironmentProviderFailure(
 
   const input = record(error);
   const context = record(input?.context);
+  if (input?.name === "ContainerUnavailableError" && input.code === undefined) {
+    return {
+      code: gatewayProviderFailureCodes.transient,
+      retryable: true,
+      retryAfterMs: DEFAULT_RETRY_AFTER_MS,
+      retryInRequest: false,
+    };
+  }
+  if (input?.name === "RPCTransportError" && input.code === undefined) {
+    return isReadOnlyOperation(operation)
+      ? {
+          code: gatewayProviderFailureCodes.transient,
+          retryable: true,
+          retryAfterMs: DEFAULT_RETRY_AFTER_MS,
+        }
+      : { code: gatewayProviderFailureCodes.operationUncertain, retryable: false };
+  }
+  if (input?.name === "OperationInterruptedError" && input.code === undefined) {
+    return isReadOnlyOperation(operation)
+      ? {
+          code: gatewayProviderFailureCodes.transient,
+          retryable: true,
+          retryAfterMs: DEFAULT_RETRY_AFTER_MS,
+        }
+      : { code: gatewayProviderFailureCodes.operationUncertain, retryable: false };
+  }
   if (input?.code === "CONTAINER_UNAVAILABLE" && context?.retryable === true) {
     const capacity =
       context.reason === "no_container_instance_available" ||
@@ -51,6 +77,19 @@ export function classifyEnvironmentProviderFailure(
       code: capacity ? gatewayProviderFailureCodes.capacity : gatewayProviderFailureCodes.starting,
       retryable: true,
       retryAfterMs: retryAfterMs(context.retryAfterMs),
+      // The stable Sandbox SDK has already exhausted its own startup retry
+      // budget before surfacing this error. Let the external caller reacquire
+      // a fresh short-lived ticket instead of multiplying that budget here.
+      retryInRequest: false,
+    };
+  }
+
+  if (input?.code === "INTERNAL_ERROR" && context?.phase === "startup") {
+    return {
+      code: gatewayProviderFailureCodes.transient,
+      retryable: true,
+      retryAfterMs: DEFAULT_RETRY_AFTER_MS,
+      retryInRequest: false,
     };
   }
 

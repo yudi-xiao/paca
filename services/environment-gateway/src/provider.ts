@@ -38,6 +38,37 @@ export interface EnvironmentProvider {
 
 const SANDBOX_ID = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 const DEFAULT_RETRY_AFTER_MS = 500;
+const SAFE_ERROR_TOKEN = /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/u;
+
+function safeErrorToken(value: unknown): string | null {
+  return typeof value === "string" && SAFE_ERROR_TOKEN.test(value) ? value : null;
+}
+
+function errorRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function providerErrorShape(error: unknown): Record<string, unknown> {
+  const input = errorRecord(error);
+  const context = errorRecord(input?.context);
+  const cause = errorRecord(input?.cause);
+  const causeContext = errorRecord(cause?.context);
+  return {
+    name: safeErrorToken(input?.name),
+    code: safeErrorToken(input?.code),
+    retryable: input?.retryable === true,
+    overloaded: input?.overloaded === true,
+    contextPhase: safeErrorToken(context?.phase),
+    contextReason: safeErrorToken(context?.reason),
+    contextRetryable: context?.retryable === true,
+    causeName: safeErrorToken(cause?.name),
+    causeCode: safeErrorToken(cause?.code),
+    causeContextPhase: safeErrorToken(causeContext?.phase),
+    causeContextReason: safeErrorToken(causeContext?.reason),
+  };
+}
 
 function isReadOnlyOperation(operation: EnvironmentProviderOperation): boolean {
   return operation === "prepare" || operation === "status";
@@ -80,6 +111,14 @@ async function providerCall<T>(
   try {
     return await call();
   } catch (error) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        message: "environment.provider.sdk_error_shape",
+        operation,
+        ...providerErrorShape(error),
+      }),
+    );
     throw normalizeEnvironmentProviderFailure(error, operation);
   }
 }

@@ -354,16 +354,16 @@ describe("Paca Environment Gateway", () => {
     expect(test.consumeTicket).not.toHaveBeenCalled();
   });
 
-  it("retries a classified cold-start failure within the bounded read-only budget", async () => {
+  it("retries a classified transport failure within the bounded read-only budget", async () => {
     const environmentProvider = provider();
     environmentProvider.prepare
       .mockRejectedValueOnce({
-        code: "CONTAINER_UNAVAILABLE",
-        message: "container starting",
+        code: "RPC_TRANSPORT_ERROR",
+        message: "transport lost",
         context: {
-          reason: "container_starting",
-          retryable: true,
-          retryAfterMs: 250,
+          kind: "peer_closed",
+          originalMessage: "peer closed",
+          errorName: "Error",
         },
       })
       .mockResolvedValueOnce(undefined);
@@ -383,19 +383,19 @@ describe("Paca Environment Gateway", () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("x-paca-provider-attempts")).toBe("2");
-    expect(wait).toHaveBeenCalledWith(250);
+    expect(wait).toHaveBeenCalledWith(500);
     expect(environmentProvider.prepare).toHaveBeenCalledTimes(2);
   });
 
-  it("returns bounded retry metadata after cold-start retries are exhausted", async () => {
+  it("returns bounded retry metadata after transport retries are exhausted", async () => {
     const environmentProvider = provider();
     environmentProvider.status.mockRejectedValue({
-      code: "CONTAINER_UNAVAILABLE",
-      message: "capacity unavailable",
+      code: "RPC_TRANSPORT_ERROR",
+      message: "transport lost",
       context: {
-        reason: "max_container_instances_exceeded",
-        retryable: true,
-        retryAfterMs: 1_500,
+        kind: "peer_closed",
+        originalMessage: "peer closed",
+        errorName: "Error",
       },
     });
     const wait = vi.fn(async () => undefined);
@@ -413,11 +413,11 @@ describe("Paca Environment Gateway", () => {
       test.env,
     );
     expect(response.status).toBe(503);
-    expect(response.headers.get("retry-after")).toBe("2");
+    expect(response.headers.get("retry-after")).toBe("1");
     await expect(response.json()).resolves.toEqual({
-      code: "GATEWAY_PROVIDER_CAPACITY",
+      code: "GATEWAY_PROVIDER_TRANSIENT",
       retryable: true,
-      retryAfterMs: 1_500,
+      retryAfterMs: 500,
       attempts: 3,
     });
     expect(wait).toHaveBeenCalledTimes(2);

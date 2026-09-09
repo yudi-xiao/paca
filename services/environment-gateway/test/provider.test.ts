@@ -19,11 +19,61 @@ describe("environment provider failure classification", () => {
       code: "GATEWAY_PROVIDER_STARTING",
       retryable: true,
       retryAfterMs: 250,
+      retryInRequest: false,
     });
     expect(classifyEnvironmentProviderFailure(capacity, "terminal")).toEqual({
       code: "GATEWAY_PROVIDER_CAPACITY",
       retryable: true,
       retryAfterMs: 500,
+      retryInRequest: false,
+    });
+  });
+
+  it("treats an SDK-wrapped startup failure as externally retryable", () => {
+    const error = {
+      code: "INTERNAL_ERROR",
+      message: "container failed to start",
+      context: { phase: "startup", error: "opaque platform detail" },
+    };
+
+    expect(classifyEnvironmentProviderFailure(error, "prepare")).toEqual({
+      code: "GATEWAY_PROVIDER_TRANSIENT",
+      retryable: true,
+      retryAfterMs: 500,
+      retryInRequest: false,
+    });
+  });
+
+  it("falls back to stable SDK class names when DO transport strips getters", () => {
+    expect(
+      classifyEnvironmentProviderFailure(
+        { name: "ContainerUnavailableError", message: "opaque" },
+        "prepare",
+      ),
+    ).toEqual({
+      code: "GATEWAY_PROVIDER_TRANSIENT",
+      retryable: true,
+      retryAfterMs: 500,
+      retryInRequest: false,
+    });
+    expect(
+      classifyEnvironmentProviderFailure(
+        { name: "RPCTransportError", message: "opaque" },
+        "status",
+      ),
+    ).toEqual({
+      code: "GATEWAY_PROVIDER_TRANSIENT",
+      retryable: true,
+      retryAfterMs: 500,
+    });
+    expect(
+      classifyEnvironmentProviderFailure(
+        { name: "OperationInterruptedError", message: "opaque" },
+        "terminal",
+      ),
+    ).toEqual({
+      code: "GATEWAY_PROVIDER_OPERATION_UNCERTAIN",
+      retryable: false,
     });
   });
 
