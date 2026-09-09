@@ -28,7 +28,7 @@ function configJson() {
 			keyAlgorithm: "Ed25519",
 			publicKey,
 			privateKey,
-			capabilities: ["project.read", "task.execute"],
+			capabilities: ["project.read", "task.execute", "environment.connect"],
 			grantRequests: [
 				{
 					capability: "project.read",
@@ -43,6 +43,16 @@ function configJson() {
 					constraints: {
 						organizationId: "org-1",
 						projectId: "11111111-1111-4111-8111-111111111111",
+						validUntil: "2099-01-01T00:00:00.000Z",
+					},
+				},
+				{
+					capability: "environment.connect",
+					constraints: {
+						organizationId: "org-1",
+						projectId: "11111111-1111-4111-8111-111111111111",
+						environmentId: "22222222-2222-4222-8222-222222222222",
+						operationMode: "execute",
 						validUntil: "2099-01-01T00:00:00.000Z",
 					},
 				},
@@ -157,6 +167,152 @@ describe("Agent Auth MCP client", () => {
 		await expect(client.execute("task.write", {})).rejects.toEqual(
 			new AgentAuthClientError("AGENT_CAPABILITY_NOT_REQUESTED"),
 		);
+	});
+
+	it("retries environment ticket issuance only when the server explicitly allows it", async () => {
+		const fixture = await writeConfig();
+		const config = await loadAgentAuthConfig(fixture.path);
+		const wait = vi.fn(async () => undefined);
+		let issueAttempts = 0;
+		const request = vi.fn(
+			async (input: string | URL | Request, init?: RequestInit) => {
+				const url = String(input);
+				if (url === config.defaultLocation) {
+					issueAttempts += 1;
+					if (issueAttempts === 1) {
+						return Response.json(
+							{
+								error: "AGENT_ENVIRONMENT_GATEWAY_UNAVAILABLE",
+								message: "AGENT_ENVIRONMENT_GATEWAY_UNAVAILABLE",
+								retryable: true,
+								retry_after_ms: 750,
+							},
+							{ status: 503 },
+						);
+					}
+					return Response.json({
+						data: {
+							protocolVersion: "paca.environment.connection.v1",
+							requestId: "33333333-3333-4333-8333-333333333333",
+							environmentId: "22222222-2222-4222-8222-222222222222",
+							operationMode: "execute",
+							transport: "websocket",
+							url: "wss://paca-env.example.com/v1/connect",
+							accessToken: "ticket-not-logged",
+							expiresAt: "2026-09-02T08:00:45.000Z",
+						},
+					});
+				}
+				expect(url).toBe("https://paca-env.example.com/v1/connect");
+				expect(new Headers(init?.headers).get("authorization")).toBe(
+					"Bearer ticket-not-logged",
+				);
+				return Response.json({
+					status: "ready",
+					environmentId: "22222222-2222-4222-8222-222222222222",
+				});
+			},
+		);
+		const client = new AgentAuthClient(
+			config,
+			request as typeof fetch,
+			() => new Date("2026-09-02T08:00:00.000Z"),
+			wait,
+		);
+
+		await expect(
+			client.execute("environment.connect", {
+				requestId: "33333333-3333-4333-8333-333333333333",
+			}),
+		).resolves.toMatchObject({ transport: "websocket" });
+		expect(issueAttempts).toBe(2);
+		expect(wait).toHaveBeenCalledOnce();
+		expect(wait).toHaveBeenCalledWith(750);
+	});
+
+	it("reacquires an idempotent environment ticket after a retryable prepare failure", async () => {
+		const fixture = await writeConfig();
+		const config = await loadAgentAuthConfig(fixture.path);
+		const wait = vi.fn(async () => undefined);
+		let prepareAttempts = 0;
+		const request = vi.fn(async (input: string | URL | Request) => {
+			if (String(input) === config.defaultLocation) {
+				return Response.json({
+					data: {
+						protocolVersion: "paca.environment.connection.v1",
+						requestId: "33333333-3333-4333-8333-333333333333",
+						environmentId: "22222222-2222-4222-8222-222222222222",
+						operationMode: "execute",
+						transport: "websocket",
+						url: "wss://paca-env.example.com/v1/connect",
+						accessToken: `ticket-${prepareAttempts}`,
+						expiresAt: "2026-09-02T08:00:45.000Z",
+					},
+				});
+			}
+			prepareAttempts += 1;
+			return prepareAttempts === 1
+				? Response.json(
+						{
+							code: "GATEWAY_PROVIDER_STARTING",
+							retryable: true,
+							retryAfterMs: 250,
+							attempts: 3,
+						},
+						{ status: 503 },
+					)
+				: Response.json({
+						status: "ready",
+						environmentId: "22222222-2222-4222-8222-222222222222",
+					});
+		});
+		const client = new AgentAuthClient(
+			config,
+			request as typeof fetch,
+			() => new Date("2026-09-02T08:00:00.000Z"),
+			wait,
+		);
+
+		await client.execute("environment.connect", {
+			requestId: "33333333-3333-4333-8333-333333333333",
+		});
+		expect(prepareAttempts).toBe(2);
+		expect(request).toHaveBeenCalledTimes(4);
+		expect(wait).toHaveBeenCalledWith(250);
+		const issueBodies = request.mock.calls
+			.filter(([url]) => String(url) === config.defaultLocation)
+			.map(([, init]) => JSON.parse(String(init?.body)) as unknown);
+		expect(issueBodies[0]).toEqual(issueBodies[1]);
+	});
+
+	it("does not retry an unsupported environment provider", async () => {
+		const fixture = await writeConfig();
+		const request = vi.fn(async () =>
+			Response.json(
+				{
+					error: "AGENT_ENVIRONMENT_PROVIDER_UNSUPPORTED",
+					message: "AGENT_ENVIRONMENT_PROVIDER_UNSUPPORTED",
+					retryable: false,
+				},
+				{ status: 503 },
+			),
+		);
+		const wait = vi.fn(async () => undefined);
+		const client = new AgentAuthClient(
+			await loadAgentAuthConfig(fixture.path),
+			request as typeof fetch,
+			() => new Date("2026-09-02T08:00:00.000Z"),
+			wait,
+		);
+
+		await expect(
+			client.execute("environment.connect", {}),
+		).rejects.toMatchObject({
+			code: "AGENT_ENVIRONMENT_PROVIDER_UNSUPPORTED",
+			retryable: false,
+		});
+		expect(request).toHaveBeenCalledOnce();
+		expect(wait).not.toHaveBeenCalled();
 	});
 
 	it("rejects Agent API paths that could escape the enrolled origin boundary", async () => {

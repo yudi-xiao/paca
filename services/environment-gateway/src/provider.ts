@@ -1,6 +1,16 @@
-import { getSandbox, proxyTerminal } from "@cloudflare/sandbox";
+import {
+  getSandbox,
+  isDurableObjectCodeUpdateReset,
+  isPlatformTransientError,
+  proxyTerminal,
+} from "@cloudflare/sandbox";
 
 import type { TicketClaims } from "./protocol";
+import {
+  ClassifiedEnvironmentProviderError,
+  classifyEnvironmentProviderFailure,
+  type EnvironmentProviderOperation,
+} from "./provider-failure";
 
 export type EnvironmentStatus = {
   environmentId: string;
@@ -17,6 +27,7 @@ export type EnvironmentStatus = {
 
 export interface EnvironmentProvider {
   supports(claims: TicketClaims): boolean;
+  prepare(claims: TicketClaims): Promise<void>;
   status(claims: TicketClaims): Promise<EnvironmentStatus>;
   terminal(claims: TicketClaims, sessionId: string, request: Request): Promise<Response>;
   terminate(
@@ -26,6 +37,52 @@ export interface EnvironmentProvider {
 }
 
 const SANDBOX_ID = /^[a-z0-9][a-z0-9-]{0,62}$/u;
+const DEFAULT_RETRY_AFTER_MS = 500;
+
+function isReadOnlyOperation(operation: EnvironmentProviderOperation): boolean {
+  return operation === "prepare" || operation === "status";
+}
+
+function normalizeEnvironmentProviderFailure(
+  error: unknown,
+  operation: EnvironmentProviderOperation,
+): ClassifiedEnvironmentProviderError {
+  const failure = classifyEnvironmentProviderFailure(error, operation);
+  if (failure.code !== "GATEWAY_PROVIDER_FAILED") {
+    return new ClassifiedEnvironmentProviderError(failure);
+  }
+  if (isDurableObjectCodeUpdateReset(error)) {
+    return new ClassifiedEnvironmentProviderError({
+      code: "GATEWAY_PROVIDER_TRANSIENT",
+      retryable: true,
+      retryAfterMs: DEFAULT_RETRY_AFTER_MS,
+      retryInRequest: false,
+    });
+  }
+  if (isPlatformTransientError(error)) {
+    return new ClassifiedEnvironmentProviderError(
+      isReadOnlyOperation(operation)
+        ? {
+            code: "GATEWAY_PROVIDER_TRANSIENT",
+            retryable: true,
+            retryAfterMs: DEFAULT_RETRY_AFTER_MS,
+          }
+        : { code: "GATEWAY_PROVIDER_OPERATION_UNCERTAIN", retryable: false },
+    );
+  }
+  return new ClassifiedEnvironmentProviderError(failure);
+}
+
+async function providerCall<T>(
+  operation: EnvironmentProviderOperation,
+  call: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    throw normalizeEnvironmentProviderFailure(error, operation);
+  }
+}
 
 export class CloudflareSandboxProvider implements EnvironmentProvider {
   constructor(private readonly env: Pick<Env, "SANDBOXES">) {}
@@ -37,6 +94,11 @@ export class CloudflareSandboxProvider implements EnvironmentProvider {
   private sandbox(claims: TicketClaims) {
     return getSandbox(this.env.SANDBOXES, claims.reference, {
       sleepAfter: "10m",
+      containerTimeouts: {
+        instanceGetTimeoutMS: 30_000,
+        portReadyTimeoutMS: 90_000,
+        waitIntervalMS: 300,
+      },
       labels: {
         environmentId: claims.environmentId,
         projectId: claims.projectId,
@@ -45,8 +107,12 @@ export class CloudflareSandboxProvider implements EnvironmentProvider {
     });
   }
 
+  async prepare(claims: TicketClaims): Promise<void> {
+    await providerCall("prepare", () => this.sandbox(claims).listProcesses()).then(() => undefined);
+  }
+
   async status(claims: TicketClaims): Promise<EnvironmentStatus> {
-    const processes = await this.sandbox(claims).listProcesses();
+    const processes = await providerCall("status", () => this.sandbox(claims).listProcesses());
     return {
       environmentId: claims.environmentId,
       processes: processes.slice(0, 1000).map((process) => ({
@@ -62,10 +128,12 @@ export class CloudflareSandboxProvider implements EnvironmentProvider {
   }
 
   async terminal(claims: TicketClaims, sessionId: string, request: Request): Promise<Response> {
-    return proxyTerminal(this.sandbox(claims), sessionId, request, {
-      cols: 120,
-      rows: 30,
-    });
+    return providerCall("terminal", () =>
+      proxyTerminal(this.sandbox(claims), sessionId, request, {
+        cols: 120,
+        rows: 30,
+      }),
+    );
   }
 
   async terminate(
@@ -75,9 +143,16 @@ export class CloudflareSandboxProvider implements EnvironmentProvider {
     if (input.backend !== "cloudflare-sandbox" || !SANDBOX_ID.test(input.reference)) {
       throw new Error("GATEWAY_PROVIDER_UNAVAILABLE");
     }
-    const result = await getSandbox(this.env.SANDBOXES, input.reference, {
-      sleepAfter: "10m",
-    }).deleteSession(sessionId);
+    const result = await providerCall("terminate", () =>
+      getSandbox(this.env.SANDBOXES, input.reference, {
+        sleepAfter: "10m",
+        containerTimeouts: {
+          instanceGetTimeoutMS: 30_000,
+          portReadyTimeoutMS: 90_000,
+          waitIntervalMS: 300,
+        },
+      }).deleteSession(sessionId),
+    );
     if (!result.success) throw new Error("GATEWAY_SESSION_TERMINATION_FAILED");
   }
 }

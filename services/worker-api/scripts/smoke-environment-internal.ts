@@ -14,6 +14,8 @@ type EnvironmentOperationMode = "read" | "execute";
 type RevocationMode = "grant" | "project-permission";
 
 const TERMINAL_READY_TIMEOUT_MS = 90_000;
+const PROVIDER_ACTION_MAX_ATTEMPTS = 3;
+const PROVIDER_ACTION_TIMEOUT_MS = 90_000;
 
 const execFileAsync = promisify(execFile);
 const root = new URL("../../../", import.meta.url);
@@ -279,6 +281,79 @@ async function waitForTerminalRevocation(socket: WebSocket): Promise<boolean> {
   });
 }
 
+async function providerActionWithRetry(
+  connection: { url: string; accessToken: string },
+  action: "prepare" | "status",
+): Promise<{
+  body: unknown;
+  clientAttempts: number;
+  providerAttempts: number;
+  durationMs: number;
+}> {
+  const endpoint = connection.url.replace(/^wss:/u, "https:");
+  const startedAt = Date.now();
+  let providerAttempts = 0;
+  for (
+    let clientAttempts = 1;
+    clientAttempts <= PROVIDER_ACTION_MAX_ATTEMPTS;
+    clientAttempts += 1
+  ) {
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${connection.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action }),
+        redirect: "error",
+        signal: AbortSignal.timeout(PROVIDER_ACTION_TIMEOUT_MS),
+      });
+    } catch {
+      if (clientAttempts === PROVIDER_ACTION_MAX_ATTEMPTS) {
+        throw new Error("SANDBOX_PROVIDER_ACTION_UNAVAILABLE");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      continue;
+    }
+    const attemptsHeader = Number(response.headers.get("x-paca-provider-attempts") ?? 0);
+    if (Number.isSafeInteger(attemptsHeader) && attemptsHeader > 0 && attemptsHeader <= 3) {
+      providerAttempts += attemptsHeader;
+    }
+    const body = await jsonOrNull(response);
+    if (response.ok) {
+      return {
+        body,
+        clientAttempts,
+        providerAttempts: Math.max(providerAttempts, 1),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+    const failure = asRecord(body);
+    const retryAfterMs = failure?.retryAfterMs;
+    if (
+      response.status !== 503 ||
+      failure?.retryable !== true ||
+      clientAttempts === PROVIDER_ACTION_MAX_ATTEMPTS
+    ) {
+      throw new Error(responseCode(body, `SANDBOX_PROVIDER_ACTION_HTTP_${response.status}`));
+    }
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        typeof retryAfterMs === "number" &&
+          Number.isSafeInteger(retryAfterMs) &&
+          retryAfterMs >= 100 &&
+          retryAfterMs <= 5_000
+          ? retryAfterMs
+          : 500,
+      ),
+    );
+  }
+  throw new Error("SANDBOX_PROVIDER_RETRY_INVARIANT");
+}
+
 function uuid(value: string, code: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)) {
     throw new Error(code);
@@ -314,7 +389,7 @@ async function main(): Promise<void> {
     process.env.PACA_AGENT_HOST_CONFIG?.trim() ||
     fileURLToPath(new URL(".paca/agent-host.json", root));
   const environmentId = crypto.randomUUID();
-  const gatewayReference = "paca-environment-smoke";
+  const gatewayReference = `paca-env-smoke-${environmentId.slice(0, 8)}`;
   const role = await createTemporaryDatabaseRole(pscaleOrganization);
   let scopeCreated = false;
   let agentId: string | null = null;
@@ -465,6 +540,11 @@ async function main(): Promise<void> {
     }
 
     let processCount: number | null = null;
+    let providerReadiness: {
+      clientAttempts: number;
+      providerAttempts: number;
+      durationMs: number;
+    } | null = null;
     let terminalVerified: {
       markerObserved: boolean;
       replayRejected: boolean;
@@ -474,19 +554,11 @@ async function main(): Promise<void> {
     let terminalRevocation: Promise<boolean> | null = null;
     let preIssuedConnection: { url: string; accessToken: string } | null = null;
     if (operationMode === "read") {
-      const statusResponse = await fetch(connection.url, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${connection.accessToken}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ action: "status" }),
-        redirect: "error",
-        signal: AbortSignal.timeout(55_000),
-      });
-      const statusBody = await jsonOrNull(statusResponse);
-      requireStatus(statusResponse, 200, statusBody, "SANDBOX_STATUS");
-      const environmentStatus = asRecord(statusBody);
+      const status = await providerActionWithRetry(
+        { url: connection.url, accessToken: connection.accessToken },
+        "status",
+      );
+      const environmentStatus = asRecord(status.body);
       if (
         environmentStatus?.environmentId !== environmentId ||
         !Array.isArray(environmentStatus.processes)
@@ -494,7 +566,25 @@ async function main(): Promise<void> {
         throw new Error("SANDBOX_STATUS_INVALID");
       }
       processCount = environmentStatus.processes.length;
+      providerReadiness = {
+        clientAttempts: status.clientAttempts,
+        providerAttempts: status.providerAttempts,
+        durationMs: status.durationMs,
+      };
     } else {
+      const prepared = await providerActionWithRetry(
+        { url: connection.url, accessToken: connection.accessToken },
+        "prepare",
+      );
+      const prepareBody = asRecord(prepared.body);
+      if (prepareBody?.status !== "ready" || prepareBody.environmentId !== environmentId) {
+        throw new Error("SANDBOX_PREPARE_INVALID");
+      }
+      providerReadiness = {
+        clientAttempts: prepared.clientAttempts,
+        providerAttempts: prepared.providerAttempts,
+        durationMs: prepared.durationMs,
+      };
       terminalSocket = await openVerifiedTerminal(connection.url, connection.accessToken);
       const replayRejected = await verifyTicketRejected(
         connection.url,
@@ -603,6 +693,10 @@ async function main(): Promise<void> {
         backend: "cloudflare-sandbox",
         operationMode,
         revocationMode,
+        coldStartReference: gatewayReference,
+        providerClientAttempts: providerReadiness?.clientAttempts,
+        providerAttempts: providerReadiness?.providerAttempts,
+        providerReadyDurationMs: providerReadiness?.durationMs,
         ...(processCount === null ? {} : { processCount }),
         ...(terminalVerified ?? {}),
         grantRevoked: revocationMode === "grant",

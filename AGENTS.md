@@ -223,6 +223,8 @@ Paca 的 Agent 控制面不得绑定某一种模型或执行器。每个 Better 
 
 领取和推进工作项使用独立的 `task.execute` Capability，不把“可以运行任务”混入 `task.write`。Grant 至少绑定 Organization、Project、Task、`operationMode=execute`、允许的 action 与短有效期；Agent Auth Session 中的 Agent/Host 是可信租约所有者，客户端提交的 actor 字段一律忽略。PostgreSQL 对同一 Task 的 active lease、单调版本、checkpoint 序列、幂等 request ID 和事件记录负责，AgentDO 只镜像有界运行摘要。Harness 若要实际修改 Task 或 Document，仍需另行取得对应 `task.write`、`document.edit` Grant，`task.execute` 本身不授予业务字段写权限。
 
+Environment Gateway 必须把 provider 冷启动、容量不足、瞬时传输故障、结果不确定和永久失败映射为不泄露平台原始错误的稳定协议码，并显式返回有界 `retryable`/`retryAfterMs`。execute 连接允许在消费一次性 PTY 票据前执行只读 prepare 预热；Gateway 只可在同一请求内重试确定未产生副作用的 prepare/status 操作。Cloudflare Agent、本地 Codex、Claude Code、DeepSeek 等 Harness 只能在服务端明确标记可重试时，以同一业务幂等 request ID 和固定次数/时间预算重试；PTY、shell 或其他可能已执行的操作若结果不确定，禁止自动重放。
+
 Cloudflare Agents SDK 的默认 `/agents/*` 路由不得直接公开。浏览器、Cloudflare Agent 和外部 Harness 都先经过 Hono 的 Better Auth Session 或 Agent Auth JWT 校验，再由服务端按 Better Auth Agent ID 获取 AgentDO stub；AgentDO RPC 与 Workflow 在执行敏感工具前仍需重查 active Grant、constraints 和 delegated 用户权限交集。
 
 Agent Tracing 是运行可观测性，不是权限、业务审计或可靠事件日志。生产默认不记录 prompt、文档内容、JWT、Grant、secret 和工具原始 payload；只记录 run ID、Agent ID、Harness 类型、工具名、安全状态码、耗时和关联 span。Tracing 可能采样或丢失，业务审计必须继续写入 PostgreSQL。若后续使用 AI SDK，应采用 Cloudflare 官方 tracing 包装或自定义 span，并保持 payload 脱敏。

@@ -14,12 +14,18 @@ import {
   type TicketClaims,
 } from "./protocol";
 import type { EnvironmentProvider } from "./provider";
+import {
+  classifyEnvironmentProviderFailure,
+  type EnvironmentProviderFailure,
+  type EnvironmentProviderOperation,
+} from "./provider-failure";
 import { accessTokenFromRequest, signTicket, TicketError, verifyTicket } from "./ticket";
 
 const MAX_ISSUE_REQUEST_BYTES = 16 * 1024;
 const PRIVATE_ISSUE_PATH = "/v1/connections";
 const PRIVATE_REVOCATION_PATH = "/v1/revocations/agent";
 const PRIVATE_PROJECT_REVOCATION_PATH = "/v1/revocations/project";
+const MAX_PROVIDER_ATTEMPTS = 3;
 
 export type GatewayBindings = Pick<
   Env,
@@ -28,6 +34,7 @@ export type GatewayBindings = Pick<
 
 export type GatewayDependencies = {
   now: () => Date;
+  wait: (milliseconds: number) => Promise<void>;
   provider: (env: GatewayBindings) => EnvironmentProvider;
   consumeTicket: (env: GatewayBindings, ticketId: string, expiresAtMs: number) => Promise<boolean>;
   registerConnection: (
@@ -118,13 +125,94 @@ async function boundedJson(request: Request): Promise<unknown> {
   }
 }
 
-function codeResponse(code: string, status: 400 | 401 | 403 | 404 | 409 | 422 | 500 | 503) {
+function codeResponse(code: string, status: 400 | 401 | 403 | 404 | 409 | 422 | 500 | 502 | 503) {
   return Response.json(
     { code },
     {
       status,
       headers: { "cache-control": "no-store" },
     },
+  );
+}
+
+class ProviderCallFailure extends Error {
+  constructor(
+    readonly failure: EnvironmentProviderFailure,
+    readonly attempts: number,
+  ) {
+    super(failure.code);
+    this.name = "ProviderCallFailure";
+  }
+}
+
+async function callReadOnlyProvider<T>(
+  dependencies: GatewayDependencies,
+  operation: "prepare" | "status",
+  call: () => Promise<T>,
+): Promise<{ value: T; attempts: number }> {
+  for (let attempts = 1; attempts <= MAX_PROVIDER_ATTEMPTS; attempts += 1) {
+    try {
+      return { value: await call(), attempts };
+    } catch (error) {
+      const failure = classifyEnvironmentProviderFailure(error, operation);
+      if (
+        !failure.retryable ||
+        failure.retryInRequest === false ||
+        attempts === MAX_PROVIDER_ATTEMPTS
+      ) {
+        throw new ProviderCallFailure(failure, attempts);
+      }
+      await dependencies.wait(failure.retryAfterMs ?? 500);
+    }
+  }
+  throw new Error("GATEWAY_PROVIDER_RETRY_INVARIANT");
+}
+
+function providerFailureResponse(
+  failure: EnvironmentProviderFailure,
+  attempts: number,
+  operation: EnvironmentProviderOperation,
+  claims: TicketClaims,
+): Response {
+  console.error(
+    JSON.stringify({
+      level: "error",
+      message: "environment.provider.failed",
+      requestId: claims.jti,
+      environmentId: claims.environmentId,
+      backend: claims.backend,
+      operation,
+      code: failure.code,
+      retryable: failure.retryable,
+      attempts,
+    }),
+  );
+  const headers = new Headers({
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  });
+  if (failure.retryable && failure.retryAfterMs !== undefined) {
+    headers.set("retry-after", String(Math.max(1, Math.ceil(failure.retryAfterMs / 1_000))));
+  }
+  return Response.json(
+    {
+      code: failure.code,
+      retryable: failure.retryable,
+      ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
+      attempts,
+    },
+    { status: failure.retryable ? 503 : 502, headers },
+  );
+}
+
+function unsupportedProviderResponse(): Response {
+  return Response.json(
+    {
+      code: "GATEWAY_PROVIDER_UNSUPPORTED",
+      retryable: false,
+      attempts: 1,
+    },
+    { status: 503, headers: { "cache-control": "no-store" } },
   );
 }
 
@@ -195,7 +283,7 @@ export function createGatewayApp(
     const claims = claimsFromIssue(issueRequest, dependencies.now());
     if (!claims) return codeResponse("GATEWAY_AUTHORIZATION_EXPIRED", 403);
     const provider = dependencies.provider(context.env);
-    if (!provider.supports(claims)) return codeResponse("GATEWAY_PROVIDER_UNAVAILABLE", 503);
+    if (!provider.supports(claims)) return unsupportedProviderResponse();
 
     try {
       const connectionOrigin =
@@ -305,7 +393,7 @@ export function createGatewayApp(
       return codeResponse("GATEWAY_TICKET_INVALID", 401);
     }
     const provider = dependencies.provider(context.env);
-    if (!provider.supports(claims)) return codeResponse("GATEWAY_PROVIDER_UNAVAILABLE", 503);
+    if (!provider.supports(claims)) return unsupportedProviderResponse();
     if (
       !(await dependencies.isTicketAuthorized(
         context.env,
@@ -318,6 +406,46 @@ export function createGatewayApp(
     }
 
     if (claims.operationMode === "execute") {
+      if (
+        context.req.method === "POST" &&
+        context.req.header("content-type")?.split(";", 1)[0]?.trim() === "application/json"
+      ) {
+        let body: unknown;
+        try {
+          body = await boundedJson(context.req.raw);
+        } catch {
+          return codeResponse("GATEWAY_REQUEST_INVALID", 400);
+        }
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          Array.isArray(body) ||
+          Object.keys(body).length !== 1 ||
+          !("action" in body) ||
+          body.action !== "prepare"
+        ) {
+          return codeResponse("GATEWAY_PREPARE_REQUEST_INVALID", 400);
+        }
+        try {
+          const prepared = await callReadOnlyProvider(dependencies, "prepare", () =>
+            provider.prepare(claims),
+          );
+          return Response.json(
+            { status: "ready", environmentId: claims.environmentId },
+            {
+              headers: {
+                "cache-control": "no-store",
+                "x-paca-provider-attempts": String(prepared.attempts),
+              },
+            },
+          );
+        } catch (error) {
+          if (error instanceof ProviderCallFailure) {
+            return providerFailureResponse(error.failure, error.attempts, "prepare", claims);
+          }
+          throw error;
+        }
+      }
       if (
         context.req.method !== "GET" ||
         context.req.header("upgrade")?.toLowerCase() !== "websocket"
@@ -354,7 +482,7 @@ export function createGatewayApp(
           return codeResponse("GATEWAY_TICKET_REVOKED", 401);
         }
         return terminalResponse;
-      } catch {
+      } catch (error) {
         if (registered) {
           await dependencies
             .unregisterConnection(context.env, claims.agentId, claims.jti)
@@ -362,17 +490,12 @@ export function createGatewayApp(
         } else if (terminalOpened) {
           await provider.terminate(connection, sessionId).catch(() => undefined);
         }
-        console.error(
-          JSON.stringify({
-            level: "error",
-            message: "environment.provider.failed",
-            requestId: claims.jti,
-            environmentId: claims.environmentId,
-            backend: claims.backend,
-            operationMode: claims.operationMode,
-          }),
+        return providerFailureResponse(
+          classifyEnvironmentProviderFailure(error, "terminal"),
+          1,
+          "terminal",
+          claims,
         );
-        return codeResponse("GATEWAY_PROVIDER_FAILED", 503);
       }
     }
 
@@ -399,21 +522,20 @@ export function createGatewayApp(
       return codeResponse("GATEWAY_STATUS_REQUEST_INVALID", 400);
     }
     try {
-      return Response.json(await provider.status(claims), {
-        headers: { "cache-control": "no-store" },
-      });
-    } catch {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          message: "environment.provider.failed",
-          requestId: claims.jti,
-          environmentId: claims.environmentId,
-          backend: claims.backend,
-          operationMode: claims.operationMode,
-        }),
+      const status = await callReadOnlyProvider(dependencies, "status", () =>
+        provider.status(claims),
       );
-      return codeResponse("GATEWAY_PROVIDER_FAILED", 503);
+      return Response.json(status.value, {
+        headers: {
+          "cache-control": "no-store",
+          "x-paca-provider-attempts": String(status.attempts),
+        },
+      });
+    } catch (error) {
+      if (error instanceof ProviderCallFailure) {
+        return providerFailureResponse(error.failure, error.attempts, "status", claims);
+      }
+      throw error;
     }
   });
 

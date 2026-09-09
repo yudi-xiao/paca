@@ -149,6 +149,76 @@ describe("ServiceBindingEnvironmentConnectionGateway", () => {
     });
   });
 
+  it("preserves bounded retry metadata from a transient Gateway failure", async () => {
+    const gateway = new ServiceBindingEnvironmentConnectionGateway(
+      fetcher(async () =>
+        Response.json(
+          {
+            code: "GATEWAY_PROVIDER_CAPACITY",
+            retryable: true,
+            retryAfterMs: 1_500,
+            attempts: 3,
+          },
+          { status: 503 },
+        ),
+      ),
+    );
+
+    await expect(gateway.issue(input())).rejects.toMatchObject({
+      code: environmentConnectionErrorCodes.gatewayUnavailable,
+      retryable: true,
+      retryAfterMs: 1_500,
+    });
+  });
+
+  it("distinguishes unsupported and uncertain provider failures from retryable outages", async () => {
+    const unsupported = new ServiceBindingEnvironmentConnectionGateway(
+      fetcher(async () =>
+        Response.json(
+          { code: "GATEWAY_PROVIDER_UNSUPPORTED", retryable: false, attempts: 1 },
+          { status: 503 },
+        ),
+      ),
+    );
+    const uncertain = new ServiceBindingEnvironmentConnectionGateway(
+      fetcher(async () =>
+        Response.json(
+          { code: "GATEWAY_PROVIDER_OPERATION_UNCERTAIN", retryable: false, attempts: 1 },
+          { status: 502 },
+        ),
+      ),
+    );
+
+    await expect(unsupported.issue(input())).rejects.toMatchObject({
+      code: environmentConnectionErrorCodes.providerUnsupported,
+      retryable: false,
+    });
+    await expect(uncertain.issue(input())).rejects.toMatchObject({
+      code: environmentConnectionErrorCodes.providerFailed,
+      retryable: false,
+    });
+  });
+
+  it("rejects an unbounded or malformed Gateway failure envelope", async () => {
+    const gateway = new ServiceBindingEnvironmentConnectionGateway(
+      fetcher(async () =>
+        Response.json(
+          {
+            code: "GATEWAY_PROVIDER_CAPACITY",
+            retryable: true,
+            retryAfterMs: 60_000,
+            attempts: 3,
+          },
+          { status: 503 },
+        ),
+      ),
+    );
+    await expect(gateway.issue(input())).rejects.toMatchObject({
+      code: environmentConnectionErrorCodes.gatewayResponseInvalid,
+      retryable: false,
+    });
+  });
+
   it.each([
     () => new Response("not json", { status: 200, headers: { "content-type": "text/plain" } }),
     () => Response.json({ ...gatewayResponse(), unexpected: true }),

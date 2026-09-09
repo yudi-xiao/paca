@@ -9,6 +9,10 @@ import { lstat, readFile } from "node:fs/promises";
 const MAX_CONFIG_BYTES = 64 * 1024;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const ERROR_CODE = /^[A-Z][A-Z0-9_]{0,127}$/;
+const ENVIRONMENT_RETRY_MAX_ATTEMPTS = 3;
+const ENVIRONMENT_RETRY_DEFAULT_DELAY_MS = 500;
+const ENVIRONMENT_RETRY_MAX_DELAY_MS = 5_000;
+const ENVIRONMENT_PREPARE_TIMEOUT_MS = 30_000;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -53,7 +57,11 @@ export type AgentAuthConfig = {
 };
 
 export class AgentAuthClientError extends Error {
-	constructor(readonly code: string) {
+	constructor(
+		readonly code: string,
+		readonly retryable = false,
+		readonly retryAfterMs?: number,
+	) {
 		super(code);
 		this.name = "AgentAuthClientError";
 	}
@@ -285,13 +293,29 @@ function base64url(value: string | Uint8Array): string {
 	return Buffer.from(value).toString("base64url");
 }
 
-function remoteError(body: unknown, status: number): string {
+function remoteError(
+	body: unknown,
+	status: number,
+): { code: string; retryable: boolean; retryAfterMs?: number } {
 	const value = record(body);
+	let code = `AGENT_HTTP_${status}`;
 	for (const candidate of [value?.code, value?.error_code, value?.error]) {
-		if (typeof candidate === "string" && ERROR_CODE.test(candidate))
-			return candidate;
+		if (typeof candidate === "string" && ERROR_CODE.test(candidate)) {
+			code = candidate;
+			break;
+		}
 	}
-	return `AGENT_HTTP_${status}`;
+	const retryAfter = value?.retry_after_ms ?? value?.retryAfterMs;
+	return {
+		code,
+		retryable: value?.retryable === true,
+		...(typeof retryAfter === "number" &&
+		Number.isInteger(retryAfter) &&
+		retryAfter >= 100 &&
+		retryAfter <= ENVIRONMENT_RETRY_MAX_DELAY_MS
+			? { retryAfterMs: retryAfter }
+			: {}),
+	};
 }
 
 export class AgentAuthClient {
@@ -299,6 +323,9 @@ export class AgentAuthClient {
 		readonly config: AgentAuthConfig,
 		private readonly request: typeof fetch = fetch,
 		private readonly now: () => Date = () => new Date(),
+		private readonly wait: (milliseconds: number) => Promise<void> = (
+			milliseconds,
+		) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
 	) {}
 
 	private jwt(capabilities: string[]): string {
@@ -343,12 +370,21 @@ export class AgentAuthClient {
 		const headers = new Headers(init.headers);
 		headers.set("accept", "application/json");
 		headers.set("authorization", `Bearer ${this.jwt(capabilities)}`);
-		const response = await this.request(url, {
-			...init,
-			headers,
-			redirect: "error",
-			signal: init.signal ?? AbortSignal.timeout(15_000),
-		});
+		let response: Response;
+		try {
+			response = await this.request(url, {
+				...init,
+				headers,
+				redirect: "error",
+				signal: init.signal ?? AbortSignal.timeout(15_000),
+			});
+		} catch {
+			throw new AgentAuthClientError(
+				"AGENT_NETWORK_UNAVAILABLE",
+				true,
+				ENVIRONMENT_RETRY_DEFAULT_DELAY_MS,
+			);
+		}
 		const declaredLength = Number(response.headers.get("content-length") ?? 0);
 		if (declaredLength > MAX_RESPONSE_BYTES) {
 			throw new AgentAuthClientError("AGENT_RESPONSE_INVALID");
@@ -363,18 +399,157 @@ export class AgentAuthClient {
 		} catch {
 			throw new AgentAuthClientError("AGENT_RESPONSE_INVALID");
 		}
-		if (!response.ok)
-			throw new AgentAuthClientError(remoteError(body, response.status));
+		if (!response.ok) {
+			const failure = remoteError(body, response.status);
+			throw new AgentAuthClientError(
+				failure.code,
+				failure.retryable,
+				failure.retryAfterMs,
+			);
+		}
 		const envelope = record(body);
 		return envelope && "data" in envelope ? envelope.data : body;
 	}
 
 	async execute(capability: string, arguments_: JsonRecord): Promise<unknown> {
-		return this.jsonRequest(this.config.defaultLocation, [capability], {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ capability, arguments: arguments_ }),
-		});
+		const execute = () =>
+			this.jsonRequest(this.config.defaultLocation, [capability], {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ capability, arguments: arguments_ }),
+			});
+		if (capability !== "environment.connect") return execute();
+
+		for (
+			let attempt = 1;
+			attempt <= ENVIRONMENT_RETRY_MAX_ATTEMPTS;
+			attempt += 1
+		) {
+			try {
+				const connection = await execute();
+				await this.prepareEnvironmentConnection(connection);
+				return connection;
+			} catch (error) {
+				if (
+					!(error instanceof AgentAuthClientError) ||
+					!error.retryable ||
+					attempt === ENVIRONMENT_RETRY_MAX_ATTEMPTS
+				) {
+					throw error;
+				}
+				await this.wait(
+					error.retryAfterMs ?? ENVIRONMENT_RETRY_DEFAULT_DELAY_MS,
+				);
+			}
+		}
+		throw new AgentAuthClientError("AGENT_ENVIRONMENT_RETRY_INVARIANT");
+	}
+
+	private async prepareEnvironmentConnection(value: unknown): Promise<void> {
+		const connection = record(value);
+		if (connection?.operationMode !== "execute") return;
+		if (
+			connection.protocolVersion !== "paca.environment.connection.v1" ||
+			connection.transport !== "websocket" ||
+			!nonEmptyString(connection.url, 2_048) ||
+			!nonEmptyString(connection.accessToken, 4_096) ||
+			!nonEmptyString(connection.environmentId) ||
+			!nonEmptyString(connection.expiresAt)
+		) {
+			throw new AgentAuthClientError("AGENT_ENVIRONMENT_CONNECTION_INVALID");
+		}
+
+		let endpoint: URL;
+		try {
+			endpoint = new URL(connection.url);
+			if (
+				endpoint.protocol !== "wss:" ||
+				endpoint.username ||
+				endpoint.password ||
+				endpoint.search ||
+				endpoint.hash
+			) {
+				throw new Error("invalid environment URL");
+			}
+			endpoint.protocol = "https:";
+		} catch {
+			throw new AgentAuthClientError("AGENT_ENVIRONMENT_CONNECTION_INVALID");
+		}
+
+		const expiresAt = Date.parse(connection.expiresAt);
+		if (!Number.isFinite(expiresAt) || expiresAt <= this.now().getTime()) {
+			throw new AgentAuthClientError("AGENT_ENVIRONMENT_TICKET_EXPIRED", true);
+		}
+		let response: Response;
+		try {
+			response = await this.request(endpoint, {
+				method: "POST",
+				redirect: "error",
+				headers: {
+					accept: "application/json",
+					authorization: `Bearer ${connection.accessToken}`,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ action: "prepare" }),
+				signal: AbortSignal.timeout(ENVIRONMENT_PREPARE_TIMEOUT_MS),
+			});
+		} catch {
+			throw new AgentAuthClientError(
+				"AGENT_ENVIRONMENT_PREPARE_UNAVAILABLE",
+				true,
+				ENVIRONMENT_RETRY_DEFAULT_DELAY_MS,
+			);
+		}
+
+		const contentType = response.headers
+			.get("content-type")
+			?.split(";", 1)[0]
+			?.trim();
+		const declaredHeader = response.headers.get("content-length");
+		const declaredLength = declaredHeader === null ? 0 : Number(declaredHeader);
+		if (
+			contentType !== "application/json" ||
+			!Number.isSafeInteger(declaredLength) ||
+			declaredLength < 0 ||
+			declaredLength > MAX_RESPONSE_BYTES
+		) {
+			void response.body?.cancel().catch(() => undefined);
+			throw new AgentAuthClientError("AGENT_RESPONSE_INVALID");
+		}
+		let bytes: Uint8Array;
+		try {
+			bytes = new Uint8Array(await response.arrayBuffer());
+		} catch {
+			throw new AgentAuthClientError(
+				"AGENT_ENVIRONMENT_PREPARE_UNAVAILABLE",
+				true,
+				ENVIRONMENT_RETRY_DEFAULT_DELAY_MS,
+			);
+		}
+		if (bytes.byteLength > MAX_RESPONSE_BYTES) {
+			throw new AgentAuthClientError("AGENT_RESPONSE_INVALID");
+		}
+		let body: unknown;
+		try {
+			body = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+		} catch {
+			throw new AgentAuthClientError("AGENT_RESPONSE_INVALID");
+		}
+		if (!response.ok) {
+			const failure = remoteError(body, response.status);
+			throw new AgentAuthClientError(
+				failure.code,
+				failure.retryable,
+				failure.retryAfterMs,
+			);
+		}
+		const ready = record(body);
+		if (
+			ready?.status !== "ready" ||
+			ready.environmentId !== connection.environmentId
+		) {
+			throw new AgentAuthClientError("AGENT_ENVIRONMENT_PREPARE_INVALID");
+		}
 	}
 
 	async requestAgent(

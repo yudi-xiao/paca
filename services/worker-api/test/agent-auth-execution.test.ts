@@ -832,6 +832,8 @@ describe("Paca Agent Auth execution boundary", () => {
   it.each([
     [environmentConnectionErrorCodes.gatewayUnavailable, "SERVICE_UNAVAILABLE", 503],
     [environmentConnectionErrorCodes.gatewayResponseInvalid, "SERVICE_UNAVAILABLE", 503],
+    [environmentConnectionErrorCodes.providerFailed, "SERVICE_UNAVAILABLE", 503],
+    [environmentConnectionErrorCodes.providerUnsupported, "SERVICE_UNAVAILABLE", 503],
     [environmentConnectionErrorCodes.scopeMismatch, "FORBIDDEN", 403],
     [environmentConnectionErrorCodes.authorizationExpired, "FORBIDDEN", 403],
   ] as const)("preserves the bounded environment failure %s through the Agent Auth batch executor", async (code, status, statusCode) => {
@@ -859,6 +861,41 @@ describe("Paca Agent Auth execution boundary", () => {
       status,
       statusCode,
       body: { error: code, message: code },
+    });
+  });
+
+  it("exposes retry guidance only for a bounded retryable environment failure", async () => {
+    const executor = createPacaAgentExecutor(
+      dependencies({
+        connectEnvironment: async () => {
+          throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable, {
+            retryable: true,
+            retryAfterMs: 1_500,
+          });
+        },
+      }),
+    );
+    const constraints = {
+      ...scope,
+      environmentId: ENVIRONMENT_ID,
+      operationMode: "read" as const,
+    } satisfies CapabilityConstraints;
+
+    await expect(
+      executor(
+        executeContext("environment.connect", agentSession("environment.connect", constraints), {
+          ...constraints,
+          requestId: REQUEST_ID,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      headers: { "Retry-After": "2" },
+      body: {
+        error: environmentConnectionErrorCodes.gatewayUnavailable,
+        retryable: true,
+        retry_after_ms: 1_500,
+      },
     });
   });
 });

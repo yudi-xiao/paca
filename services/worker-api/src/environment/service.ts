@@ -44,6 +44,8 @@ export const environmentConnectionErrorCodes = {
   authorizationExpired: "AGENT_ENVIRONMENT_AUTHORIZATION_EXPIRED",
   gatewayResponseInvalid: "AGENT_ENVIRONMENT_GATEWAY_RESPONSE_INVALID",
   gatewayUnavailable: "AGENT_ENVIRONMENT_GATEWAY_UNAVAILABLE",
+  providerFailed: "AGENT_ENVIRONMENT_PROVIDER_FAILED",
+  providerUnsupported: "AGENT_ENVIRONMENT_PROVIDER_UNSUPPORTED",
   scopeMismatch: "AGENT_ENVIRONMENT_SCOPE_MISMATCH",
 } as const;
 
@@ -51,9 +53,18 @@ export type EnvironmentConnectionErrorCode =
   (typeof environmentConnectionErrorCodes)[keyof typeof environmentConnectionErrorCodes];
 
 export class EnvironmentConnectionError extends Error {
-  constructor(readonly code: EnvironmentConnectionErrorCode) {
+  readonly retryable: boolean;
+  readonly retryAfterMs?: number;
+
+  constructor(
+    readonly code: EnvironmentConnectionErrorCode,
+    options: { retryable?: boolean; retryAfterMs?: number } = {},
+  ) {
     super(code);
     this.name = "EnvironmentConnectionError";
+    this.retryable =
+      options.retryable ?? code === environmentConnectionErrorCodes.gatewayUnavailable;
+    if (options.retryAfterMs !== undefined) this.retryAfterMs = options.retryAfterMs;
   }
 }
 

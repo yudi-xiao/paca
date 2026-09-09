@@ -36,6 +36,22 @@ const revocationResponseSchema = z
   })
   .strict();
 
+const gatewayProviderFailureSchema = z
+  .object({
+    code: z.enum([
+      "GATEWAY_PROVIDER_STARTING",
+      "GATEWAY_PROVIDER_CAPACITY",
+      "GATEWAY_PROVIDER_TRANSIENT",
+      "GATEWAY_PROVIDER_OPERATION_UNCERTAIN",
+      "GATEWAY_PROVIDER_FAILED",
+      "GATEWAY_PROVIDER_UNSUPPORTED",
+    ]),
+    retryable: z.boolean(),
+    retryAfterMs: z.number().int().min(100).max(10_000).optional(),
+    attempts: z.number().int().min(1).max(3),
+  })
+  .strict();
+
 async function readBoundedJson(response: Response): Promise<unknown> {
   const declaredLength = response.headers.get("content-length");
   if (declaredLength !== null) {
@@ -81,6 +97,28 @@ async function readBoundedJson(response: Response): Promise<unknown> {
   }
 }
 
+async function throwGatewayIssueFailure(response: Response): Promise<never> {
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
+  if (contentType !== "application/json") {
+    void response.body?.cancel().catch(() => undefined);
+    throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayResponseInvalid);
+  }
+  const parsed = gatewayProviderFailureSchema.safeParse(await readBoundedJson(response));
+  if (!parsed.success) {
+    throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayResponseInvalid);
+  }
+  if (parsed.data.code === "GATEWAY_PROVIDER_UNSUPPORTED") {
+    throw new EnvironmentConnectionError(environmentConnectionErrorCodes.providerUnsupported);
+  }
+  if (!parsed.data.retryable) {
+    throw new EnvironmentConnectionError(environmentConnectionErrorCodes.providerFailed);
+  }
+  throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable, {
+    retryable: true,
+    ...(parsed.data.retryAfterMs === undefined ? {} : { retryAfterMs: parsed.data.retryAfterMs }),
+  });
+}
+
 export class ServiceBindingEnvironmentConnectionGateway implements EnvironmentConnectionGateway {
   constructor(private readonly binding?: Fetcher) {}
 
@@ -124,8 +162,7 @@ export class ServiceBindingEnvironmentConnectionGateway implements EnvironmentCo
     }
 
     if (response.status < 200 || response.status >= 300) {
-      void response.body?.cancel().catch(() => undefined);
-      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable);
+      return throwGatewayIssueFailure(response);
     }
     const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
     if (contentType !== "application/json") {

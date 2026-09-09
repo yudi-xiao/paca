@@ -182,7 +182,14 @@ function environmentConnectionFailure(error: unknown): never {
     error.code === environmentConnectionErrorCodes.scopeMismatch
       ? "FORBIDDEN"
       : "SERVICE_UNAVAILABLE";
-  throw agentError(status, { code: error.code, message: error.code });
+  const headers =
+    error.retryable && error.retryAfterMs !== undefined
+      ? { "Retry-After": String(Math.max(1, Math.ceil(error.retryAfterMs / 1_000))) }
+      : undefined;
+  throw agentError(status, { code: error.code, message: error.code }, undefined, headers, {
+    retryable: error.retryable,
+    ...(error.retryAfterMs === undefined ? {} : { retry_after_ms: error.retryAfterMs }),
+  });
 }
 
 function requireDelegatedUser(session: AgentSession): string {

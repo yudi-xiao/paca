@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createGatewayApp, type GatewayBindings, type GatewayDependencies } from "../src/app";
 import { connectionResponseSchema, type TicketClaims } from "../src/protocol";
 import type { EnvironmentProvider } from "../src/provider";
+import { ClassifiedEnvironmentProviderError } from "../src/provider-failure";
 
 const NOW = new Date("2026-09-09T01:00:00.000Z");
 const SECRET = "test-only-ticket-secret-with-at-least-32-bytes";
@@ -58,6 +59,7 @@ function provider() {
       environmentId: claims.environmentId,
       processes: [],
     })),
+    prepare: vi.fn<EnvironmentProvider["prepare"]>(async () => undefined),
     terminal: vi.fn<EnvironmentProvider["terminal"]>(async () =>
       Promise.resolve(new Response("terminal-proxied")),
     ),
@@ -72,6 +74,7 @@ function harness(input?: {
   registerConnection?: GatewayDependencies["registerConnection"];
   revokeAgentConnections?: GatewayDependencies["revokeAgentConnections"];
   revokeProjectConnections?: GatewayDependencies["revokeProjectConnections"];
+  wait?: GatewayDependencies["wait"];
 }) {
   const environmentProvider = input?.provider ?? provider();
   const consumeTicket =
@@ -97,6 +100,7 @@ function harness(input?: {
     }));
   const dependencies: GatewayDependencies = {
     now: () => NOW,
+    wait: input?.wait ?? vi.fn(async () => undefined),
     provider: () => environmentProvider,
     consumeTicket,
     registerConnection,
@@ -326,12 +330,145 @@ describe("Paca Environment Gateway", () => {
     expect(test.provider.status).toHaveBeenCalledOnce();
   });
 
+  it("prepares an execute container without consuming its one-time terminal ticket", async () => {
+    const test = harness();
+    const connection = await issue(test.app, test.env);
+    const response = await test.app.fetch(
+      new Request(workerRequestUrl(connection.url), {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${connection.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "prepare" }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-paca-provider-attempts")).toBe("1");
+    await expect(response.json()).resolves.toEqual({
+      status: "ready",
+      environmentId: ENVIRONMENT_ID,
+    });
+    expect(test.provider.prepare).toHaveBeenCalledOnce();
+    expect(test.consumeTicket).not.toHaveBeenCalled();
+  });
+
+  it("retries a classified cold-start failure within the bounded read-only budget", async () => {
+    const environmentProvider = provider();
+    environmentProvider.prepare
+      .mockRejectedValueOnce({
+        code: "CONTAINER_UNAVAILABLE",
+        message: "container starting",
+        context: {
+          reason: "container_starting",
+          retryable: true,
+          retryAfterMs: 250,
+        },
+      })
+      .mockResolvedValueOnce(undefined);
+    const wait = vi.fn(async () => undefined);
+    const test = harness({ provider: environmentProvider, wait });
+    const connection = await issue(test.app, test.env);
+    const response = await test.app.fetch(
+      new Request(workerRequestUrl(connection.url), {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${connection.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "prepare" }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-paca-provider-attempts")).toBe("2");
+    expect(wait).toHaveBeenCalledWith(250);
+    expect(environmentProvider.prepare).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns bounded retry metadata after cold-start retries are exhausted", async () => {
+    const environmentProvider = provider();
+    environmentProvider.status.mockRejectedValue({
+      code: "CONTAINER_UNAVAILABLE",
+      message: "capacity unavailable",
+      context: {
+        reason: "max_container_instances_exceeded",
+        retryable: true,
+        retryAfterMs: 1_500,
+      },
+    });
+    const wait = vi.fn(async () => undefined);
+    const test = harness({ provider: environmentProvider, wait });
+    const connection = await issue(test.app, test.env, "read");
+    const response = await test.app.fetch(
+      new Request(connection.url, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${connection.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "status" }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("2");
+    await expect(response.json()).resolves.toEqual({
+      code: "GATEWAY_PROVIDER_CAPACITY",
+      retryable: true,
+      retryAfterMs: 1_500,
+      attempts: 3,
+    });
+    expect(wait).toHaveBeenCalledTimes(2);
+    expect(environmentProvider.status).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns control to a fresh request instead of retrying a superseded runtime in place", async () => {
+    const environmentProvider = provider();
+    environmentProvider.status.mockRejectedValue(
+      new ClassifiedEnvironmentProviderError({
+        code: "GATEWAY_PROVIDER_TRANSIENT",
+        retryable: true,
+        retryAfterMs: 500,
+        retryInRequest: false,
+      }),
+    );
+    const wait = vi.fn(async () => undefined);
+    const test = harness({ provider: environmentProvider, wait });
+    const connection = await issue(test.app, test.env, "read");
+    const response = await test.app.fetch(
+      new Request(connection.url, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${connection.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "status" }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "GATEWAY_PROVIDER_TRANSIENT",
+      retryable: true,
+      attempts: 1,
+    });
+    expect(environmentProvider.status).toHaveBeenCalledOnce();
+    expect(wait).not.toHaveBeenCalled();
+  });
+
   it("fails closed for unsupported providers and malformed public requests", async () => {
     const unavailable = provider();
     unavailable.supports.mockReturnValue(false);
     const test = harness({ provider: unavailable });
     const providerResponse = await test.app.fetch(issueRequest(), test.env);
     expect(providerResponse.status).toBe(503);
+    await expect(providerResponse.json()).resolves.toEqual({
+      code: "GATEWAY_PROVIDER_UNSUPPORTED",
+      retryable: false,
+      attempts: 1,
+    });
 
     const missingTicket = await test.app.fetch(
       new Request("https://paca-env.howlearnwood.com/v1/connect"),
@@ -417,7 +554,12 @@ describe("Paca Environment Gateway", () => {
       }),
       test.env,
     );
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      code: "GATEWAY_PROVIDER_FAILED",
+      retryable: false,
+      attempts: 1,
+    });
     expect(test.registerConnection).not.toHaveBeenCalled();
     expect(test.unregisterConnection).not.toHaveBeenCalled();
     expect(test.provider.terminate).not.toHaveBeenCalled();

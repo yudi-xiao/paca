@@ -7,6 +7,7 @@ export { ConnectionTicketDO } from "./ticket-do";
 
 const dependencies: GatewayDependencies = {
   now: () => new Date(),
+  wait: (milliseconds) => scheduler.wait(milliseconds),
   provider: (env) => new CloudflareSandboxProvider(env),
   consumeTicket: (env, ticketId, expiresAtMs) => {
     const id = env.CONNECTION_TICKETS.idFromName(ticketId);

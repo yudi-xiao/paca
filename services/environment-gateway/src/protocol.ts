@@ -2,6 +2,27 @@ import * as z from "zod";
 
 export const gatewayProtocol = "paca.environment.gateway.v1" as const;
 export const connectionProtocol = "paca.environment.connection.v1" as const;
+
+export const gatewayProviderFailureCodes = {
+  starting: "GATEWAY_PROVIDER_STARTING",
+  capacity: "GATEWAY_PROVIDER_CAPACITY",
+  transient: "GATEWAY_PROVIDER_TRANSIENT",
+  operationUncertain: "GATEWAY_PROVIDER_OPERATION_UNCERTAIN",
+  failed: "GATEWAY_PROVIDER_FAILED",
+  unsupported: "GATEWAY_PROVIDER_UNSUPPORTED",
+} as const;
+
+export type GatewayProviderFailureCode =
+  (typeof gatewayProviderFailureCodes)[keyof typeof gatewayProviderFailureCodes];
+
+export const gatewayProviderFailureSchema = z
+  .object({
+    code: z.enum(gatewayProviderFailureCodes),
+    retryable: z.boolean(),
+    retryAfterMs: z.number().int().min(100).max(10_000).optional(),
+    attempts: z.number().int().min(1).max(3),
+  })
+  .strict();
 export const privateGatewayOrigin = "https://environment-gateway.internal";
 export const connectionPath = "/v1/connect";
 export const MAX_CONNECTION_TTL_SECONDS = 60;
