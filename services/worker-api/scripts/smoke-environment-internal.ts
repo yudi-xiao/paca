@@ -10,6 +10,7 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 type HeadersWithSetCookie = Headers & { getSetCookie?: () => string[] };
+type EnvironmentOperationMode = "read" | "execute";
 
 const execFileAsync = promisify(execFile);
 const root = new URL("../../../", import.meta.url);
@@ -151,6 +152,110 @@ async function query(databaseURL: string, sql: string): Promise<void> {
   await command("psql", args);
 }
 
+async function websocketText(value: unknown): Promise<string> {
+  if (typeof value === "string") return value;
+  if (value instanceof ArrayBuffer) return new TextDecoder().decode(value);
+  if (ArrayBuffer.isView(value)) {
+    return new TextDecoder().decode(
+      new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
+    );
+  }
+  if (value instanceof Blob) return value.text();
+  return "";
+}
+
+async function verifyTerminalConnection(
+  url: string,
+  accessToken: string,
+): Promise<{ markerObserved: boolean; replayRejected: boolean }> {
+  const marker = `PACA_TERMINAL_SMOKE_${crypto.randomUUID().replaceAll("-", "")}`;
+  await new Promise<void>((resolve, reject) => {
+    const socket = new WebSocket(url, [`paca-ticket.${accessToken}`]);
+    socket.binaryType = "arraybuffer";
+    let settled = false;
+    let ready = false;
+    let output = "";
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      socket.close(1000, "smoke timeout");
+      reject(
+        new Error(ready ? "SANDBOX_TERMINAL_OUTPUT_TIMEOUT" : "SANDBOX_TERMINAL_READY_TIMEOUT"),
+      );
+    }, 45_000);
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.close(1000, "smoke complete");
+      resolve();
+    };
+    socket.addEventListener("message", (event) => {
+      if (typeof event.data === "string") {
+        try {
+          const control = asRecord(JSON.parse(event.data) as unknown);
+          if (control?.type === "ready" && !ready) {
+            ready = true;
+            socket.send(JSON.stringify({ type: "resize", cols: 120, rows: 30 }));
+            socket.send(new TextEncoder().encode(`printf '${marker}\\n'\n`));
+          } else if (control?.type === "error") {
+            settled = true;
+            clearTimeout(timeout);
+            socket.close(1000, "terminal error");
+            reject(new Error("SANDBOX_TERMINAL_PROTOCOL_ERROR"));
+          }
+        } catch {
+          // Unknown text frames are not terminal output and are intentionally ignored.
+        }
+        return;
+      }
+      void websocketText(event.data)
+        .then((chunk) => {
+          output = `${output}${chunk}`.slice(-16_384);
+          if (output.includes(marker)) succeed();
+        })
+        .catch(() => undefined);
+    });
+    socket.addEventListener("error", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(new Error("SANDBOX_TERMINAL_CONNECTION_FAILED"));
+    });
+    socket.addEventListener("close", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(new Error("SANDBOX_TERMINAL_CLOSED_EARLY"));
+    });
+  });
+
+  const replayRejected = await new Promise<boolean>((resolve) => {
+    const socket = new WebSocket(url, [`paca-ticket.${accessToken}`]);
+    let opened = false;
+    const timeout = setTimeout(() => {
+      socket.close(1000, "replay smoke timeout");
+      resolve(!opened);
+    }, 10_000);
+    socket.addEventListener("open", () => {
+      opened = true;
+      clearTimeout(timeout);
+      socket.close(1000, "unexpected replay");
+      resolve(false);
+    });
+    socket.addEventListener("error", () => {
+      clearTimeout(timeout);
+      resolve(!opened);
+    });
+    socket.addEventListener("close", () => {
+      clearTimeout(timeout);
+      resolve(!opened);
+    });
+  });
+  if (!replayRejected) throw new Error("SANDBOX_TERMINAL_TICKET_REPLAY_ACCEPTED");
+  return { markerObserved: true, replayRejected };
+}
+
 function uuid(value: string, code: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)) {
     throw new Error(code);
@@ -168,6 +273,11 @@ async function main(): Promise<void> {
   ).origin;
   const organizationId = process.env.PACA_ORGANIZATION_ID?.trim() || "paca-default";
   const projectId = uuid(required("PACA_PROJECT_ID"), "PACA_PROJECT_ID_INVALID");
+  const operationMode = (process.env.PACA_ENVIRONMENT_SMOKE_MODE?.trim() ||
+    "read") as EnvironmentOperationMode;
+  if (operationMode !== "read" && operationMode !== "execute") {
+    throw new Error("PACA_ENVIRONMENT_SMOKE_MODE_INVALID");
+  }
   const pscaleOrganization = required("PACA_PLANETSCALE_ORG");
   const hostConfigPath =
     process.env.PACA_AGENT_HOST_CONFIG?.trim() ||
@@ -210,13 +320,13 @@ async function main(): Promise<void> {
             organizationId,
             projectId,
             environmentId,
-            operationMode: "read",
+            operationMode,
             validUntil,
           },
         },
       ],
       reason: "验证本地 Harness 经 Agent Auth 连接 Cloudflare Sandbox 环境。",
-      bindingMessage: "仅限临时环境、只读状态查询和十分钟短期 Grant。",
+      bindingMessage: `仅限临时环境、${operationMode} 模式和十分钟短期 Grant。`,
     });
     agentId = registration.config.agentId;
 
@@ -246,7 +356,7 @@ async function main(): Promise<void> {
           organizationId,
           projectId,
           environmentId,
-          operationMode: "read",
+          operationMode,
           requestId,
           validUntil,
         },
@@ -257,8 +367,8 @@ async function main(): Promise<void> {
       connection?.protocolVersion !== "paca.environment.connection.v1" ||
       connection.requestId !== requestId ||
       connection.environmentId !== environmentId ||
-      connection.operationMode !== "read" ||
-      connection.transport !== "http" ||
+      connection.operationMode !== operationMode ||
+      connection.transport !== (operationMode === "read" ? "http" : "websocket") ||
       typeof connection.url !== "string" ||
       typeof connection.accessToken !== "string" ||
       typeof connection.expiresAt !== "string"
@@ -266,24 +376,31 @@ async function main(): Promise<void> {
       throw new Error("ENVIRONMENT_CONNECTION_INVALID");
     }
 
-    const statusResponse = await fetch(connection.url, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${connection.accessToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ action: "status" }),
-      redirect: "error",
-      signal: AbortSignal.timeout(55_000),
-    });
-    const statusBody = await jsonOrNull(statusResponse);
-    requireStatus(statusResponse, 200, statusBody, "SANDBOX_STATUS");
-    const environmentStatus = asRecord(statusBody);
-    if (
-      environmentStatus?.environmentId !== environmentId ||
-      !Array.isArray(environmentStatus.processes)
-    ) {
-      throw new Error("SANDBOX_STATUS_INVALID");
+    let processCount: number | null = null;
+    let terminalVerified: { markerObserved: boolean; replayRejected: boolean } | null = null;
+    if (operationMode === "read") {
+      const statusResponse = await fetch(connection.url, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${connection.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "status" }),
+        redirect: "error",
+        signal: AbortSignal.timeout(55_000),
+      });
+      const statusBody = await jsonOrNull(statusResponse);
+      requireStatus(statusResponse, 200, statusBody, "SANDBOX_STATUS");
+      const environmentStatus = asRecord(statusBody);
+      if (
+        environmentStatus?.environmentId !== environmentId ||
+        !Array.isArray(environmentStatus.processes)
+      ) {
+        throw new Error("SANDBOX_STATUS_INVALID");
+      }
+      processCount = environmentStatus.processes.length;
+    } else {
+      terminalVerified = await verifyTerminalConnection(connection.url, connection.accessToken);
     }
 
     const revoke = await userRequest(
@@ -305,8 +422,9 @@ async function main(): Promise<void> {
         agentId,
         harness: "local",
         backend: "cloudflare-sandbox",
-        operationMode: "read",
-        processCount: environmentStatus.processes.length,
+        operationMode,
+        ...(processCount === null ? {} : { processCount }),
+        ...(terminalVerified ?? {}),
         grantRevoked: true,
       }),
     );

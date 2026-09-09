@@ -159,13 +159,15 @@ export function createGatewayApp(
     if (!provider.supports(claims)) return codeResponse("GATEWAY_PROVIDER_UNAVAILABLE", 503);
 
     try {
+      const connectionOrigin =
+        claims.operationMode === "execute" ? origin.replace(/^https:/u, "wss:") : origin;
       const response = connectionResponseSchema.parse({
         protocolVersion: connectionProtocol,
         requestId: claims.jti,
         environmentId: claims.environmentId,
         operationMode: claims.operationMode,
         transport: claims.operationMode === "execute" ? "websocket" : "http",
-        url: `${origin}${connectionPath}`,
+        url: `${connectionOrigin}${connectionPath}`,
         accessToken: await signTicket(claims, context.env.CONNECTION_TICKET_SECRET),
         expiresAt: new Date(claims.expiresAt * 1000).toISOString(),
       });
@@ -210,6 +212,16 @@ export function createGatewayApp(
       try {
         return await provider.terminal(claims, sanitizedTerminalRequest(context.req.raw));
       } catch {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            message: "environment.provider.failed",
+            requestId: claims.jti,
+            environmentId: claims.environmentId,
+            backend: claims.backend,
+            operationMode: claims.operationMode,
+          }),
+        );
         return codeResponse("GATEWAY_PROVIDER_FAILED", 503);
       }
     }
@@ -241,6 +253,16 @@ export function createGatewayApp(
         headers: { "cache-control": "no-store" },
       });
     } catch {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          message: "environment.provider.failed",
+          requestId: claims.jti,
+          environmentId: claims.environmentId,
+          backend: claims.backend,
+          operationMode: claims.operationMode,
+        }),
+      );
       return codeResponse("GATEWAY_PROVIDER_FAILED", 503);
     }
   });

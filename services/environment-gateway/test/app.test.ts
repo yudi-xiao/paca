@@ -93,6 +93,10 @@ async function issue(
   return connectionResponseSchema.parse(await response.json());
 }
 
+function workerRequestUrl(connectionUrl: string): string {
+  return connectionUrl.replace(/^wss:/u, "https:");
+}
+
 describe("Paca Environment Gateway", () => {
   it("issues a short-lived connection only through the private Service Binding origin", async () => {
     const test = harness();
@@ -102,7 +106,7 @@ describe("Paca Environment Gateway", () => {
       environmentId: ENVIRONMENT_ID,
       operationMode: "execute",
       transport: "websocket",
-      url: "https://paca-env.howlearnwood.com/v1/connect",
+      url: "wss://paca-env.howlearnwood.com/v1/connect",
       expiresAt: new Date(NOW.getTime() + 45_000).toISOString(),
     });
     expect(connection.accessToken).not.toContain(ENVIRONMENT_ID);
@@ -123,7 +127,7 @@ describe("Paca Environment Gateway", () => {
     const test = harness();
     const connection = await issue(test.app, test.env);
     const response = await test.app.fetch(
-      new Request(connection.url, {
+      new Request(workerRequestUrl(connection.url), {
         headers: {
           authorization: `Bearer ${connection.accessToken}`,
           cookie: "must-not-reach-sandbox=true",
@@ -149,7 +153,7 @@ describe("Paca Environment Gateway", () => {
     const test = harness({ consumeTicket: vi.fn(async () => false) });
     const connection = await issue(test.app, test.env);
     const response = await test.app.fetch(
-      new Request(connection.url, {
+      new Request(workerRequestUrl(connection.url), {
         headers: { authorization: `Bearer ${connection.accessToken}`, upgrade: "websocket" },
       }),
       test.env,
@@ -161,7 +165,10 @@ describe("Paca Environment Gateway", () => {
   it("uses a reusable read ticket only for the structured status operation", async () => {
     const test = harness();
     const connection = await issue(test.app, test.env, "read");
-    expect(connection.transport).toBe("http");
+    expect(connection).toMatchObject({
+      transport: "http",
+      url: "https://paca-env.howlearnwood.com/v1/connect",
+    });
     const response = await test.app.fetch(
       new Request(connection.url, {
         method: "POST",

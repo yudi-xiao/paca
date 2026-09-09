@@ -24,3 +24,10 @@ bunx wrangler secret put CONNECTION_TICKET_SECRET --env internal
 Secret 至少 32 字节，不得与 Better Auth、数据库或其他服务的 Secret 共用。先部署本
 Gateway，再在 `paca-worker-api-internal` 添加名为 `ENVIRONMENT_GATEWAY`、目标为
 `paca-environment-gateway-internal` 的 Service Binding。
+
+部署后从 `services/worker-api` 运行 `smoke:environment:internal`。测试所需的 Project、审批
+账号和 PlanetScale Organization 只能通过 `PACA_PROJECT_ID`、`PACA_APPROVER_EMAIL`、
+`PACA_APPROVER_PASSWORD`、`PACA_PLANETSCALE_ORG` 环境变量注入；设置
+`PACA_ENVIRONMENT_SMOKE_MODE=read` 验证脱敏状态查询，设置为 `execute` 验证 PTY 双向
+二进制帧和一次性票据重放拒绝。脚本不输出连接票据或数据库凭据，并在退出前撤销临时
+Grant/Agent/Session、删除环境 scope 和短期数据库 role。

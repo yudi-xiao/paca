@@ -1,6 +1,5 @@
 import type { AgentSession, CapabilityConstraints } from "@better-auth/agent-auth";
 import { describe, expect, it, vi } from "vitest";
-
 import {
   createPacaAgentExecutor,
   type PacaAgentExecutionDependencies,
@@ -15,6 +14,10 @@ import type {
   DocumentAgentLeaseResult,
   DocumentAgentSnapshot,
 } from "../src/document/agent-operations";
+import {
+  EnvironmentConnectionError,
+  environmentConnectionErrorCodes,
+} from "../src/environment/service";
 import type { Project } from "../src/project/service";
 import type { Task, TaskActor } from "../src/task/service";
 
@@ -824,5 +827,38 @@ describe("Paca Agent Auth execution boundary", () => {
       ),
     ).rejects.toThrow("AGENT_DELEGATED_PERMISSION_DENIED");
     expect(connectEnvironment).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [environmentConnectionErrorCodes.gatewayUnavailable, "SERVICE_UNAVAILABLE", 503],
+    [environmentConnectionErrorCodes.gatewayResponseInvalid, "SERVICE_UNAVAILABLE", 503],
+    [environmentConnectionErrorCodes.scopeMismatch, "FORBIDDEN", 403],
+    [environmentConnectionErrorCodes.authorizationExpired, "FORBIDDEN", 403],
+  ] as const)("preserves the bounded environment failure %s through the Agent Auth batch executor", async (code, status, statusCode) => {
+    const executor = createPacaAgentExecutor(
+      dependencies({
+        connectEnvironment: async () => {
+          throw new EnvironmentConnectionError(code);
+        },
+      }),
+    );
+    const constraints = {
+      ...scope,
+      environmentId: ENVIRONMENT_ID,
+      operationMode: "read",
+    } satisfies CapabilityConstraints;
+
+    await expect(
+      executor(
+        executeContext("environment.connect", agentSession("environment.connect", constraints), {
+          ...constraints,
+          requestId: REQUEST_ID,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status,
+      statusCode,
+      body: { error: code, message: code },
+    });
   });
 });

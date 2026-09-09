@@ -32,8 +32,10 @@ import type { DocumentScope } from "../document/postgres-scope-repository";
 import { PostgresEnvironmentScopeRepository } from "../environment/postgres-repository";
 import {
   type EnvironmentConnection,
+  EnvironmentConnectionError,
   EnvironmentConnectionService,
   type EnvironmentOperationMode,
+  environmentConnectionErrorCodes,
 } from "../environment/service";
 import { ServiceBindingEnvironmentConnectionGateway } from "../environment/service-binding-gateway";
 import { PostgresPacaPermissionStore } from "../permission/postgres-store";
@@ -170,6 +172,16 @@ function agentTaskLeaseFailure(error: unknown): never {
           : "CONFLICT";
   // Use Agent Auth's own error factory so its batch executor recognizes the
   // error instance and preserves the bounded per-request protocol code.
+  throw agentError(status, { code: error.code, message: error.code });
+}
+
+function environmentConnectionFailure(error: unknown): never {
+  if (!(error instanceof EnvironmentConnectionError)) throw error;
+  const status =
+    error.code === environmentConnectionErrorCodes.authorizationExpired ||
+    error.code === environmentConnectionErrorCodes.scopeMismatch
+      ? "FORBIDDEN"
+      : "SERVICE_UNAVAILABLE";
   throw agentError(status, { code: error.code, message: error.code });
 }
 
@@ -470,15 +482,19 @@ export function createPacaAgentExecutor(
           environmentId,
           operationMode,
         } = input;
-        return dependencies.connectEnvironment({
-          requestId,
-          organizationId,
-          projectId,
-          environmentId,
-          operationMode,
-          actor: { agentId: context.agentSession.agentId, hostId: host.id },
-          authorizationExpiresAt: new Date(agentAuthorizationExpiresAt(context.grant)),
-        });
+        try {
+          return await dependencies.connectEnvironment({
+            requestId,
+            organizationId,
+            projectId,
+            environmentId,
+            operationMode,
+            actor: { agentId: context.agentSession.agentId, hostId: host.id },
+            authorizationExpiresAt: new Date(agentAuthorizationExpiresAt(context.grant)),
+          });
+        } catch (error) {
+          return environmentConnectionFailure(error);
+        }
       }
       default:
         denied("AGENT_CAPABILITY_NOT_EXECUTABLE");
