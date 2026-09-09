@@ -10,6 +10,7 @@ import {
   MAX_AUTHORIZATION_TTL_SECONDS,
   privateGatewayOrigin,
   revokeAgentConnectionsRequestSchema,
+  revokeProjectConnectionsRequestSchema,
   type TicketClaims,
 } from "./protocol";
 import type { EnvironmentProvider } from "./provider";
@@ -18,6 +19,7 @@ import { accessTokenFromRequest, signTicket, TicketError, verifyTicket } from ".
 const MAX_ISSUE_REQUEST_BYTES = 16 * 1024;
 const PRIVATE_ISSUE_PATH = "/v1/connections";
 const PRIVATE_REVOCATION_PATH = "/v1/revocations/agent";
+const PRIVATE_PROJECT_REVOCATION_PATH = "/v1/revocations/project";
 
 export type GatewayBindings = Pick<
   Env,
@@ -35,6 +37,7 @@ export type GatewayDependencies = {
   isTicketAuthorized: (
     env: GatewayBindings,
     agentId: string,
+    projectId: string,
     ticketIssuedAtMs: number,
   ) => Promise<boolean>;
   unregisterConnection: (
@@ -45,6 +48,14 @@ export type GatewayDependencies = {
   revokeAgentConnections: (
     env: GatewayBindings,
     agentId: string,
+  ) => Promise<{
+    terminated: number;
+    pending: number;
+  }>;
+  revokeProjectConnections: (
+    env: GatewayBindings,
+    projectId: string,
+    agentIds: string[],
   ) => Promise<{
     terminated: number;
     pending: number;
@@ -243,6 +254,42 @@ export function createGatewayApp(
     }
   });
 
+  app.post(PRIVATE_PROJECT_REVOCATION_PATH, async (context) => {
+    const requestUrl = new URL(context.req.url);
+    if (
+      requestUrl.origin !== privateGatewayOrigin ||
+      context.req.header("x-paca-environment-gateway-protocol") !== gatewayProtocol ||
+      context.req.header("content-type")?.split(";", 1)[0]?.trim() !== "application/json"
+    ) {
+      return codeResponse("GATEWAY_PRIVATE_ROUTE_REQUIRED", 404);
+    }
+    let request: ReturnType<typeof revokeProjectConnectionsRequestSchema.parse>;
+    try {
+      request = revokeProjectConnectionsRequestSchema.parse(await boundedJson(context.req.raw));
+    } catch {
+      return codeResponse("GATEWAY_REQUEST_INVALID", 400);
+    }
+    try {
+      const result = await dependencies.revokeProjectConnections(context.env, request.projectId, [
+        ...new Set(request.agentIds),
+      ]);
+      return Response.json(result, {
+        status: result.pending > 0 ? 202 : 200,
+        headers: { "cache-control": "no-store" },
+      });
+    } catch {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          message: "environment.project_revocation.failed",
+          projectId: request.projectId,
+          agentCount: request.agentIds.length,
+        }),
+      );
+      return codeResponse("GATEWAY_REVOCATION_FAILED", 503);
+    }
+  });
+
   app.all(connectionPath, async (context) => {
     const origin = publicOrigin(context.env.PUBLIC_ORIGIN);
     if (!origin || new URL(context.req.url).origin !== origin) {
@@ -259,7 +306,14 @@ export function createGatewayApp(
     }
     const provider = dependencies.provider(context.env);
     if (!provider.supports(claims)) return codeResponse("GATEWAY_PROVIDER_UNAVAILABLE", 503);
-    if (!(await dependencies.isTicketAuthorized(context.env, claims.agentId, claims.issuedAtMs))) {
+    if (
+      !(await dependencies.isTicketAuthorized(
+        context.env,
+        claims.agentId,
+        claims.projectId,
+        claims.issuedAtMs,
+      ))
+    ) {
       return codeResponse("GATEWAY_TICKET_REVOKED", 401);
     }
 

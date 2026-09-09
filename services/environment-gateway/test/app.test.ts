@@ -71,6 +71,7 @@ function harness(input?: {
   isTicketAuthorized?: GatewayDependencies["isTicketAuthorized"];
   registerConnection?: GatewayDependencies["registerConnection"];
   revokeAgentConnections?: GatewayDependencies["revokeAgentConnections"];
+  revokeProjectConnections?: GatewayDependencies["revokeProjectConnections"];
 }) {
   const environmentProvider = input?.provider ?? provider();
   const consumeTicket =
@@ -88,6 +89,12 @@ function harness(input?: {
       terminated: 0,
       pending: 0,
     }));
+  const revokeProjectConnections =
+    input?.revokeProjectConnections ??
+    vi.fn<GatewayDependencies["revokeProjectConnections"]>(async () => ({
+      terminated: 0,
+      pending: 0,
+    }));
   const dependencies: GatewayDependencies = {
     now: () => NOW,
     provider: () => environmentProvider,
@@ -96,6 +103,7 @@ function harness(input?: {
     isTicketAuthorized,
     unregisterConnection,
     revokeAgentConnections,
+    revokeProjectConnections,
   };
   return {
     app: createGatewayApp(dependencies),
@@ -106,6 +114,7 @@ function harness(input?: {
     isTicketAuthorized,
     unregisterConnection,
     revokeAgentConnections,
+    revokeProjectConnections,
   };
 }
 
@@ -255,6 +264,12 @@ describe("Paca Environment Gateway", () => {
     );
     expect(response.status).toBe(401);
     expect(test.provider.status).not.toHaveBeenCalled();
+    expect(test.isTicketAuthorized).toHaveBeenCalledWith(
+      test.env,
+      "agent-1",
+      PROJECT_ID,
+      NOW.getTime(),
+    );
   });
 
   it("closes the check/register race when revocation lands during execute setup", async () => {
@@ -361,6 +376,34 @@ describe("Paca Environment Gateway", () => {
       test.env,
     );
     expect(publicResponse.status).toBe(404);
+  });
+
+  it("revokes only the requested project for a bounded set of Agents", async () => {
+    const revokeProjectConnections = vi.fn<GatewayDependencies["revokeProjectConnections"]>(
+      async () => ({ terminated: 2, pending: 1 }),
+    );
+    const test = harness({ revokeProjectConnections });
+    const response = await test.app.fetch(
+      new Request("https://environment-gateway.internal/v1/revocations/project", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-paca-environment-gateway-protocol": "paca.environment.gateway.v1",
+        },
+        body: JSON.stringify({
+          protocolVersion: "paca.environment.gateway.v1",
+          projectId: PROJECT_ID,
+          agentIds: ["agent-1", "agent-2", "agent-1"],
+        }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ terminated: 2, pending: 1 });
+    expect(revokeProjectConnections).toHaveBeenCalledWith(test.env, PROJECT_ID, [
+      "agent-1",
+      "agent-2",
+    ]);
   });
 
   it("does not register a connection when terminal proxy setup fails", async () => {

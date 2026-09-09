@@ -81,6 +81,45 @@ describe("PacaPermissionService", () => {
     expect(decisions.get("missing")).toEqual({ allowed: false, grants: [], scopeExists: false });
   });
 
+  it("uses the bulk multi-user project permission authority without changing grant semantics", async () => {
+    const listProjectGrantSetsForUsers = vi.fn(async () =>
+      Promise.resolve(
+        new Map([
+          ["user-1", [{ resource: "environments", action: "connect" }]],
+          ["user-2", [{ resource: "environments", action: "read" }]],
+        ] satisfies Array<[string, PermissionGrant[]]>),
+      ),
+    );
+    const service = new PacaPermissionService(fakeStore({ listProjectGrantSetsForUsers }));
+
+    const permissions = await service.listProjectPermissionsForUsers(
+      ["user-1", "user-2", "user-1"],
+      "project-1",
+    );
+    expect(permissions).toEqual(
+      new Map([
+        ["user-1", [{ resource: "environments", action: "connect" }]],
+        ["user-2", [{ resource: "environments", action: "read" }]],
+      ]),
+    );
+    expect(listProjectGrantSetsForUsers).toHaveBeenCalledWith(["user-1", "user-2"], "project-1");
+  });
+
+  it("marks every user outside a missing project scope as unavailable", async () => {
+    const service = new PacaPermissionService(
+      fakeStore({ listProjectGrantSetsForUsers: async () => null }),
+    );
+
+    await expect(
+      service.listProjectPermissionsForUsers(["user-1", "user-2"], "missing"),
+    ).resolves.toEqual(
+      new Map([
+        ["user-1", null],
+        ["user-2", null],
+      ]),
+    );
+  });
+
   it("does not treat an unknown project as an authorization success", async () => {
     const service = new PacaPermissionService(
       fakeStore({ findProjectOrganization: async () => null }),

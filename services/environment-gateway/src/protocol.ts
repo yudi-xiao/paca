@@ -86,6 +86,14 @@ export const revokeAgentConnectionsRequestSchema = z
   })
   .strict();
 
+export const revokeProjectConnectionsRequestSchema = z
+  .object({
+    protocolVersion: z.literal(gatewayProtocol),
+    projectId: z.uuid(),
+    agentIds: z.array(z.string().trim().min(1).max(255)).min(1).max(100),
+  })
+  .strict();
+
 export const connectionResponseSchema = z
   .object({
     protocolVersion: z.literal(connectionProtocol),

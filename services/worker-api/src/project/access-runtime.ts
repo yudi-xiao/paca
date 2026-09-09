@@ -1,5 +1,11 @@
 import type { AppBindings } from "../bindings";
 import { withDatabase } from "../database";
+import {
+  listDelegatedAgentIds,
+  projectEnvironmentConnectionRevoker,
+  readProjectEnvironmentPermissionSnapshot,
+  usersWithProjectEnvironmentPermissionLoss,
+} from "../environment/project-permission-revocation";
 import type { PermissionGrant } from "../permission/statement";
 import { invalidateProjectActor, invalidateProjectRoom } from "../realtime/invalidation";
 import { PostgresProjectAccessRepository } from "./access-postgres-repository";
@@ -60,10 +66,32 @@ export const projectAccessRuntime: ProjectAccessRuntime = {
   createRole: (env, actorGrants, projectId, input) =>
     withService(env, (service) => service.createRole(actorGrants, projectId, input)),
   updateRole: async (env, actorGrants, projectId, roleId, input) => {
-    const role = await withService(env, (service) =>
-      service.updateRole(actorGrants, projectId, roleId, input),
-    );
-    await invalidateProjectRoom(env, projectId);
+    const { role, agentIds } = await withDatabase(env, async (database) => {
+      const service = new ProjectAccessService(new PostgresProjectAccessRepository(database));
+      const affectedUserIds = (await service.listMembers(projectId))
+        .filter((member) => member.role.id === roleId)
+        .map((member) => member.userId);
+      const before = await readProjectEnvironmentPermissionSnapshot(
+        database,
+        projectId,
+        affectedUserIds,
+      );
+      const role = await service.updateRole(actorGrants, projectId, roleId, input);
+      const after = await readProjectEnvironmentPermissionSnapshot(
+        database,
+        projectId,
+        affectedUserIds,
+      );
+      const agentIds = await listDelegatedAgentIds(
+        database,
+        usersWithProjectEnvironmentPermissionLoss(before, after),
+      );
+      return { role, agentIds };
+    });
+    await Promise.all([
+      invalidateProjectRoom(env, projectId),
+      projectEnvironmentConnectionRevoker(env).revoke(projectId, agentIds),
+    ]);
     return role;
   },
   deleteRole: (env, projectId, roleId) =>
@@ -72,15 +100,63 @@ export const projectAccessRuntime: ProjectAccessRuntime = {
   addMember: (env, actorGrants, projectId, userId, roleId) =>
     withService(env, (service) => service.addMember(actorGrants, projectId, userId, roleId)),
   replaceMemberRole: async (env, actorGrants, projectId, memberId, roleId) => {
-    const member = await withService(env, (service) =>
-      service.replaceMemberRole(actorGrants, projectId, memberId, roleId),
-    );
-    await invalidateProjectActor(env, projectId, "user", member.userId);
+    const { member, agentIds } = await withDatabase(env, async (database) => {
+      const service = new ProjectAccessService(new PostgresProjectAccessRepository(database));
+      const current = (await service.listMembers(projectId)).find(
+        (candidate) => candidate.id === memberId,
+      );
+      const affectedUserIds = current ? [current.userId] : [];
+      const before = await readProjectEnvironmentPermissionSnapshot(
+        database,
+        projectId,
+        affectedUserIds,
+      );
+      const member = await service.replaceMemberRole(actorGrants, projectId, memberId, roleId);
+      const after = await readProjectEnvironmentPermissionSnapshot(
+        database,
+        projectId,
+        affectedUserIds,
+      );
+      const agentIds = await listDelegatedAgentIds(
+        database,
+        usersWithProjectEnvironmentPermissionLoss(before, after),
+      );
+      return { member, agentIds };
+    });
+    await Promise.all([
+      invalidateProjectActor(env, projectId, "user", member.userId),
+      projectEnvironmentConnectionRevoker(env).revoke(projectId, agentIds),
+    ]);
     return member;
   },
   removeMember: async (env, projectId, memberId) => {
-    const member = await withService(env, (service) => service.removeMember(projectId, memberId));
-    await invalidateProjectActor(env, projectId, "user", member.userId);
+    const { member, agentIds } = await withDatabase(env, async (database) => {
+      const service = new ProjectAccessService(new PostgresProjectAccessRepository(database));
+      const current = (await service.listMembers(projectId)).find(
+        (candidate) => candidate.id === memberId,
+      );
+      const affectedUserIds = current ? [current.userId] : [];
+      const before = await readProjectEnvironmentPermissionSnapshot(
+        database,
+        projectId,
+        affectedUserIds,
+      );
+      const member = await service.removeMember(projectId, memberId);
+      const after = await readProjectEnvironmentPermissionSnapshot(
+        database,
+        projectId,
+        affectedUserIds,
+      );
+      const agentIds = await listDelegatedAgentIds(
+        database,
+        usersWithProjectEnvironmentPermissionLoss(before, after),
+      );
+      return { member, agentIds };
+    });
+    await Promise.all([
+      invalidateProjectActor(env, projectId, "user", member.userId),
+      projectEnvironmentConnectionRevoker(env).revoke(projectId, agentIds),
+    ]);
   },
   listUsers: (env, page, pageSize) =>
     withService(env, (service) => service.listUsers(page, pageSize)),

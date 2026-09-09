@@ -11,6 +11,7 @@ import {
 type JsonRecord = Record<string, unknown>;
 type HeadersWithSetCookie = Headers & { getSetCookie?: () => string[] };
 type EnvironmentOperationMode = "read" | "execute";
+type RevocationMode = "grant" | "project-permission";
 
 const TERMINAL_READY_TIMEOUT_MS = 90_000;
 
@@ -300,6 +301,14 @@ async function main(): Promise<void> {
   if (operationMode !== "read" && operationMode !== "execute") {
     throw new Error("PACA_ENVIRONMENT_SMOKE_MODE_INVALID");
   }
+  const revocationMode = (process.env.PACA_ENVIRONMENT_SMOKE_REVOCATION?.trim() ||
+    "grant") as RevocationMode;
+  if (revocationMode !== "grant" && revocationMode !== "project-permission") {
+    throw new Error("PACA_ENVIRONMENT_SMOKE_REVOCATION_INVALID");
+  }
+  if (revocationMode === "project-permission" && operationMode !== "execute") {
+    throw new Error("PACA_ENVIRONMENT_SMOKE_PROJECT_PERMISSION_REQUIRES_EXECUTE");
+  }
   const pscaleOrganization = required("PACA_PLANETSCALE_ORG");
   const hostConfigPath =
     process.env.PACA_AGENT_HOST_CONFIG?.trim() ||
@@ -310,7 +319,13 @@ async function main(): Promise<void> {
   let scopeCreated = false;
   let agentId: string | null = null;
   let grantActive = false;
-  let cookie = "";
+  let adminCookie = "";
+  let delegatedCookie = "";
+  let approvalCookie = "";
+  let delegatedUserId: string | null = null;
+  let projectRoleId: string | null = null;
+  let projectRoleName: string | null = null;
+  let projectMemberId: string | null = null;
   let terminalSocket: WebSocket | null = null;
 
   try {
@@ -329,7 +344,57 @@ async function main(): Promise<void> {
       rememberMe: false,
     });
     requireStatus(signIn.response, 200, signIn.body, "SIGN_IN");
-    cookie = sessionCookie(signIn.response);
+    adminCookie = sessionCookie(signIn.response);
+
+    if (revocationMode === "project-permission") {
+      const identity = crypto.randomUUID().replaceAll("-", "");
+      const signUp = await userRequest(baseURL, "/api/auth/sign-up/email", "", "POST", {
+        name: `Environment smoke ${identity.slice(0, 8)}`,
+        email: `paca-environment-smoke-${identity}@example.invalid`,
+        password: `${crypto.randomUUID()}Aa1!`,
+      });
+      requireStatus(signUp.response, 200, signUp.body, "SIGN_UP_DELEGATED_USER");
+      delegatedCookie = sessionCookie(signUp.response);
+      const signUpUser = asRecord(asRecord(signUp.body)?.user);
+      if (typeof signUpUser?.id !== "string") throw new Error("DELEGATED_USER_RESPONSE_INVALID");
+      delegatedUserId = signUpUser.id;
+
+      const roleName = `Environment smoke ${identity.slice(0, 8)}`;
+      projectRoleName = roleName;
+      const createRole = await userRequest(
+        baseURL,
+        `/api/v1/projects/${projectId}/roles`,
+        adminCookie,
+        "POST",
+        {
+          role_name: roleName,
+          permissions: {
+            "agents.approveGrant": true,
+            "environments.read": true,
+            "environments.connect": true,
+          },
+        },
+      );
+      requireStatus(createRole.response, 201, createRole.body, "CREATE_PROJECT_ROLE");
+      const createdRole = asRecord(asRecord(createRole.body)?.data);
+      if (typeof createdRole?.id !== "string") throw new Error("PROJECT_ROLE_RESPONSE_INVALID");
+      projectRoleId = createdRole.id;
+
+      const addMember = await userRequest(
+        baseURL,
+        `/api/v1/projects/${projectId}/members`,
+        adminCookie,
+        "POST",
+        { user_id: delegatedUserId, project_role_id: projectRoleId },
+      );
+      requireStatus(addMember.response, 201, addMember.body, "ADD_PROJECT_MEMBER");
+      const createdMember = asRecord(asRecord(addMember.body)?.data);
+      if (typeof createdMember?.id !== "string") throw new Error("PROJECT_MEMBER_RESPONSE_INVALID");
+      projectMemberId = createdMember.id;
+      approvalCookie = delegatedCookie;
+    } else {
+      approvalCookie = adminCookie;
+    }
 
     const validUntil = new Date(Date.now() + 10 * 60_000).toISOString();
     const hostConfig = await readAgentHostConfig(hostConfigPath);
@@ -356,7 +421,7 @@ async function main(): Promise<void> {
     const approval = await userRequest(
       baseURL,
       "/api/auth/agent/approve-capability",
-      cookie,
+      approvalCookie,
       "POST",
       {
         agent_id: agentId,
@@ -471,15 +536,33 @@ async function main(): Promise<void> {
       };
     }
 
-    const revoke = await userRequest(
-      baseURL,
-      "/api/auth/paca-agent/revoke-capability",
-      cookie,
-      "POST",
-      { agent_id: agentId, capabilities: ["environment.connect"] },
-    );
-    requireStatus(revoke.response, 200, revoke.body, "REVOKE_CAPABILITY");
-    grantActive = false;
+    if (revocationMode === "grant") {
+      const revoke = await userRequest(
+        baseURL,
+        "/api/auth/paca-agent/revoke-capability",
+        approvalCookie,
+        "POST",
+        { agent_id: agentId, capabilities: ["environment.connect"] },
+      );
+      requireStatus(revoke.response, 200, revoke.body, "REVOKE_CAPABILITY");
+      grantActive = false;
+    } else {
+      if (!projectRoleId || !projectRoleName) throw new Error("PROJECT_ROLE_REQUIRED");
+      const updateRole = await userRequest(
+        baseURL,
+        `/api/v1/projects/${projectId}/roles/${projectRoleId}`,
+        adminCookie,
+        "PATCH",
+        {
+          role_name: projectRoleName,
+          permissions: {
+            "agents.approveGrant": true,
+            "environments.read": true,
+          },
+        },
+      );
+      requireStatus(updateRole.response, 200, updateRole.body, "REVOKE_PROJECT_PERMISSION");
+    }
     if (preIssuedConnection && terminalVerified) {
       terminalVerified.preIssuedTicketRejected = await verifyTicketRejected(
         preIssuedConnection.url,
@@ -519,9 +602,11 @@ async function main(): Promise<void> {
         harness: "local",
         backend: "cloudflare-sandbox",
         operationMode,
+        revocationMode,
         ...(processCount === null ? {} : { processCount }),
         ...(terminalVerified ?? {}),
-        grantRevoked: true,
+        grantRevoked: revocationMode === "grant",
+        projectPermissionRevoked: revocationMode === "project-permission",
         newConnectionRejected,
       }),
     );
@@ -529,19 +614,53 @@ async function main(): Promise<void> {
     if (terminalSocket && terminalSocket.readyState !== WebSocket.CLOSED) {
       terminalSocket.close(1000, "environment smoke cleanup");
     }
-    if (agentId && grantActive && cookie) {
-      await userRequest(baseURL, "/api/auth/paca-agent/revoke-capability", cookie, "POST", {
+    if (agentId && grantActive && approvalCookie) {
+      const cleanupGrant = await userRequest(
+        baseURL,
+        "/api/auth/paca-agent/revoke-capability",
+        approvalCookie,
+        "POST",
+        {
+          agent_id: agentId,
+          capabilities: ["environment.connect"],
+        },
+      ).catch(() => null);
+      if (cleanupGrant?.response.ok) grantActive = false;
+    }
+    if (agentId && approvalCookie) {
+      await userRequest(baseURL, "/api/auth/agent/revoke", approvalCookie, "POST", {
         agent_id: agentId,
-        capabilities: ["environment.connect"],
       }).catch(() => null);
     }
-    if (agentId && cookie) {
-      await userRequest(baseURL, "/api/auth/agent/revoke", cookie, "POST", {
-        agent_id: agentId,
-      }).catch(() => null);
+    if (delegatedCookie) {
+      await userRequest(baseURL, "/api/auth/sign-out", delegatedCookie, "POST", {}).catch(
+        () => null,
+      );
     }
-    if (cookie) {
-      await userRequest(baseURL, "/api/auth/sign-out", cookie, "POST", {}).catch(() => null);
+    if (projectMemberId && adminCookie) {
+      await userRequest(
+        baseURL,
+        `/api/v1/projects/${projectId}/members/${projectMemberId}`,
+        adminCookie,
+        "DELETE",
+      ).catch(() => null);
+    }
+    if (projectRoleId && adminCookie) {
+      await userRequest(
+        baseURL,
+        `/api/v1/projects/${projectId}/roles/${projectRoleId}`,
+        adminCookie,
+        "DELETE",
+      ).catch(() => null);
+    }
+    if (delegatedUserId) {
+      await query(
+        role.databaseURL,
+        `DELETE FROM public."user" WHERE id = ${sqlLiteral(delegatedUserId)}`,
+      ).catch(() => undefined);
+    }
+    if (adminCookie) {
+      await userRequest(baseURL, "/api/auth/sign-out", adminCookie, "POST", {}).catch(() => null);
     }
     if (scopeCreated) {
       await query(

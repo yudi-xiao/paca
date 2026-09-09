@@ -11,6 +11,8 @@ import {
 const ENVIRONMENT_GATEWAY_ENDPOINT = "https://environment-gateway.internal/v1/connections";
 const ENVIRONMENT_GATEWAY_REVOCATION_ENDPOINT =
   "https://environment-gateway.internal/v1/revocations/agent";
+const ENVIRONMENT_GATEWAY_PROJECT_REVOCATION_ENDPOINT =
+  "https://environment-gateway.internal/v1/revocations/project";
 const ENVIRONMENT_GATEWAY_PROTOCOL = "paca.environment.gateway.v1";
 const MAX_GATEWAY_RESPONSE_BYTES = 32 * 1_024;
 
@@ -154,6 +156,49 @@ export class ServiceBindingEnvironmentConnectionGateway implements EnvironmentCo
         body: JSON.stringify({
           protocolVersion: ENVIRONMENT_GATEWAY_PROTOCOL,
           agentId,
+        }),
+      });
+    } catch {
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable);
+    }
+
+    if (response.status < 200 || response.status >= 300) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable);
+    }
+    const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
+    if (contentType !== "application/json") {
+      void response.body?.cancel().catch(() => undefined);
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayResponseInvalid);
+    }
+    const parsed = revocationResponseSchema.safeParse(await readBoundedJson(response));
+    if (!parsed.success) {
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayResponseInvalid);
+    }
+    return parsed.data;
+  }
+
+  async revokeProjectConnections(
+    projectId: string,
+    agentIds: string[],
+  ): Promise<{ terminated: number; pending: number }> {
+    if (!this.binding) {
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable);
+    }
+
+    let response: Response;
+    try {
+      response = await this.binding.fetch(ENVIRONMENT_GATEWAY_PROJECT_REVOCATION_ENDPOINT, {
+        method: "POST",
+        redirect: "manual",
+        headers: {
+          "content-type": "application/json",
+          "x-paca-environment-gateway-protocol": ENVIRONMENT_GATEWAY_PROTOCOL,
+        },
+        body: JSON.stringify({
+          protocolVersion: ENVIRONMENT_GATEWAY_PROTOCOL,
+          projectId,
+          agentIds,
         }),
       });
     } catch {

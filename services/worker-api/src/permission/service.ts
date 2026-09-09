@@ -12,6 +12,10 @@ export interface PacaPermissionStore {
     userId: string,
     projectIds: string[],
   ): Promise<Map<string, PermissionGrant[]>>;
+  listProjectGrantSetsForUsers?(
+    userIds: string[],
+    projectId: string,
+  ): Promise<Map<string, PermissionGrant[]> | null>;
 }
 
 export type PermissionDecision = {
@@ -50,6 +54,27 @@ export class PacaPermissionService {
     const organization = await this.store.listOrganizationGrants(userId, organizationId);
     const project = await this.store.listProjectGrants(userId, projectId);
     return uniquePermissionGrants([...system, ...organization, ...project]);
+  }
+
+  async listProjectPermissionsForUsers(
+    userIds: string[],
+    projectId: string,
+  ): Promise<Map<string, PermissionGrant[] | null>> {
+    const uniqueUserIds = [...new Set(userIds)];
+    if (this.store.listProjectGrantSetsForUsers) {
+      const grantSets = await this.store.listProjectGrantSetsForUsers(uniqueUserIds, projectId);
+      return new Map(
+        uniqueUserIds.map((userId) => [
+          userId,
+          grantSets ? uniquePermissionGrants(grantSets.get(userId) ?? []) : null,
+        ]),
+      );
+    }
+    const result = new Map<string, PermissionGrant[] | null>();
+    for (const userId of uniqueUserIds) {
+      result.set(userId, await this.listProjectPermissions(userId, projectId));
+    }
+    return result;
   }
 
   async hasSystemPermission(
