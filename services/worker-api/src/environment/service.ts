@@ -15,6 +15,28 @@ export type EnvironmentScope = {
   gatewayReference: string;
 };
 
+export type EnvironmentResource = {
+  id: string;
+  projectId: string;
+  name: string;
+  backend: EnvironmentBackend;
+  createdBy: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type PersistedEnvironmentCreate = EnvironmentResource & {
+  gatewayReference: string;
+};
+
+export type EnvironmentCreateInput = {
+  name: string;
+};
+
+export type EnvironmentUpdateInput = {
+  name?: string;
+};
+
 export type EnvironmentConnection = {
   protocolVersion: typeof environmentConnectionProtocol;
   requestId: string;
@@ -29,6 +51,98 @@ export type EnvironmentConnection = {
 export type EnvironmentScopeRepository = {
   find(environmentId: string): Promise<EnvironmentScope | null>;
 };
+
+export type EnvironmentResourceRepository = EnvironmentScopeRepository & {
+  list(projectId: string): Promise<EnvironmentResource[]>;
+  findResource(projectId: string, environmentId: string): Promise<EnvironmentResource>;
+  create(input: PersistedEnvironmentCreate): Promise<EnvironmentResource>;
+  update(
+    projectId: string,
+    environmentId: string,
+    input: EnvironmentUpdateInput,
+  ): Promise<EnvironmentResource>;
+  archive(projectId: string, environmentId: string): Promise<void>;
+};
+
+export const environmentResourceErrorCodes = {
+  nameInvalid: "ENVIRONMENT_NAME_INVALID",
+  nameTaken: "ENVIRONMENT_NAME_TAKEN",
+  notFound: "ENVIRONMENT_NOT_FOUND",
+  revocationFailed: "ENVIRONMENT_REVOCATION_FAILED",
+} as const;
+
+export type EnvironmentResourceErrorCode =
+  (typeof environmentResourceErrorCodes)[keyof typeof environmentResourceErrorCodes];
+
+export class EnvironmentResourceError extends Error {
+  constructor(
+    readonly code: EnvironmentResourceErrorCode,
+    message = code,
+  ) {
+    super(message);
+    this.name = "EnvironmentResourceError";
+  }
+}
+
+const ENVIRONMENT_NAME_MAX_LENGTH = 100;
+
+function normalizeEnvironmentName(value: string): string {
+  const name = value.trim();
+  if (name.length === 0 || name.length > ENVIRONMENT_NAME_MAX_LENGTH) {
+    throw new EnvironmentResourceError(environmentResourceErrorCodes.nameInvalid);
+  }
+  return name;
+}
+
+function environmentGatewayReference(environmentId: string): string {
+  return `paca-env-${environmentId}`;
+}
+
+export class EnvironmentResourceService {
+  constructor(private readonly repository: EnvironmentResourceRepository) {}
+
+  list(projectId: string): Promise<EnvironmentResource[]> {
+    return this.repository.list(projectId);
+  }
+
+  get(projectId: string, environmentId: string): Promise<EnvironmentResource> {
+    return this.repository.findResource(projectId, environmentId);
+  }
+
+  async create(
+    projectId: string,
+    createdBy: string,
+    input: EnvironmentCreateInput,
+  ): Promise<EnvironmentResource> {
+    const id = crypto.randomUUID();
+    const now = new Date();
+    return this.repository.create({
+      id,
+      projectId,
+      name: normalizeEnvironmentName(input.name),
+      backend: "cloudflare-sandbox",
+      gatewayReference: environmentGatewayReference(id),
+      createdBy,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  async update(
+    projectId: string,
+    environmentId: string,
+    input: EnvironmentUpdateInput,
+  ): Promise<EnvironmentResource> {
+    if (input.name === undefined) return this.get(projectId, environmentId);
+    return this.repository.update(projectId, environmentId, {
+      name: normalizeEnvironmentName(input.name),
+    });
+  }
+
+  archive(projectId: string, environmentId: string): Promise<void> {
+    return this.repository.archive(projectId, environmentId);
+  }
+}
 
 export type EnvironmentConnectionGateway = {
   issue(input: {

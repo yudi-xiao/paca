@@ -71,6 +71,12 @@ import {
 import { checkDatabaseHealth, type DatabaseHealth, withDatabase } from "./database";
 import { type DocumentRuntime, documentRuntime } from "./document/runtime";
 import { DocumentError, documentErrorCodes, type PacaDocument } from "./document/service";
+import { type EnvironmentRuntime, environmentRuntime } from "./environment/runtime";
+import {
+  type EnvironmentResource,
+  EnvironmentResourceError,
+  environmentResourceErrorCodes,
+} from "./environment/service";
 import { type IterationRuntime, iterationRuntime } from "./iteration/runtime";
 import {
   IterationError,
@@ -184,6 +190,7 @@ type AppDependencies = {
   customFields: CustomFieldRuntime;
   iterations: IterationRuntime;
   documents: DocumentRuntime;
+  environments: EnvironmentRuntime;
   loadSystemPermissions: LoadSystemPermissions;
   log: (event: LogEvent) => void;
   notifications: NotificationRuntime;
@@ -209,6 +216,13 @@ async function requireValidProjectId(context: AppContext, next: Next) {
   await next();
 }
 
+async function requireValidEnvironmentId(context: AppContext, next: Next) {
+  if (!z.uuid().safeParse(context.req.param("environmentId")).success) {
+    return legacyFailure(context, 400, "BAD_REQUEST", "Invalid environment id");
+  }
+  await next();
+}
+
 async function requireValidOrganizationId(context: AppContext, next: Next) {
   const organizationId = context.req.param("organizationId")?.trim();
   if (!organizationId || organizationId.length > 255) {
@@ -227,7 +241,7 @@ function legacySuccess<T>(context: AppContext, data: T) {
 
 function legacyFailure(
   context: AppContext,
-  status: 400 | 403 | 404 | 409 | 413 | 416 | 500,
+  status: 400 | 403 | 404 | 409 | 413 | 416 | 500 | 503,
   errorCode: string,
   error: string,
 ) {
@@ -263,6 +277,11 @@ const projectCreateBodySchema = z.object({
 const projectUpdateBodySchema = projectCreateBodySchema
   .omit({ name: true })
   .extend({ name: z.string().optional() })
+  .refine((body) => Object.keys(body).length > 0);
+
+const environmentCreateBodySchema = z.object({ name: z.string() }).strict();
+const environmentUpdateBodySchema = environmentCreateBodySchema
+  .partial()
   .refine((body) => Object.keys(body).length > 0);
 
 const brandingUpdateBodySchema = z
@@ -580,6 +599,33 @@ function projectFailure(context: AppContext, error: unknown) {
       return legacyFailure(context, 404, error.code, error.message);
     case projectErrorCodes.nameTaken:
       return legacyFailure(context, 409, error.code, error.message);
+  }
+}
+
+function environmentResponse(environment: EnvironmentResource) {
+  return {
+    id: environment.id,
+    project_id: environment.projectId,
+    name: environment.name,
+    status: "ready_on_demand" as const,
+    backend: environment.backend,
+    created_by: environment.createdBy,
+    created_at: environment.createdAt.toISOString(),
+    updated_at: environment.updatedAt.toISOString(),
+  };
+}
+
+function environmentFailure(context: AppContext, error: unknown) {
+  if (!(error instanceof EnvironmentResourceError)) throw error;
+  switch (error.code) {
+    case environmentResourceErrorCodes.nameInvalid:
+      return legacyFailure(context, 400, error.code, error.message);
+    case environmentResourceErrorCodes.notFound:
+      return legacyFailure(context, 404, error.code, error.message);
+    case environmentResourceErrorCodes.nameTaken:
+      return legacyFailure(context, 409, error.code, error.message);
+    case environmentResourceErrorCodes.revocationFailed:
+      return legacyFailure(context, 503, error.code, error.message);
   }
 }
 
@@ -1367,6 +1413,7 @@ const defaultDependencies: AppDependencies = {
   customFields: customFieldRuntime,
   databaseHealth: checkDatabaseHealth,
   documents: documentRuntime,
+  environments: environmentRuntime,
   iterations: iterationRuntime,
   loadSystemPermissions,
   log(event) {
@@ -2118,6 +2165,132 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
           await dependencies.projectAgentDirectory.list(context.env, context.req.param("projectId"))
         ).map(projectAgentDirectoryResponse),
       }),
+  );
+  app.get(
+    "/api/v1/projects/:projectId/environments",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, {
+      environments: ["read"],
+    }),
+    async (context) => {
+      try {
+        const environments = await dependencies.environments.list(
+          context.env,
+          context.req.param("projectId"),
+        );
+        return legacySuccess(context, { environments: environments.map(environmentResponse) });
+      } catch (error) {
+        return environmentFailure(context, error);
+      }
+    },
+  );
+  app.post(
+    "/api/v1/projects/:projectId/environments",
+    requireValidProjectId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, {
+      environments: ["write"],
+    }),
+    async (context) => {
+      const parsed = environmentCreateBodySchema.safeParse(
+        await context.req.json().catch(() => null),
+      );
+      if (!parsed.success) {
+        return legacyFailure(context, 400, "BAD_REQUEST", "Invalid environment");
+      }
+      try {
+        const environment = await dependencies.environments.create(
+          context.env,
+          context.req.param("projectId"),
+          context.get("permissionActorId"),
+          parsed.data,
+        );
+        return context.json(
+          {
+            success: true as const,
+            data: environmentResponse(environment),
+            request_id: context.get("requestId"),
+          },
+          201,
+        );
+      } catch (error) {
+        return environmentFailure(context, error);
+      }
+    },
+  );
+  app.get(
+    "/api/v1/projects/:projectId/environments/:environmentId",
+    requireValidProjectId,
+    requireValidEnvironmentId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, {
+      environments: ["read"],
+    }),
+    async (context) => {
+      try {
+        return legacySuccess(
+          context,
+          environmentResponse(
+            await dependencies.environments.get(
+              context.env,
+              context.req.param("projectId"),
+              context.req.param("environmentId"),
+            ),
+          ),
+        );
+      } catch (error) {
+        return environmentFailure(context, error);
+      }
+    },
+  );
+  app.patch(
+    "/api/v1/projects/:projectId/environments/:environmentId",
+    requireValidProjectId,
+    requireValidEnvironmentId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, {
+      environments: ["write"],
+    }),
+    async (context) => {
+      const parsed = environmentUpdateBodySchema.safeParse(
+        await context.req.json().catch(() => null),
+      );
+      if (!parsed.success) {
+        return legacyFailure(context, 400, "BAD_REQUEST", "Invalid environment");
+      }
+      try {
+        return legacySuccess(
+          context,
+          environmentResponse(
+            await dependencies.environments.update(
+              context.env,
+              context.req.param("projectId"),
+              context.req.param("environmentId"),
+              parsed.data,
+            ),
+          ),
+        );
+      } catch (error) {
+        return environmentFailure(context, error);
+      }
+    },
+  );
+  app.delete(
+    "/api/v1/projects/:projectId/environments/:environmentId",
+    requireValidProjectId,
+    requireValidEnvironmentId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, {
+      environments: ["write"],
+    }),
+    async (context) => {
+      try {
+        await dependencies.environments.archive(
+          context.env,
+          context.req.param("projectId"),
+          context.req.param("environmentId"),
+        );
+        return context.body(null, 204);
+      } catch (error) {
+        return environmentFailure(context, error);
+      }
+    },
   );
   app.patch(
     "/api/v1/projects/:projectId",

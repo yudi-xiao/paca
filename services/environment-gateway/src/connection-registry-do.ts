@@ -10,6 +10,7 @@ import { CloudflareSandboxProvider } from "./provider";
 const CONNECTION_PREFIX = "connection:";
 const REVOCATION_BARRIER_KEY = "revocation-barrier-ms";
 const PROJECT_REVOCATION_BARRIER_PREFIX = "project-revocation-barrier:";
+const ENVIRONMENT_REVOCATION_BARRIER_PREFIX = "environment-revocation-barrier:";
 const REVOCATION_RETRY_KEY = "revocation-retry-attempt";
 const MAX_CONNECTIONS_PER_AGENT = 100;
 const REVOCATION_RETRY_MS = 5_000;
@@ -27,6 +28,10 @@ export class AgentConnectionRegistryDO extends DurableObject<Env> {
 
   private projectBarrierKey(projectId: string): string {
     return `${PROJECT_REVOCATION_BARRIER_PREFIX}${projectId}`;
+  }
+
+  private environmentBarrierKey(environmentId: string): string {
+    return `${ENVIRONMENT_REVOCATION_BARRIER_PREFIX}${environmentId}`;
   }
 
   private async records(): Promise<Map<string, ActiveEnvironmentConnection>> {
@@ -71,9 +76,14 @@ export class AgentConnectionRegistryDO extends DurableObject<Env> {
       const projectRevokedAtMs = await transaction.get<number>(
         this.projectBarrierKey(connection.projectId),
       );
+      const environmentRevokedAtMs = await transaction.get<number>(
+        this.environmentBarrierKey(connection.environmentId),
+      );
       if (
         (revokedAtMs !== undefined && connection.ticketIssuedAtMs <= revokedAtMs) ||
-        (projectRevokedAtMs !== undefined && connection.ticketIssuedAtMs <= projectRevokedAtMs)
+        (projectRevokedAtMs !== undefined && connection.ticketIssuedAtMs <= projectRevokedAtMs) ||
+        (environmentRevokedAtMs !== undefined &&
+          connection.ticketIssuedAtMs <= environmentRevokedAtMs)
       ) {
         return false;
       }
@@ -98,15 +108,21 @@ export class AgentConnectionRegistryDO extends DurableObject<Env> {
     return accepted;
   }
 
-  async isTicketAuthorized(projectId: string, ticketIssuedAtMs: number): Promise<boolean> {
+  async isTicketAuthorized(
+    projectId: string,
+    environmentId: string,
+    ticketIssuedAtMs: number,
+  ): Promise<boolean> {
     if (!Number.isSafeInteger(ticketIssuedAtMs) || ticketIssuedAtMs <= 0) return false;
-    const [revokedAtMs, projectRevokedAtMs] = await Promise.all([
+    const [revokedAtMs, projectRevokedAtMs, environmentRevokedAtMs] = await Promise.all([
       this.ctx.storage.get<number>(REVOCATION_BARRIER_KEY),
       this.ctx.storage.get<number>(this.projectBarrierKey(projectId)),
+      this.ctx.storage.get<number>(this.environmentBarrierKey(environmentId)),
     ]);
     return (
       (revokedAtMs === undefined || ticketIssuedAtMs > revokedAtMs) &&
-      (projectRevokedAtMs === undefined || ticketIssuedAtMs > projectRevokedAtMs)
+      (projectRevokedAtMs === undefined || ticketIssuedAtMs > projectRevokedAtMs) &&
+      (environmentRevokedAtMs === undefined || ticketIssuedAtMs > environmentRevokedAtMs)
     );
   }
 
@@ -182,6 +198,29 @@ export class AgentConnectionRegistryDO extends DurableObject<Env> {
           continue;
         }
         if (parsed.data.projectId === projectId) active.set(key, parsed.data);
+      }
+      return active;
+    });
+    return this.terminate(records);
+  }
+
+  async revokeEnvironment(
+    projectId: string,
+    environmentId: string,
+  ): Promise<ConnectionRevocationResult> {
+    const records = await this.ctx.storage.transaction(async (transaction) => {
+      await transaction.put(this.environmentBarrierKey(environmentId), Date.now());
+      const stored = await transaction.list<unknown>({ prefix: CONNECTION_PREFIX });
+      const active = new Map<string, ActiveEnvironmentConnection>();
+      for (const [key, value] of stored) {
+        const parsed = activeEnvironmentConnectionSchema.safeParse(value);
+        if (!parsed.success) {
+          await transaction.delete(key);
+          continue;
+        }
+        if (parsed.data.projectId === projectId && parsed.data.environmentId === environmentId) {
+          active.set(key, parsed.data);
+        }
       }
       return active;
     });

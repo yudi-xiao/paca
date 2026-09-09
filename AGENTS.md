@@ -225,6 +225,8 @@ Paca 的 Agent 控制面不得绑定某一种模型或执行器。每个 Better 
 
 Environment Gateway 必须把 provider 冷启动、容量不足、瞬时传输故障、结果不确定和永久失败映射为不泄露平台原始错误的稳定协议码，并显式返回有界 `retryable`/`retryAfterMs`。错误分类必须兼容 Cloudflare DO/RPC 跨边界序列化：优先读取稳定 `code/context`，只有在 getter 被传输层剥离时才允许按官方稳定错误类名做精确 fallback，禁止把平台原始 message 透传给调用方或用宽泛字符串猜测业务错误。execute 连接允许在消费一次性 PTY 票据前执行只读 prepare 预热；Gateway 只可在同一请求内重试确定未产生副作用且尚未由 SDK 消耗完整重试预算的 prepare/status 操作。Cloudflare Agent、本地 Codex、Claude Code、DeepSeek 等 Harness 只能在服务端明确标记可重试时，以同一业务幂等 request ID 和固定次数/时间预算重试；PTY、shell 或其他可能已执行的操作若结果不确定，禁止自动重放。
 
+Environment 在 Paca 领域中是 Project-scoped 的长期逻辑资源，不等于一个持续运行的容器实例。用户创建时只允许提交名称；环境 UUID、provider 类型和 opaque Gateway reference 由服务端生成，公开 API 不返回 Gateway reference、票据、Session ID 或 provider secret。Cloudflare Sandbox provider 按首次实际连接惰性启动，因此 UI/API 状态使用 `ready_on_demand`，不得伪造需要人工维护的 `running`/`stopped` 状态。环境归档采用软删除并必须同步写入精确到 Project + Environment + Agent 的 Gateway 撤销栅栏，关闭既有连接并拒绝归档前已签发但未使用的票据；撤销通知失败时归档请求必须可幂等重试，不能误报成功。
+
 Cloudflare Agents SDK 的默认 `/agents/*` 路由不得直接公开。浏览器、Cloudflare Agent 和外部 Harness 都先经过 Hono 的 Better Auth Session 或 Agent Auth JWT 校验，再由服务端按 Better Auth Agent ID 获取 AgentDO stub；AgentDO RPC 与 Workflow 在执行敏感工具前仍需重查 active Grant、constraints 和 delegated 用户权限交集。
 
 Agent Tracing 是运行可观测性，不是权限、业务审计或可靠事件日志。生产默认不记录 prompt、文档内容、JWT、Grant、secret 和工具原始 payload；只记录 run ID、Agent ID、Harness 类型、工具名、安全状态码、耗时和关联 span。Tracing 可能采样或丢失，业务审计必须继续写入 PostgreSQL。若后续使用 AI SDK，应采用 Cloudflare 官方 tracing 包装或自定义 span，并保持 payload 脱敏。

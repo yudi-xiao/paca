@@ -210,7 +210,9 @@ describe("agent-auth-api", () => {
 			}),
 		);
 
-		await expect(listProjectAgentDirectory("project/unsafe")).resolves.toMatchObject([
+		await expect(
+			listProjectAgentDirectory("project/unsafe"),
+		).resolves.toMatchObject([
 			{ agent_id: "agent-1", authorization_status: "active" },
 		]);
 		expect(fetchMock).toHaveBeenCalledWith(

@@ -6,6 +6,8 @@ import {
 } from "../src/environment/project-permission-revocation";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
+const ENVIRONMENT_ID = "22222222-2222-4222-8222-222222222222";
+const revokeEnvironmentConnections = async () => ({ terminated: 0, pending: 0 });
 
 describe("project environment permission revocation", () => {
   it("selects only users who actually lost read or connect permission", () => {
@@ -33,7 +35,10 @@ describe("project environment permission revocation", () => {
       terminated: agentIds.length,
       pending: 0,
     }));
-    const revoker = new ProjectEnvironmentConnectionRevoker({ revokeProjectConnections });
+    const revoker = new ProjectEnvironmentConnectionRevoker({
+      revokeProjectConnections,
+      revokeEnvironmentConnections,
+    });
     const agentIds = Array.from({ length: 102 }, (_, index) => `agent-${index}`);
 
     await expect(revoker.revoke(PROJECT_ID, [...agentIds, "agent-0"])).resolves.toEqual({
@@ -55,7 +60,10 @@ describe("project environment permission revocation", () => {
       >()
       .mockRejectedValueOnce(new Error("gateway unavailable"))
       .mockResolvedValueOnce({ terminated: 1, pending: 0 });
-    const revoker = new ProjectEnvironmentConnectionRevoker({ revokeProjectConnections });
+    const revoker = new ProjectEnvironmentConnectionRevoker({
+      revokeProjectConnections,
+      revokeEnvironmentConnections,
+    });
     const agentIds = Array.from({ length: 101 }, (_, index) => `agent-${index}`);
 
     await expect(revoker.revoke(PROJECT_ID, agentIds)).resolves.toEqual({
@@ -66,5 +74,35 @@ describe("project environment permission revocation", () => {
     });
     expect(log).toHaveBeenCalledOnce();
     log.mockRestore();
+  });
+
+  it("deduplicates and sends exact environment revocations in bounded batches", async () => {
+    const revokeEnvironmentConnections = vi.fn(
+      async (_projectId: string, _environmentId: string, agentIds: string[]) => ({
+        terminated: agentIds.length,
+        pending: 0,
+      }),
+    );
+    const revoker = new ProjectEnvironmentConnectionRevoker({
+      revokeProjectConnections: async () => ({ terminated: 0, pending: 0 }),
+      revokeEnvironmentConnections,
+    });
+    const agentIds = Array.from({ length: 101 }, (_, index) => `agent-${index}`);
+
+    await expect(
+      revoker.revokeEnvironment(PROJECT_ID, ENVIRONMENT_ID, [...agentIds, "agent-0"]),
+    ).resolves.toEqual({
+      requested: 101,
+      terminated: 101,
+      pending: 0,
+      failed: 0,
+    });
+    expect(revokeEnvironmentConnections).toHaveBeenCalledTimes(2);
+    expect(revokeEnvironmentConnections.mock.calls[0]?.slice(0, 2)).toEqual([
+      PROJECT_ID,
+      ENVIRONMENT_ID,
+    ]);
+    expect(revokeEnvironmentConnections.mock.calls[0]?.[2]).toHaveLength(100);
+    expect(revokeEnvironmentConnections.mock.calls[1]?.[2]).toHaveLength(1);
   });
 });

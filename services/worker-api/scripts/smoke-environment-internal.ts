@@ -11,7 +11,7 @@ import {
 type JsonRecord = Record<string, unknown>;
 type HeadersWithSetCookie = Headers & { getSetCookie?: () => string[] };
 type EnvironmentOperationMode = "read" | "execute";
-type RevocationMode = "grant" | "project-permission";
+type RevocationMode = "environment-archive" | "grant" | "project-permission";
 
 const TERMINAL_READY_TIMEOUT_MS = 90_000;
 const PROVIDER_ACTION_MAX_ATTEMPTS = 3;
@@ -378,11 +378,15 @@ async function main(): Promise<void> {
   }
   const revocationMode = (process.env.PACA_ENVIRONMENT_SMOKE_REVOCATION?.trim() ||
     "grant") as RevocationMode;
-  if (revocationMode !== "grant" && revocationMode !== "project-permission") {
+  if (
+    revocationMode !== "environment-archive" &&
+    revocationMode !== "grant" &&
+    revocationMode !== "project-permission"
+  ) {
     throw new Error("PACA_ENVIRONMENT_SMOKE_REVOCATION_INVALID");
   }
-  if (revocationMode === "project-permission" && operationMode !== "execute") {
-    throw new Error("PACA_ENVIRONMENT_SMOKE_PROJECT_PERMISSION_REQUIRES_EXECUTE");
+  if (revocationMode !== "grant" && operationMode !== "execute") {
+    throw new Error("PACA_ENVIRONMENT_SMOKE_CONNECTION_REVOCATION_REQUIRES_EXECUTE");
   }
   const pscaleOrganization = required("PACA_PLANETSCALE_ORG");
   const hostConfigPath =
@@ -407,8 +411,9 @@ async function main(): Promise<void> {
     await query(
       role.databaseURL,
       `INSERT INTO public.paca_environment_scope
-         (environment_id, project_id, backend, gateway_reference)
+         (environment_id, project_id, name, backend, gateway_reference)
        VALUES (${sqlLiteral(environmentId)}::uuid, ${sqlLiteral(projectId)}::uuid,
+               ${sqlLiteral(`Smoke ${environmentId.slice(0, 8)}`)},
                'cloudflare-sandbox', ${sqlLiteral(gatewayReference)})`,
     );
     scopeCreated = true;
@@ -636,7 +641,7 @@ async function main(): Promise<void> {
       );
       requireStatus(revoke.response, 200, revoke.body, "REVOKE_CAPABILITY");
       grantActive = false;
-    } else {
+    } else if (revocationMode === "project-permission") {
       if (!projectRoleId || !projectRoleName) throw new Error("PROJECT_ROLE_REQUIRED");
       const updateRole = await userRequest(
         baseURL,
@@ -652,6 +657,14 @@ async function main(): Promise<void> {
         },
       );
       requireStatus(updateRole.response, 200, updateRole.body, "REVOKE_PROJECT_PERMISSION");
+    } else {
+      const archive = await userRequest(
+        baseURL,
+        `/api/v1/projects/${projectId}/environments/${environmentId}`,
+        adminCookie,
+        "DELETE",
+      );
+      requireStatus(archive.response, 204, archive.body, "ARCHIVE_ENVIRONMENT");
     }
     if (preIssuedConnection && terminalVerified) {
       terminalVerified.preIssuedTicketRejected = await verifyTicketRejected(
@@ -701,6 +714,7 @@ async function main(): Promise<void> {
         ...(terminalVerified ?? {}),
         grantRevoked: revocationMode === "grant",
         projectPermissionRevoked: revocationMode === "project-permission",
+        environmentArchived: revocationMode === "environment-archive",
         newConnectionRejected,
       }),
     );

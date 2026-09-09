@@ -116,6 +116,29 @@ describe("ServiceBindingEnvironmentConnectionGateway", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
+  it("requests environment-scoped connection termination through the private binding", async () => {
+    const fetch = vi.fn<Fetcher["fetch"]>(async (requestInfo, init) => {
+      expect(String(requestInfo)).toBe(
+        "https://environment-gateway.internal/v1/revocations/environment",
+      );
+      expect(init?.method).toBe("POST");
+      expect(init?.redirect).toBe("manual");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        protocolVersion: "paca.environment.gateway.v1",
+        projectId: PROJECT_ID,
+        environmentId: ENVIRONMENT_ID,
+        agentIds: ["agent-1", "agent-2"],
+      });
+      return Response.json({ terminated: 1, pending: 0 });
+    });
+    const gateway = new ServiceBindingEnvironmentConnectionGateway(fetcher(fetch));
+
+    await expect(
+      gateway.revokeEnvironmentConnections(PROJECT_ID, ENVIRONMENT_ID, ["agent-1", "agent-2"]),
+    ).resolves.toEqual({ terminated: 1, pending: 0 });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("requests Agent-wide connection termination through the private binding", async () => {
     const fetch = vi.fn<Fetcher["fetch"]>(async (requestInfo, init) => {
       expect(String(requestInfo)).toBe("https://environment-gateway.internal/v1/revocations/agent");

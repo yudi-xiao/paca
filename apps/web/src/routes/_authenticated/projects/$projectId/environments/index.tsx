@@ -1,14 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Plus, Server } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-
+import { CloudflareEnvironmentPage } from "@/components/projects/environments/cloudflare-environment-page";
 import { EnvironmentCreateDialog } from "@/components/projects/environments/environment-create-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
+import { cloudflareEnvironmentsQueryOptions } from "@/lib/cloudflare-environment-api";
 import {
 	ENVIRONMENT_STATUS_COLORS,
 	environmentsQueryOptions,
@@ -19,24 +20,32 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/environments/",
 )({
-	beforeLoad: ({ params: { projectId } }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
-			throw redirect({
-				to: "/projects/$projectId",
-				params: { projectId },
-			});
-		}
-	},
 	validateSearch: (search: Record<string, unknown>) => ({
 		create: search.create === true || search.create === "true",
 	}),
 	loader: async ({ context: { queryClient }, params: { projectId } }) => {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+			await queryClient.ensureQueryData(
+				cloudflareEnvironmentsQueryOptions(projectId),
+			);
+			return;
+		}
 		await queryClient.ensureQueryData(environmentsQueryOptions(projectId));
 	},
-	component: EnvironmentsPage,
+	component: EnvironmentRoute,
 });
 
-function EnvironmentsPage() {
+function EnvironmentRoute() {
+	const { projectId } = Route.useParams();
+	const { create } = Route.useSearch();
+	return import.meta.env.VITE_INTERNAL_PREVIEW === "true" ? (
+		<CloudflareEnvironmentPage projectId={projectId} initialCreate={create} />
+	) : (
+		<LegacyEnvironmentsPage />
+	);
+}
+
+function LegacyEnvironmentsPage() {
 	const { t } = useTranslation("projects");
 	const { projectId } = Route.useParams();
 	const { create } = Route.useSearch();

@@ -58,6 +58,14 @@ const environmentBackendSnapshotURL = new URL(
   "../drizzle/meta/0025_snapshot.json",
   import.meta.url,
 );
+const environmentResourceMigrationURL = new URL(
+  "../drizzle/0026_nosy_gamma_corps.sql",
+  import.meta.url,
+);
+const environmentResourceSnapshotURL = new URL(
+  "../drizzle/meta/0026_snapshot.json",
+  import.meta.url,
+);
 
 const applicationTables = [
   "user",
@@ -120,6 +128,23 @@ describe("reviewed permission migration", () => {
 
     expect(uniqueConstraint).toBeGreaterThan(-1);
     expect(referencingForeignKey).toBeGreaterThan(uniqueConstraint);
+  });
+
+  it("adds user-manageable environment metadata with a safe existing-row backfill", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(environmentResourceMigrationURL, "utf8"),
+      readFile(environmentResourceSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0026_nosy_gamma_corps', '${checksum}')`);
+    expect(migration).toContain('ADD COLUMN "name" text');
+    expect(migration).toContain("'Environment ' || left(\"environment_id\"::text, 8)");
+    expect(migration).toContain('ALTER COLUMN "name" SET NOT NULL');
+    expect(migration).toContain('ADD COLUMN "created_by" text');
+    expect(migration).toContain("paca_environment_scope_project_name_uidx");
   });
 
   it("keeps the project projection migration transactional and checksummed", async () => {

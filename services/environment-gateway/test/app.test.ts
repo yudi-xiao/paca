@@ -74,6 +74,7 @@ function harness(input?: {
   registerConnection?: GatewayDependencies["registerConnection"];
   revokeAgentConnections?: GatewayDependencies["revokeAgentConnections"];
   revokeProjectConnections?: GatewayDependencies["revokeProjectConnections"];
+  revokeEnvironmentConnections?: GatewayDependencies["revokeEnvironmentConnections"];
   wait?: GatewayDependencies["wait"];
 }) {
   const environmentProvider = input?.provider ?? provider();
@@ -98,6 +99,12 @@ function harness(input?: {
       terminated: 0,
       pending: 0,
     }));
+  const revokeEnvironmentConnections =
+    input?.revokeEnvironmentConnections ??
+    vi.fn<GatewayDependencies["revokeEnvironmentConnections"]>(async () => ({
+      terminated: 0,
+      pending: 0,
+    }));
   const dependencies: GatewayDependencies = {
     now: () => NOW,
     wait: input?.wait ?? vi.fn(async () => undefined),
@@ -108,6 +115,7 @@ function harness(input?: {
     unregisterConnection,
     revokeAgentConnections,
     revokeProjectConnections,
+    revokeEnvironmentConnections,
   };
   return {
     app: createGatewayApp(dependencies),
@@ -119,6 +127,7 @@ function harness(input?: {
     unregisterConnection,
     revokeAgentConnections,
     revokeProjectConnections,
+    revokeEnvironmentConnections,
   };
 }
 
@@ -272,6 +281,7 @@ describe("Paca Environment Gateway", () => {
       test.env,
       "agent-1",
       PROJECT_ID,
+      ENVIRONMENT_ID,
       NOW.getTime(),
     );
   });
@@ -541,6 +551,37 @@ describe("Paca Environment Gateway", () => {
       "agent-1",
       "agent-2",
     ]);
+  });
+
+  it("revokes only the requested environment for a bounded set of Agents", async () => {
+    const revokeEnvironmentConnections = vi.fn<GatewayDependencies["revokeEnvironmentConnections"]>(
+      async () => ({ terminated: 1, pending: 1 }),
+    );
+    const test = harness({ revokeEnvironmentConnections });
+    const response = await test.app.fetch(
+      new Request("https://environment-gateway.internal/v1/revocations/environment", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-paca-environment-gateway-protocol": "paca.environment.gateway.v1",
+        },
+        body: JSON.stringify({
+          protocolVersion: "paca.environment.gateway.v1",
+          projectId: PROJECT_ID,
+          environmentId: ENVIRONMENT_ID,
+          agentIds: ["agent-1", "agent-2", "agent-1"],
+        }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ terminated: 1, pending: 1 });
+    expect(revokeEnvironmentConnections).toHaveBeenCalledWith(
+      test.env,
+      PROJECT_ID,
+      ENVIRONMENT_ID,
+      ["agent-1", "agent-2"],
+    );
   });
 
   it("does not register a connection when terminal proxy setup fails", async () => {

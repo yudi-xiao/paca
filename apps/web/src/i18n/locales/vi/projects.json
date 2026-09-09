@@ -340,6 +340,22 @@
 		}
 	},
 	"environments": {
+		"cloudflare": {
+			"subtitle": "Agent execution environments started on demand by Cloudflare Sandbox",
+			"agentAccessTitle": "Connections are authorized by Agent Auth",
+			"agentAccessDescription": "Local Codex, Claude Code, DeepSeek, or Cloudflare Agents connect only after receiving an exact environment.connect Grant. Environments start on demand, so there is no manual running or stopped state to maintain.",
+			"emptyDescription": "Create a project-scoped execution environment. Its Sandbox starts only when an Agent uses it and connections use short-lived authorization.",
+			"readyOnDemand": "Ready on demand",
+			"createTitle": "Create Cloudflare environment",
+			"renameTitle": "Rename environment",
+			"createDescription": "Project members control the name; the backend type and Gateway reference are configured safely by the server.",
+			"rename": "Rename",
+			"archive": "Archive",
+			"archiveTitle": "Archive {{name}}?",
+			"archiveDescription": "Agents can no longer request connections after archival. Existing connections and unused tickets are revoked as well.",
+			"saveFailed": "Could not save the environment. Check for a duplicate name and try again.",
+			"archiveFailed": "Could not archive the environment. Please try again."
+		},
 		"status": {
 			"creating": "Đang tạo",
 			"running": "Đang chạy",

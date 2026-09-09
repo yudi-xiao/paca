@@ -21,6 +21,7 @@ const migrations = [
   "0023_worried_paibok",
   "0024_deep_nomad",
   "0025_moaning_wild_pack",
+  "0026_nosy_gamma_corps",
 ] as const;
 
 type RolePayload = {

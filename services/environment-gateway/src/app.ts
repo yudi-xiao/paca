@@ -10,6 +10,7 @@ import {
   MAX_AUTHORIZATION_TTL_SECONDS,
   privateGatewayOrigin,
   revokeAgentConnectionsRequestSchema,
+  revokeEnvironmentConnectionsRequestSchema,
   revokeProjectConnectionsRequestSchema,
   type TicketClaims,
 } from "./protocol";
@@ -25,6 +26,7 @@ const MAX_ISSUE_REQUEST_BYTES = 16 * 1024;
 const PRIVATE_ISSUE_PATH = "/v1/connections";
 const PRIVATE_REVOCATION_PATH = "/v1/revocations/agent";
 const PRIVATE_PROJECT_REVOCATION_PATH = "/v1/revocations/project";
+const PRIVATE_ENVIRONMENT_REVOCATION_PATH = "/v1/revocations/environment";
 const MAX_PROVIDER_ATTEMPTS = 3;
 
 export type GatewayBindings = Pick<
@@ -45,6 +47,7 @@ export type GatewayDependencies = {
     env: GatewayBindings,
     agentId: string,
     projectId: string,
+    environmentId: string,
     ticketIssuedAtMs: number,
   ) => Promise<boolean>;
   unregisterConnection: (
@@ -62,6 +65,15 @@ export type GatewayDependencies = {
   revokeProjectConnections: (
     env: GatewayBindings,
     projectId: string,
+    agentIds: string[],
+  ) => Promise<{
+    terminated: number;
+    pending: number;
+  }>;
+  revokeEnvironmentConnections: (
+    env: GatewayBindings,
+    projectId: string,
+    environmentId: string,
     agentIds: string[],
   ) => Promise<{
     terminated: number;
@@ -378,6 +390,46 @@ export function createGatewayApp(
     }
   });
 
+  app.post(PRIVATE_ENVIRONMENT_REVOCATION_PATH, async (context) => {
+    const requestUrl = new URL(context.req.url);
+    if (
+      requestUrl.origin !== privateGatewayOrigin ||
+      context.req.header("x-paca-environment-gateway-protocol") !== gatewayProtocol ||
+      context.req.header("content-type")?.split(";", 1)[0]?.trim() !== "application/json"
+    ) {
+      return codeResponse("GATEWAY_PRIVATE_ROUTE_REQUIRED", 404);
+    }
+    let request: ReturnType<typeof revokeEnvironmentConnectionsRequestSchema.parse>;
+    try {
+      request = revokeEnvironmentConnectionsRequestSchema.parse(await boundedJson(context.req.raw));
+    } catch {
+      return codeResponse("GATEWAY_REQUEST_INVALID", 400);
+    }
+    try {
+      const result = await dependencies.revokeEnvironmentConnections(
+        context.env,
+        request.projectId,
+        request.environmentId,
+        [...new Set(request.agentIds)],
+      );
+      return Response.json(result, {
+        status: result.pending > 0 ? 202 : 200,
+        headers: { "cache-control": "no-store" },
+      });
+    } catch {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          message: "environment.resource_revocation.failed",
+          projectId: request.projectId,
+          environmentId: request.environmentId,
+          agentCount: request.agentIds.length,
+        }),
+      );
+      return codeResponse("GATEWAY_REVOCATION_FAILED", 503);
+    }
+  });
+
   app.all(connectionPath, async (context) => {
     const origin = publicOrigin(context.env.PUBLIC_ORIGIN);
     if (!origin || new URL(context.req.url).origin !== origin) {
@@ -399,6 +451,7 @@ export function createGatewayApp(
         context.env,
         claims.agentId,
         claims.projectId,
+        claims.environmentId,
         claims.issuedAtMs,
       ))
     ) {

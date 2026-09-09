@@ -1613,6 +1613,11 @@ export function AppSidebar() {
 											label="任务"
 										/>
 										<NavItem
+											to={`/projects/${projectId}/environments`}
+											icon={Server}
+											label={t("nav.environments")}
+										/>
+										<NavItem
 											to={`/projects/${projectId}/team`}
 											icon={Users}
 											label={t("nav.team")}

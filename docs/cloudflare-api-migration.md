@@ -26,7 +26,7 @@
 | Notification | Worker / PostgreSQL + Queue + UserParty | Worker 原生 | 分配任务与结构化 `teamMention` 评论在业务事务内写通知和 realtime outbox；列表按当前项目成员关系过滤，已读写入按可信 Session 用户隔离 |
 | Plugin 列表 | Worker 空投影 | Bridge | 插件运行时隔离、安装和权限模型 |
 | Legacy Paca Agent 写入、Conversation、Skill、Env Var、MCP Key | Go API | 容器保留 | 迁移到 Agent Auth 身份扩展、Conversation 协议与 Runner 身份切换；不得恢复平行 Agent 身份 |
-| Static Environment、Terminal、SSH、Port Forward | Go API + agent-runner；Worker Environment Gateway 候选 | 容器保留 | Project scope、`environment.connect`、私有 Service Binding 与 Cloudflare Sandbox provider 已部署，local Harness 的 read/PTY/重放 E2E 已通过；仍需资源生命周期、连接撤销与旧环境迁移 |
+| Static Environment、Terminal、SSH、Port Forward | Worker/PostgreSQL + Environment Gateway；旧连接能力仍在 Go API + agent-runner | 部分 Worker 原生 / 容器保留 | 环境列表、创建、详情、重命名、软归档已迁移，Sandbox 按需启动；精确环境/Project/Grant 撤销栅栏已部署。浏览器终端、文件、SSH、Port Forward 和旧环境迁移仍保留 |
 | Automation、Webhook | Go API + Valkey worker | 容器保留 | repository 迁移、Queue/Workflow 事件与幂等契约 |
 
 ```text
@@ -36,7 +36,7 @@ Better Auth Session / Agent Auth
         │
         ├── Agent Grant ────── Task Harness/Document Workflow（Worker 原生）
         │                            │
-        │                            └── Environment Gateway（Sandbox provider/私有绑定已部署）
+        │                            └── Environment CRUD + Gateway（Sandbox provider/私有绑定已部署）
         │
         └── Principal Bridge（尚未实现，故禁止隐式代理）
                                      │

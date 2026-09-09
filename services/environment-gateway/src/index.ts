@@ -17,9 +17,13 @@ const dependencies: GatewayDependencies = {
     const id = env.AGENT_CONNECTIONS.idFromName(connection.agentId);
     return env.AGENT_CONNECTIONS.get(id).register(connection);
   },
-  isTicketAuthorized: (env, agentId, projectId, ticketIssuedAtMs) => {
+  isTicketAuthorized: (env, agentId, projectId, environmentId, ticketIssuedAtMs) => {
     const id = env.AGENT_CONNECTIONS.idFromName(agentId);
-    return env.AGENT_CONNECTIONS.get(id).isTicketAuthorized(projectId, ticketIssuedAtMs);
+    return env.AGENT_CONNECTIONS.get(id).isTicketAuthorized(
+      projectId,
+      environmentId,
+      ticketIssuedAtMs,
+    );
   },
   unregisterConnection: (env, agentId, connectionId) => {
     const id = env.AGENT_CONNECTIONS.idFromName(agentId);
@@ -34,6 +38,21 @@ const dependencies: GatewayDependencies = {
       agentIds.map((agentId) => {
         const id = env.AGENT_CONNECTIONS.idFromName(agentId);
         return env.AGENT_CONNECTIONS.get(id).revokeProject(projectId);
+      }),
+    );
+    return results.reduce(
+      (total, result) => ({
+        terminated: total.terminated + result.terminated,
+        pending: total.pending + result.pending,
+      }),
+      { terminated: 0, pending: 0 },
+    );
+  },
+  revokeEnvironmentConnections: async (env, projectId, environmentId, agentIds) => {
+    const results = await Promise.all(
+      agentIds.map((agentId) => {
+        const id = env.AGENT_CONNECTIONS.idFromName(agentId);
+        return env.AGENT_CONNECTIONS.get(id).revokeEnvironment(projectId, environmentId);
       }),
     );
     return results.reduce(

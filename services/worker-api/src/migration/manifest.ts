@@ -53,13 +53,19 @@ export const apiMigrationManifest = [
     status: "container-retained",
     authority: "go-api",
     dependsOn: [
-      "paca_project to environment scope adapter",
-      "Agent Auth environment.connect executor",
-      "execution gateway",
+      "legacy folders, SSH and port-forward lifecycle migration",
+      "browser-to-environment connection authorization contract",
     ],
     owner: "go-api",
     rollback: "worker-version",
     routePrefixes: ["/api/v1/projects/:projectId/environments", "/api/v1/environments"],
+    workerNativeRoutes: [
+      { method: "GET", path: "/api/v1/projects/:projectId/environments" },
+      { method: "POST", path: "/api/v1/projects/:projectId/environments" },
+      { method: "GET", path: "/api/v1/projects/:projectId/environments/:environmentId" },
+      { method: "PATCH", path: "/api/v1/projects/:projectId/environments/:environmentId" },
+      { method: "DELETE", path: "/api/v1/projects/:projectId/environments/:environmentId" },
+    ],
   },
   {
     domain: "automations",

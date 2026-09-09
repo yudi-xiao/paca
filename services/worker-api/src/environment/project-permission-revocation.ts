@@ -22,7 +22,7 @@ export type ProjectEnvironmentPermissionSnapshot = Map<string, ProjectEnvironmen
 
 export type ProjectConnectionRevocationGateway = Pick<
   ServiceBindingEnvironmentConnectionGateway,
-  "revokeProjectConnections"
+  "revokeProjectConnections" | "revokeEnvironmentConnections"
 >;
 
 export async function readProjectEnvironmentPermissionSnapshot(
@@ -110,6 +110,47 @@ export async function listProjectEnvironmentAgentIds(
   return [...agentIds];
 }
 
+export async function listEnvironmentAgentIds(
+  database: PacaDatabase,
+  projectId: string,
+  environmentId: string,
+): Promise<string[]> {
+  const rows = await database
+    .select({
+      agentId: agent.id,
+      constraints: agentCapabilityGrant.constraints,
+    })
+    .from(agent)
+    .innerJoin(
+      agentCapabilityGrant,
+      and(
+        eq(agentCapabilityGrant.agentId, agent.id),
+        eq(agentCapabilityGrant.capability, "environment.connect"),
+        like(agentCapabilityGrant.constraints, `%${environmentId}%`),
+      ),
+    );
+
+  const agentIds = new Set<string>();
+  for (const row of rows) {
+    if (!row.constraints) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(row.constraints);
+    } catch {
+      continue;
+    }
+    const constraints = constraintsSchema.safeParse(parsed);
+    if (
+      constraints.success &&
+      exactConstraintString(constraints.data.projectId) === projectId &&
+      exactConstraintString(constraints.data.environmentId) === environmentId
+    ) {
+      agentIds.add(row.agentId);
+    }
+  }
+  return [...agentIds];
+}
+
 export class ProjectEnvironmentConnectionRevoker {
   constructor(private readonly gateway: ProjectConnectionRevocationGateway) {}
 
@@ -139,6 +180,46 @@ export class ProjectEnvironmentConnectionRevoker {
             level: "error",
             message: "environment.project_connection.revocation_notification_failed",
             projectId,
+            agentCount: batch.length,
+          }),
+        );
+      }
+    }
+    return { requested: uniqueAgentIds.length, terminated, pending, failed };
+  }
+
+  async revokeEnvironment(
+    projectId: string,
+    environmentId: string,
+    agentIds: readonly string[],
+  ): Promise<{
+    requested: number;
+    terminated: number;
+    pending: number;
+    failed: number;
+  }> {
+    const uniqueAgentIds = [...new Set(agentIds)];
+    let terminated = 0;
+    let pending = 0;
+    let failed = 0;
+    for (let offset = 0; offset < uniqueAgentIds.length; offset += MAX_AGENTS_PER_GATEWAY_REQUEST) {
+      const batch = uniqueAgentIds.slice(offset, offset + MAX_AGENTS_PER_GATEWAY_REQUEST);
+      try {
+        const result = await this.gateway.revokeEnvironmentConnections(
+          projectId,
+          environmentId,
+          batch,
+        );
+        terminated += result.terminated;
+        pending += result.pending;
+      } catch {
+        failed += batch.length;
+        console.error(
+          JSON.stringify({
+            level: "error",
+            message: "environment.resource_connection.revocation_notification_failed",
+            projectId,
+            environmentId,
             agentCount: batch.length,
           }),
         );

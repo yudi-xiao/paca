@@ -10,7 +10,9 @@ describe("API migration manifest", () => {
   });
 
   it("classifies retained project and global routes without matching near misses", () => {
-    expect(matchUnmigratedApi("/api/v1/projects/project-1/environments/env-1")).toMatchObject({
+    expect(
+      matchUnmigratedApi("/api/v1/projects/project-1/environments/env-1/folders"),
+    ).toMatchObject({
       domain: "environments",
       status: "container-retained",
       authority: "go-api",
@@ -33,5 +35,16 @@ describe("API migration manifest", () => {
       domain: "agent-management",
       status: "container-retained",
     });
+    expect(matchUnmigratedApi("/api/v1/projects/project-1/environments", "GET")).toBeNull();
+    expect(matchUnmigratedApi("/api/v1/projects/project-1/environments", "POST")).toBeNull();
+    expect(
+      matchUnmigratedApi("/api/v1/projects/project-1/environments/environment-1", "PATCH"),
+    ).toBeNull();
+    expect(
+      matchUnmigratedApi(
+        "/api/v1/projects/project-1/environments/environment-1/terminal-ticket",
+        "POST",
+      ),
+    ).toMatchObject({ domain: "environments", status: "container-retained" });
   });
 });

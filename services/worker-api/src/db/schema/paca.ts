@@ -242,8 +242,10 @@ export const pacaEnvironmentScopes = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => pacaProjects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
     backend: text("backend").$type<PacaEnvironmentBackend>().notNull(),
     gatewayReference: text("gateway_reference").notNull(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -254,6 +256,13 @@ export const pacaEnvironmentScopes = pgTable(
       table.projectId,
     ),
     index("paca_environment_scope_project_idx").on(table.projectId),
+    uniqueIndex("paca_environment_scope_project_name_uidx")
+      .on(table.projectId, sql`lower(${table.name})`)
+      .where(sql`${table.deletedAt} is null`),
+    check(
+      "paca_environment_scope_name_check",
+      sql`${table.name} = btrim(${table.name}) and length(${table.name}) between 1 and 100`,
+    ),
     check(
       "paca_environment_scope_backend_check",
       sql`${table.backend} in ('cloudflare-sandbox', 'cloudflare-computer', 'legacy-agent-runner')`,
