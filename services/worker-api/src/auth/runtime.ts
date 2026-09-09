@@ -12,6 +12,7 @@ import { PostgresBetterAuthSecondaryStorage } from "../agent-auth/secondary-stor
 import type { AppBindings } from "../bindings";
 import { type PacaDatabase, withDatabase } from "../database";
 import * as schema from "../db/schema";
+import { ServiceBindingEnvironmentConnectionGateway } from "../environment/service-binding-gateway";
 import { pacaPermission } from "../permission/plugin";
 import { PostgresPacaPermissionStore } from "../permission/postgres-store";
 import { PacaPermissionService } from "../permission/service";
@@ -201,12 +202,27 @@ export function createAuth(
     permissionService: new PacaPermissionService(permissionStore),
     findProjectOrganization: (projectId) => permissionStore.findProjectOrganization(projectId),
     onEvent: (event) => recordAgentAuthEvent(db, event),
-    onCapabilitiesRevoked: async ({ agentId, documentIds, projectIds }) => {
+    onCapabilitiesRevoked: async ({ agentId, documentIds, environmentIds, projectIds }) => {
       await Promise.all([
         ...projectIds.map((projectId) => invalidateProjectActor(env, projectId, "agent", agentId)),
         ...documentIds.map((documentId) =>
           invalidateDocumentActor(env, documentId, "agent", agentId),
         ),
+        ...(environmentIds.length > 0
+          ? [
+              new ServiceBindingEnvironmentConnectionGateway(env.ENVIRONMENT_GATEWAY)
+                .revokeAgentConnections(agentId)
+                .catch(() => {
+                  console.error(
+                    JSON.stringify({
+                      level: "error",
+                      message: "environment.connection.revocation_notification_failed",
+                      agentId,
+                    }),
+                  );
+                }),
+            ]
+          : []),
       ]);
     },
   });

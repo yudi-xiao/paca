@@ -32,13 +32,18 @@
   "durable_objects": {
     "bindings": [
       { "name": "SANDBOXES", "class_name": "Sandbox" },
-      { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" }
+      { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" },
+      { "name": "AGENT_CONNECTIONS", "class_name": "AgentConnectionRegistryDO" }
     ]
   },
   "migrations": [
     {
       "tag": "v1-sandbox-and-connection-tickets",
       "new_sqlite_classes": ["Sandbox", "ConnectionTicketDO"]
+    },
+    {
+      "tag": "v2-agent-connection-registry",
+      "new_sqlite_classes": ["AgentConnectionRegistryDO"]
     }
   ],
   "env": {
@@ -66,7 +71,8 @@
       "durable_objects": {
         "bindings": [
           { "name": "SANDBOXES", "class_name": "Sandbox" },
-          { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" }
+          { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" },
+          { "name": "AGENT_CONNECTIONS", "class_name": "AgentConnectionRegistryDO" }
         ]
       }
     }

@@ -18,7 +18,11 @@ export type EnvironmentStatus = {
 export interface EnvironmentProvider {
   supports(claims: TicketClaims): boolean;
   status(claims: TicketClaims): Promise<EnvironmentStatus>;
-  terminal(claims: TicketClaims, request: Request): Promise<Response>;
+  terminal(claims: TicketClaims, sessionId: string, request: Request): Promise<Response>;
+  terminate(
+    input: { backend: TicketClaims["backend"]; reference: string },
+    sessionId: string,
+  ): Promise<void>;
 }
 
 const SANDBOX_ID = /^[a-z0-9][a-z0-9-]{0,62}$/u;
@@ -57,10 +61,23 @@ export class CloudflareSandboxProvider implements EnvironmentProvider {
     };
   }
 
-  async terminal(claims: TicketClaims, request: Request): Promise<Response> {
-    return proxyTerminal(this.sandbox(claims), `sandbox-${claims.reference}`, request, {
+  async terminal(claims: TicketClaims, sessionId: string, request: Request): Promise<Response> {
+    return proxyTerminal(this.sandbox(claims), sessionId, request, {
       cols: 120,
       rows: 30,
     });
+  }
+
+  async terminate(
+    input: { backend: TicketClaims["backend"]; reference: string },
+    sessionId: string,
+  ): Promise<void> {
+    if (input.backend !== "cloudflare-sandbox" || !SANDBOX_ID.test(input.reference)) {
+      throw new Error("GATEWAY_PROVIDER_UNAVAILABLE");
+    }
+    const result = await getSandbox(this.env.SANDBOXES, input.reference, {
+      sleepAfter: "10m",
+    }).deleteSession(sessionId);
+    if (!result.success) throw new Error("GATEWAY_SESSION_TERMINATION_FAILED");
   }
 }

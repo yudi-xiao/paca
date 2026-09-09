@@ -1,4 +1,9 @@
-import { MAX_CONNECTION_TTL_SECONDS, type TicketClaims, ticketClaimsSchema } from "./protocol";
+import {
+  MAX_AUTHORIZATION_TTL_SECONDS,
+  MAX_CONNECTION_TTL_SECONDS,
+  type TicketClaims,
+  ticketClaimsSchema,
+} from "./protocol";
 
 const TOKEN_PREFIX = "v1";
 const MAX_TOKEN_BYTES = 4096;
@@ -91,8 +96,12 @@ export async function verifyTicket(
   const nowSeconds = Math.floor(now.getTime() / 1000);
   if (
     claims.expiresAt <= nowSeconds ||
+    claims.issuedAt > nowSeconds ||
+    Math.floor(claims.issuedAtMs / 1000) !== claims.issuedAt ||
     claims.expiresAt <= claims.issuedAt ||
-    claims.expiresAt - claims.issuedAt > MAX_CONNECTION_TTL_SECONDS
+    claims.expiresAt - claims.issuedAt > MAX_CONNECTION_TTL_SECONDS ||
+    claims.authorizationExpiresAt < claims.expiresAt ||
+    claims.authorizationExpiresAt - claims.issuedAt > MAX_AUTHORIZATION_TTL_SECONDS
   ) {
     throw new TicketError("TICKET_EXPIRED");
   }

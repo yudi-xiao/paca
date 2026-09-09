@@ -20,7 +20,9 @@ function claims(overrides: Partial<TicketClaims> = {}): TicketClaims {
     agentId: "agent-1",
     hostId: "host-1",
     issuedAt,
+    issuedAtMs: NOW.getTime(),
     expiresAt: issuedAt + 45,
+    authorizationExpiresAt: issuedAt + 15 * 60,
     ...overrides,
   };
 }

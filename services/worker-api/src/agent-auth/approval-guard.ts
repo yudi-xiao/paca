@@ -52,6 +52,7 @@ export type PacaAgentApprovalGuardOptions = {
   onCapabilitiesRevoked?: (change: {
     agentId: string;
     documentIds: string[];
+    environmentIds: string[];
     projectIds: string[];
   }) => void | Promise<void>;
 };
@@ -174,9 +175,17 @@ export function pacaAgentApprovalGuard(options: PacaAgentApprovalGuardOptions = 
                 .filter((documentId): documentId is string => Boolean(documentId)),
             ),
           ];
+          const environmentIds = [
+            ...new Set(
+              revocable
+                .map((grant) => exactConstraintString(grant.constraints?.environmentId))
+                .filter((environmentId): environmentId is string => Boolean(environmentId)),
+            ),
+          ];
           await options.onCapabilitiesRevoked?.({
             agentId: context.body.agent_id,
             documentIds,
+            environmentIds,
             projectIds,
           });
 

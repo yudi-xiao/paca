@@ -91,6 +91,39 @@ describe("ServiceBindingEnvironmentConnectionGateway", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
+  it("requests Agent-wide connection termination through the private binding", async () => {
+    const fetch = vi.fn<Fetcher["fetch"]>(async (requestInfo, init) => {
+      expect(String(requestInfo)).toBe("https://environment-gateway.internal/v1/revocations/agent");
+      expect(init?.method).toBe("POST");
+      expect(init?.redirect).toBe("manual");
+      expect(new Headers(init?.headers).get("x-paca-environment-gateway-protocol")).toBe(
+        "paca.environment.gateway.v1",
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({
+        protocolVersion: "paca.environment.gateway.v1",
+        agentId: "agent-1",
+      });
+      return Response.json({ terminated: 1, pending: 0 });
+    });
+    const gateway = new ServiceBindingEnvironmentConnectionGateway(fetcher(fetch));
+
+    await expect(gateway.revokeAgentConnections("agent-1")).resolves.toEqual({
+      terminated: 1,
+      pending: 0,
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a queued connection termination response", async () => {
+    const gateway = new ServiceBindingEnvironmentConnectionGateway(
+      fetcher(async () => Response.json({ terminated: 0, pending: 1 }, { status: 202 })),
+    );
+    await expect(gateway.revokeAgentConnections("agent-1")).resolves.toEqual({
+      terminated: 0,
+      pending: 1,
+    });
+  });
+
   it.each([
     () => new Response("not json", { status: 200, headers: { "content-type": "text/plain" } }),
     () => Response.json({ ...gatewayResponse(), unexpected: true }),

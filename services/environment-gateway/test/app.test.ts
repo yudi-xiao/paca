@@ -12,6 +12,7 @@ const REQUEST_ID = "11111111-1111-4111-8111-111111111111";
 
 function bindings(): GatewayBindings {
   return {
+    AGENT_CONNECTIONS: Object.create(null) as Env["AGENT_CONNECTIONS"],
     CONNECTION_TICKET_SECRET: SECRET,
     CONNECTION_TICKETS: Object.create(null) as Env["CONNECTION_TICKETS"],
     ENVIRONMENT: "internal",
@@ -60,26 +61,51 @@ function provider() {
     terminal: vi.fn<EnvironmentProvider["terminal"]>(async () =>
       Promise.resolve(new Response("terminal-proxied")),
     ),
+    terminate: vi.fn<EnvironmentProvider["terminate"]>(async () => undefined),
   } satisfies EnvironmentProvider;
 }
 
 function harness(input?: {
   provider?: ReturnType<typeof provider>;
   consumeTicket?: GatewayDependencies["consumeTicket"];
+  isTicketAuthorized?: GatewayDependencies["isTicketAuthorized"];
+  registerConnection?: GatewayDependencies["registerConnection"];
+  revokeAgentConnections?: GatewayDependencies["revokeAgentConnections"];
 }) {
   const environmentProvider = input?.provider ?? provider();
   const consumeTicket =
     input?.consumeTicket ?? vi.fn<GatewayDependencies["consumeTicket"]>(async () => true);
+  const registerConnection =
+    input?.registerConnection ?? vi.fn<GatewayDependencies["registerConnection"]>(async () => true);
+  const isTicketAuthorized =
+    input?.isTicketAuthorized ?? vi.fn<GatewayDependencies["isTicketAuthorized"]>(async () => true);
+  const unregisterConnection = vi.fn<GatewayDependencies["unregisterConnection"]>(
+    async () => undefined,
+  );
+  const revokeAgentConnections =
+    input?.revokeAgentConnections ??
+    vi.fn<GatewayDependencies["revokeAgentConnections"]>(async () => ({
+      terminated: 0,
+      pending: 0,
+    }));
   const dependencies: GatewayDependencies = {
     now: () => NOW,
     provider: () => environmentProvider,
     consumeTicket,
+    registerConnection,
+    isTicketAuthorized,
+    unregisterConnection,
+    revokeAgentConnections,
   };
   return {
     app: createGatewayApp(dependencies),
     env: bindings(),
     provider: environmentProvider,
     consumeTicket,
+    registerConnection,
+    isTicketAuthorized,
+    unregisterConnection,
+    revokeAgentConnections,
   };
 }
 
@@ -123,6 +149,43 @@ describe("Paca Environment Gateway", () => {
     expect(rejected.status).toBe(404);
   });
 
+  it("keeps issued tickets below the API clock-skew ceiling and rejects overlong authorization", async () => {
+    const test = harness();
+    const response = await test.app.fetch(
+      new Request("https://environment-gateway.internal/v1/connections", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-paca-environment-gateway-protocol": "paca.environment.gateway.v1",
+        },
+        body: JSON.stringify({
+          ...issueBody(),
+          authorizationExpiresAt: new Date(NOW.getTime() + 10 * 60_000).toISOString(),
+        }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(200);
+    const connection = connectionResponseSchema.parse(await response.json());
+    expect(connection.expiresAt).toBe(new Date(NOW.getTime() + 55_000).toISOString());
+
+    const excessive = await test.app.fetch(
+      new Request("https://environment-gateway.internal/v1/connections", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-paca-environment-gateway-protocol": "paca.environment.gateway.v1",
+        },
+        body: JSON.stringify({
+          ...issueBody(),
+          authorizationExpiresAt: new Date(NOW.getTime() + 15 * 60_000 + 1_000).toISOString(),
+        }),
+      }),
+      test.env,
+    );
+    expect(excessive.status).toBe(403);
+  });
+
   it("consumes an execute ticket once and strips credentials before terminal proxying", async () => {
     const test = harness();
     const connection = await issue(test.app, test.env);
@@ -143,7 +206,20 @@ describe("Paca Environment Gateway", () => {
       new Date(NOW.getTime() + 45_000).getTime(),
     );
     expect(test.provider.terminal).toHaveBeenCalledOnce();
-    const proxiedRequest = test.provider.terminal.mock.calls[0]?.[1];
+    expect(test.registerConnection).toHaveBeenCalledWith(test.env, {
+      connectionId: REQUEST_ID,
+      agentId: "agent-1",
+      environmentId: ENVIRONMENT_ID,
+      projectId: PROJECT_ID,
+      backend: "cloudflare-sandbox",
+      reference: "environment-1",
+      sessionId: `paca-${REQUEST_ID}`,
+      ticketIssuedAtMs: NOW.getTime(),
+      authorizationExpiresAtMs: NOW.getTime() + 45_000,
+    });
+    const sessionId = test.provider.terminal.mock.calls[0]?.[1];
+    expect(sessionId).toBe(`paca-${REQUEST_ID}`);
+    const proxiedRequest = test.provider.terminal.mock.calls[0]?.[2];
     expect(proxiedRequest).toBeInstanceOf(Request);
     expect(proxiedRequest?.headers.get("authorization")).toBeNull();
     expect(proxiedRequest?.headers.get("cookie")).toBeNull();
@@ -160,6 +236,52 @@ describe("Paca Environment Gateway", () => {
     );
     expect(response.status).toBe(409);
     expect(test.provider.terminal).not.toHaveBeenCalled();
+    expect(test.registerConnection).not.toHaveBeenCalled();
+  });
+
+  it("rejects a ticket issued before the Agent revocation barrier", async () => {
+    const test = harness({ isTicketAuthorized: vi.fn(async () => false) });
+    const connection = await issue(test.app, test.env, "read");
+    const response = await test.app.fetch(
+      new Request(connection.url, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${connection.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "status" }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(401);
+    expect(test.provider.status).not.toHaveBeenCalled();
+  });
+
+  it("closes the check/register race when revocation lands during execute setup", async () => {
+    const test = harness({ registerConnection: vi.fn(async () => false) });
+    const connection = await issue(test.app, test.env);
+    const response = await test.app.fetch(
+      new Request(workerRequestUrl(connection.url), {
+        headers: { authorization: `Bearer ${connection.accessToken}`, upgrade: "websocket" },
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(401);
+    expect(test.provider.terminal).toHaveBeenCalledOnce();
+    expect(test.provider.terminate).toHaveBeenCalledWith(
+      {
+        connectionId: REQUEST_ID,
+        agentId: "agent-1",
+        environmentId: ENVIRONMENT_ID,
+        projectId: PROJECT_ID,
+        backend: "cloudflare-sandbox",
+        reference: "environment-1",
+        sessionId: `paca-${REQUEST_ID}`,
+        ticketIssuedAtMs: NOW.getTime(),
+        authorizationExpiresAtMs: NOW.getTime() + 45_000,
+      },
+      `paca-${REQUEST_ID}`,
+    );
   });
 
   it("uses a reusable read ticket only for the structured status operation", async () => {
@@ -201,5 +323,60 @@ describe("Paca Environment Gateway", () => {
       test.env,
     );
     expect(missingTicket.status).toBe(401);
+  });
+
+  it("revokes registered Agent connections only through the private binding origin", async () => {
+    const revokeAgentConnections = vi.fn<GatewayDependencies["revokeAgentConnections"]>(
+      async () => ({ terminated: 2, pending: 0 }),
+    );
+    const test = harness({ revokeAgentConnections });
+    const request = new Request("https://environment-gateway.internal/v1/revocations/agent", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-paca-environment-gateway-protocol": "paca.environment.gateway.v1",
+      },
+      body: JSON.stringify({
+        protocolVersion: "paca.environment.gateway.v1",
+        agentId: "agent-1",
+      }),
+    });
+    const response = await test.app.fetch(request, test.env);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ terminated: 2, pending: 0 });
+    expect(revokeAgentConnections).toHaveBeenCalledWith(test.env, "agent-1");
+
+    const publicResponse = await test.app.fetch(
+      new Request("https://paca-env.howlearnwood.com/v1/revocations/agent", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-paca-environment-gateway-protocol": "paca.environment.gateway.v1",
+        },
+        body: JSON.stringify({
+          protocolVersion: "paca.environment.gateway.v1",
+          agentId: "agent-1",
+        }),
+      }),
+      test.env,
+    );
+    expect(publicResponse.status).toBe(404);
+  });
+
+  it("does not register a connection when terminal proxy setup fails", async () => {
+    const environmentProvider = provider();
+    environmentProvider.terminal.mockRejectedValueOnce(new Error("provider unavailable"));
+    const test = harness({ provider: environmentProvider });
+    const connection = await issue(test.app, test.env);
+    const response = await test.app.fetch(
+      new Request(workerRequestUrl(connection.url), {
+        headers: { authorization: `Bearer ${connection.accessToken}`, upgrade: "websocket" },
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(503);
+    expect(test.registerConnection).not.toHaveBeenCalled();
+    expect(test.unregisterConnection).not.toHaveBeenCalled();
+    expect(test.provider.terminate).not.toHaveBeenCalled();
   });
 });

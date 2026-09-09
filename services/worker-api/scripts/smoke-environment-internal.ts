@@ -12,6 +12,8 @@ type JsonRecord = Record<string, unknown>;
 type HeadersWithSetCookie = Headers & { getSetCookie?: () => string[] };
 type EnvironmentOperationMode = "read" | "execute";
 
+const TERMINAL_READY_TIMEOUT_MS = 90_000;
+
 const execFileAsync = promisify(execFile);
 const root = new URL("../../../", import.meta.url);
 
@@ -164,12 +166,9 @@ async function websocketText(value: unknown): Promise<string> {
   return "";
 }
 
-async function verifyTerminalConnection(
-  url: string,
-  accessToken: string,
-): Promise<{ markerObserved: boolean; replayRejected: boolean }> {
+async function openVerifiedTerminal(url: string, accessToken: string): Promise<WebSocket> {
   const marker = `PACA_TERMINAL_SMOKE_${crypto.randomUUID().replaceAll("-", "")}`;
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<WebSocket>((resolve, reject) => {
     const socket = new WebSocket(url, [`paca-ticket.${accessToken}`]);
     socket.binaryType = "arraybuffer";
     let settled = false;
@@ -182,13 +181,12 @@ async function verifyTerminalConnection(
       reject(
         new Error(ready ? "SANDBOX_TERMINAL_OUTPUT_TIMEOUT" : "SANDBOX_TERMINAL_READY_TIMEOUT"),
       );
-    }, 45_000);
+    }, TERMINAL_READY_TIMEOUT_MS);
     const succeed = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      socket.close(1000, "smoke complete");
-      resolve();
+      resolve(socket);
     };
     socket.addEventListener("message", (event) => {
       if (typeof event.data === "string") {
@@ -229,7 +227,13 @@ async function verifyTerminalConnection(
       reject(new Error("SANDBOX_TERMINAL_CLOSED_EARLY"));
     });
   });
+}
 
+async function verifyTicketRejected(
+  url: string,
+  accessToken: string,
+  acceptedErrorCode: string,
+): Promise<boolean> {
   const replayRejected = await new Promise<boolean>((resolve) => {
     const socket = new WebSocket(url, [`paca-ticket.${accessToken}`]);
     let opened = false;
@@ -252,8 +256,26 @@ async function verifyTerminalConnection(
       resolve(!opened);
     });
   });
-  if (!replayRejected) throw new Error("SANDBOX_TERMINAL_TICKET_REPLAY_ACCEPTED");
-  return { markerObserved: true, replayRejected };
+  if (!replayRejected) throw new Error(acceptedErrorCode);
+  return replayRejected;
+}
+
+async function waitForTerminalRevocation(socket: WebSocket): Promise<boolean> {
+  if (socket.readyState === WebSocket.CLOSED) return true;
+  return new Promise<boolean>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.close(1000, "revocation smoke timeout");
+      reject(new Error("SANDBOX_TERMINAL_REVOCATION_TIMEOUT"));
+    }, 20_000);
+    socket.addEventListener(
+      "close",
+      () => {
+        clearTimeout(timeout);
+        resolve(true);
+      },
+      { once: true },
+    );
+  });
 }
 
 function uuid(value: string, code: string): string {
@@ -289,6 +311,7 @@ async function main(): Promise<void> {
   let agentId: string | null = null;
   let grantActive = false;
   let cookie = "";
+  let terminalSocket: WebSocket | null = null;
 
   try {
     await query(
@@ -377,7 +400,14 @@ async function main(): Promise<void> {
     }
 
     let processCount: number | null = null;
-    let terminalVerified: { markerObserved: boolean; replayRejected: boolean } | null = null;
+    let terminalVerified: {
+      markerObserved: boolean;
+      replayRejected: boolean;
+      preIssuedTicketRejected: boolean;
+      revocationClosedConnection: boolean;
+    } | null = null;
+    let terminalRevocation: Promise<boolean> | null = null;
+    let preIssuedConnection: { url: string; accessToken: string } | null = null;
     if (operationMode === "read") {
       const statusResponse = await fetch(connection.url, {
         method: "POST",
@@ -400,7 +430,45 @@ async function main(): Promise<void> {
       }
       processCount = environmentStatus.processes.length;
     } else {
-      terminalVerified = await verifyTerminalConnection(connection.url, connection.accessToken);
+      terminalSocket = await openVerifiedTerminal(connection.url, connection.accessToken);
+      const replayRejected = await verifyTicketRejected(
+        connection.url,
+        connection.accessToken,
+        "SANDBOX_TERMINAL_TICKET_REPLAY_ACCEPTED",
+      );
+      const preIssuedRequestId = crypto.randomUUID();
+      const preIssuedExecution = asRecord(
+        await executeAgentCapability({
+          config: registration.config,
+          capability: "environment.connect",
+          arguments: {
+            organizationId,
+            projectId,
+            environmentId,
+            operationMode,
+            requestId: preIssuedRequestId,
+            validUntil,
+          },
+        }),
+      );
+      const preIssued = asRecord(preIssuedExecution?.data) ?? preIssuedExecution;
+      if (
+        preIssued?.requestId !== preIssuedRequestId ||
+        preIssued.operationMode !== "execute" ||
+        preIssued.transport !== "websocket" ||
+        typeof preIssued.url !== "string" ||
+        typeof preIssued.accessToken !== "string"
+      ) {
+        throw new Error("PREISSUED_ENVIRONMENT_CONNECTION_INVALID");
+      }
+      preIssuedConnection = { url: preIssued.url, accessToken: preIssued.accessToken };
+      terminalRevocation = waitForTerminalRevocation(terminalSocket);
+      terminalVerified = {
+        markerObserved: true,
+        replayRejected,
+        preIssuedTicketRejected: false,
+        revocationClosedConnection: false,
+      };
     }
 
     const revoke = await userRequest(
@@ -412,6 +480,34 @@ async function main(): Promise<void> {
     );
     requireStatus(revoke.response, 200, revoke.body, "REVOKE_CAPABILITY");
     grantActive = false;
+    if (preIssuedConnection && terminalVerified) {
+      terminalVerified.preIssuedTicketRejected = await verifyTicketRejected(
+        preIssuedConnection.url,
+        preIssuedConnection.accessToken,
+        "REVOKED_PREISSUED_ENVIRONMENT_TICKET_ACCEPTED",
+      );
+    }
+    let newConnectionRejected = false;
+    try {
+      await executeAgentCapability({
+        config: registration.config,
+        capability: "environment.connect",
+        arguments: {
+          organizationId,
+          projectId,
+          environmentId,
+          operationMode,
+          requestId: crypto.randomUUID(),
+          validUntil,
+        },
+      });
+    } catch {
+      newConnectionRejected = true;
+    }
+    if (!newConnectionRejected) throw new Error("REVOKED_ENVIRONMENT_GRANT_ACCEPTED");
+    if (terminalRevocation && terminalVerified) {
+      terminalVerified.revocationClosedConnection = await terminalRevocation;
+    }
 
     console.log(
       JSON.stringify({
@@ -426,9 +522,13 @@ async function main(): Promise<void> {
         ...(processCount === null ? {} : { processCount }),
         ...(terminalVerified ?? {}),
         grantRevoked: true,
+        newConnectionRejected,
       }),
     );
   } finally {
+    if (terminalSocket && terminalSocket.readyState !== WebSocket.CLOSED) {
+      terminalSocket.close(1000, "environment smoke cleanup");
+    }
     if (agentId && grantActive && cookie) {
       await userRequest(baseURL, "/api/auth/paca-agent/revoke-capability", cookie, "POST", {
         agent_id: agentId,

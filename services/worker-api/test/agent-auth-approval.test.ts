@@ -130,6 +130,7 @@ async function signedInAuth(
   onCapabilitiesRevoked?: (change: {
     agentId: string;
     documentIds: string[];
+    environmentIds: string[];
     projectIds: string[];
   }) => void | Promise<void>,
 ) {
@@ -142,7 +143,7 @@ async function signedInAuth(
       memoryAdapter(db),
       env,
       pacaPermission({ service }),
-      pacaAgentAuth(),
+      pacaAgentAuth({ environmentGatewayAvailable: true }),
       pacaAgentApprovalGuard({
         permissionService: service,
         findProjectOrganization: (projectId) => store.findProjectOrganization(projectId),
@@ -265,6 +266,7 @@ describe("Paca Agent Auth approval guard", () => {
     expect(onCapabilitiesRevoked).toHaveBeenCalledWith({
       agentId: "agent-1",
       documentIds: [],
+      environmentIds: [],
       projectIds: [PROJECT_ID],
     });
   });
@@ -306,6 +308,47 @@ describe("Paca Agent Auth approval guard", () => {
     expect(onCapabilitiesRevoked).toHaveBeenCalledWith({
       agentId: "agent-1",
       documentIds: [documentId],
+      environmentIds: [],
+      projectIds: [PROJECT_ID],
+    });
+  });
+
+  it("reports exact environment scopes so Grant revocation can terminate active sessions", async () => {
+    const onCapabilitiesRevoked = vi.fn();
+    const { auth, cookie, db } = await signedInAuth(true, undefined, onCapabilitiesRevoked);
+    seedAutonomousAgent(db);
+    const environmentId = "88888888-8888-4888-8888-888888888888";
+    const constraints = {
+      organizationId: "paca-default",
+      projectId: PROJECT_ID,
+      environmentId,
+      operationMode: "execute",
+      validUntil: FUTURE,
+    };
+    const grant = await auth.handler(
+      new Request(`${BASE_URL}/api/auth/agent/grant-capability`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json", origin: BASE_URL },
+        body: JSON.stringify({
+          agent_id: "agent-1",
+          capabilities: [{ name: "environment.connect", constraints }],
+        }),
+      }),
+    );
+    expect(grant.status).toBe(200);
+
+    const revoke = await auth.handler(
+      new Request(`${BASE_URL}/api/auth/paca-agent/revoke-capability`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json", origin: BASE_URL },
+        body: JSON.stringify({ agent_id: "agent-1", capabilities: ["environment.connect"] }),
+      }),
+    );
+    expect(revoke.status).toBe(200);
+    expect(onCapabilitiesRevoked).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      documentIds: [],
+      environmentIds: [environmentId],
       projectIds: [PROJECT_ID],
     });
   });

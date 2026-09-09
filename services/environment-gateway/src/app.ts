@@ -1,12 +1,15 @@
 import { Hono } from "hono";
 import {
+  type ActiveEnvironmentConnection,
   connectionPath,
   connectionProtocol,
   connectionResponseSchema,
   gatewayProtocol,
+  ISSUED_CONNECTION_TTL_SECONDS,
   issueRequestSchema,
-  MAX_CONNECTION_TTL_SECONDS,
+  MAX_AUTHORIZATION_TTL_SECONDS,
   privateGatewayOrigin,
+  revokeAgentConnectionsRequestSchema,
   type TicketClaims,
 } from "./protocol";
 import type { EnvironmentProvider } from "./provider";
@@ -14,16 +17,38 @@ import { accessTokenFromRequest, signTicket, TicketError, verifyTicket } from ".
 
 const MAX_ISSUE_REQUEST_BYTES = 16 * 1024;
 const PRIVATE_ISSUE_PATH = "/v1/connections";
+const PRIVATE_REVOCATION_PATH = "/v1/revocations/agent";
 
 export type GatewayBindings = Pick<
   Env,
-  "CONNECTION_TICKETS" | "ENVIRONMENT" | "PUBLIC_ORIGIN" | "SANDBOXES"
+  "AGENT_CONNECTIONS" | "CONNECTION_TICKETS" | "ENVIRONMENT" | "PUBLIC_ORIGIN" | "SANDBOXES"
 > & { CONNECTION_TICKET_SECRET: string };
 
 export type GatewayDependencies = {
   now: () => Date;
   provider: (env: GatewayBindings) => EnvironmentProvider;
   consumeTicket: (env: GatewayBindings, ticketId: string, expiresAtMs: number) => Promise<boolean>;
+  registerConnection: (
+    env: GatewayBindings,
+    connection: ActiveEnvironmentConnection,
+  ) => Promise<boolean>;
+  isTicketAuthorized: (
+    env: GatewayBindings,
+    agentId: string,
+    ticketIssuedAtMs: number,
+  ) => Promise<boolean>;
+  unregisterConnection: (
+    env: GatewayBindings,
+    agentId: string,
+    connectionId: string,
+  ) => Promise<void>;
+  revokeAgentConnections: (
+    env: GatewayBindings,
+    agentId: string,
+  ) => Promise<{
+    terminated: number;
+    pending: number;
+  }>;
 };
 
 function publicOrigin(value: string): string | null {
@@ -106,7 +131,8 @@ function claimsFromIssue(
 ): TicketClaims | null {
   const nowSeconds = Math.floor(now.getTime() / 1000);
   const authorizationExpiry = Math.floor(Date.parse(request.authorizationExpiresAt) / 1000);
-  const expiresAt = Math.min(nowSeconds + MAX_CONNECTION_TTL_SECONDS, authorizationExpiry);
+  if (authorizationExpiry > nowSeconds + MAX_AUTHORIZATION_TTL_SECONDS) return null;
+  const expiresAt = Math.min(nowSeconds + ISSUED_CONNECTION_TTL_SECONDS, authorizationExpiry);
   if (expiresAt <= nowSeconds) return null;
   return {
     version: 1,
@@ -120,7 +146,9 @@ function claimsFromIssue(
     agentId: request.actor.agentId,
     hostId: request.actor.hostId,
     issuedAt: nowSeconds,
+    issuedAtMs: now.getTime(),
     expiresAt,
+    authorizationExpiresAt: authorizationExpiry,
   };
 }
 
@@ -182,6 +210,39 @@ export function createGatewayApp(
     }
   });
 
+  app.post(PRIVATE_REVOCATION_PATH, async (context) => {
+    const requestUrl = new URL(context.req.url);
+    if (
+      requestUrl.origin !== privateGatewayOrigin ||
+      context.req.header("x-paca-environment-gateway-protocol") !== gatewayProtocol ||
+      context.req.header("content-type")?.split(";", 1)[0]?.trim() !== "application/json"
+    ) {
+      return codeResponse("GATEWAY_PRIVATE_ROUTE_REQUIRED", 404);
+    }
+    let request: ReturnType<typeof revokeAgentConnectionsRequestSchema.parse>;
+    try {
+      request = revokeAgentConnectionsRequestSchema.parse(await boundedJson(context.req.raw));
+    } catch {
+      return codeResponse("GATEWAY_REQUEST_INVALID", 400);
+    }
+    try {
+      const result = await dependencies.revokeAgentConnections(context.env, request.agentId);
+      return Response.json(result, {
+        status: result.pending > 0 ? 202 : 200,
+        headers: { "cache-control": "no-store" },
+      });
+    } catch {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          message: "environment.revocation.failed",
+          agentId: request.agentId,
+        }),
+      );
+      return codeResponse("GATEWAY_REVOCATION_FAILED", 503);
+    }
+  });
+
   app.all(connectionPath, async (context) => {
     const origin = publicOrigin(context.env.PUBLIC_ORIGIN);
     if (!origin || new URL(context.req.url).origin !== origin) {
@@ -198,6 +259,9 @@ export function createGatewayApp(
     }
     const provider = dependencies.provider(context.env);
     if (!provider.supports(claims)) return codeResponse("GATEWAY_PROVIDER_UNAVAILABLE", 503);
+    if (!(await dependencies.isTicketAuthorized(context.env, claims.agentId, claims.issuedAtMs))) {
+      return codeResponse("GATEWAY_TICKET_REVOKED", 401);
+    }
 
     if (claims.operationMode === "execute") {
       if (
@@ -209,9 +273,41 @@ export function createGatewayApp(
       if (!(await dependencies.consumeTicket(context.env, claims.jti, claims.expiresAt * 1000))) {
         return codeResponse("GATEWAY_TICKET_REPLAYED", 409);
       }
+      const sessionId = `paca-${claims.jti}`;
+      const connection: ActiveEnvironmentConnection = {
+        connectionId: claims.jti,
+        agentId: claims.agentId,
+        environmentId: claims.environmentId,
+        projectId: claims.projectId,
+        backend: claims.backend,
+        reference: claims.reference,
+        sessionId,
+        ticketIssuedAtMs: claims.issuedAtMs,
+        authorizationExpiresAtMs: claims.authorizationExpiresAt * 1000,
+      };
+      let terminalOpened = false;
+      let registered = false;
       try {
-        return await provider.terminal(claims, sanitizedTerminalRequest(context.req.raw));
+        const terminalResponse = await provider.terminal(
+          claims,
+          sessionId,
+          sanitizedTerminalRequest(context.req.raw),
+        );
+        terminalOpened = true;
+        registered = await dependencies.registerConnection(context.env, connection);
+        if (!registered) {
+          await provider.terminate(connection, sessionId);
+          return codeResponse("GATEWAY_TICKET_REVOKED", 401);
+        }
+        return terminalResponse;
       } catch {
+        if (registered) {
+          await dependencies
+            .unregisterConnection(context.env, claims.agentId, claims.jti)
+            .catch(() => undefined);
+        } else if (terminalOpened) {
+          await provider.terminate(connection, sessionId).catch(() => undefined);
+        }
         console.error(
           JSON.stringify({
             level: "error",
