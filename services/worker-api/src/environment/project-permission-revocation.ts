@@ -4,13 +4,13 @@ import * as z from "zod";
 import { exactConstraintString } from "../agent-auth/capabilities";
 import type { AppBindings } from "../bindings";
 import type { PacaDatabase } from "../database";
-import { agent, agentCapabilityGrant } from "../db/schema";
+import { agent, agentCapabilityGrant, pacaProjectMembers } from "../db/schema";
 import { hasEveryPermission } from "../permission/evaluator";
 import { PostgresPacaPermissionStore } from "../permission/postgres-store";
 import { PacaPermissionService } from "../permission/service";
 import { ServiceBindingEnvironmentConnectionGateway } from "./service-binding-gateway";
 
-const MAX_AGENTS_PER_GATEWAY_REQUEST = 100;
+const MAX_PRINCIPALS_PER_GATEWAY_REQUEST = 100;
 const constraintsSchema = z.record(z.string(), z.unknown());
 
 export type ProjectEnvironmentPermissionState = {
@@ -24,6 +24,38 @@ export type ProjectConnectionRevocationGateway = Pick<
   ServiceBindingEnvironmentConnectionGateway,
   "revokeProjectConnections" | "revokeEnvironmentConnections"
 >;
+
+type ConnectionPrincipal = { type: "agent"; id: string } | { type: "user"; id: string };
+
+function principalBatches(
+  agentIds: readonly string[],
+  userIds: readonly string[],
+): Array<{ agentIds: string[]; userIds: string[] }> {
+  const principals: ConnectionPrincipal[] = [
+    ...[...new Set(agentIds)].map((id) => ({ type: "agent" as const, id })),
+    ...[...new Set(userIds)].map((id) => ({ type: "user" as const, id })),
+  ];
+  const batches: Array<{ agentIds: string[]; userIds: string[] }> = [];
+  for (let offset = 0; offset < principals.length; offset += MAX_PRINCIPALS_PER_GATEWAY_REQUEST) {
+    const batch = principals.slice(offset, offset + MAX_PRINCIPALS_PER_GATEWAY_REQUEST);
+    batches.push({
+      agentIds: batch.filter((principal) => principal.type === "agent").map(({ id }) => id),
+      userIds: batch.filter((principal) => principal.type === "user").map(({ id }) => id),
+    });
+  }
+  return batches;
+}
+
+export async function listProjectEnvironmentUserIds(
+  database: PacaDatabase,
+  projectId: string,
+): Promise<string[]> {
+  const rows = await database
+    .select({ userId: pacaProjectMembers.userId })
+    .from(pacaProjectMembers)
+    .where(eq(pacaProjectMembers.projectId, projectId));
+  return [...new Set(rows.map(({ userId }) => userId))];
+}
 
 export async function readProjectEnvironmentPermissionSnapshot(
   database: PacaDatabase,
@@ -157,6 +189,7 @@ export class ProjectEnvironmentConnectionRevoker {
   async revoke(
     projectId: string,
     agentIds: readonly string[],
+    userIds: readonly string[] = [],
   ): Promise<{
     requested: number;
     terminated: number;
@@ -164,34 +197,43 @@ export class ProjectEnvironmentConnectionRevoker {
     failed: number;
   }> {
     const uniqueAgentIds = [...new Set(agentIds)];
+    const uniqueUserIds = [...new Set(userIds)];
     let terminated = 0;
     let pending = 0;
     let failed = 0;
-    for (let offset = 0; offset < uniqueAgentIds.length; offset += MAX_AGENTS_PER_GATEWAY_REQUEST) {
-      const batch = uniqueAgentIds.slice(offset, offset + MAX_AGENTS_PER_GATEWAY_REQUEST);
+    for (const { agentIds: agentBatch, userIds: userBatch } of principalBatches(
+      uniqueAgentIds,
+      uniqueUserIds,
+    )) {
       try {
-        const result = await this.gateway.revokeProjectConnections(projectId, batch);
+        const result = await this.gateway.revokeProjectConnections(
+          projectId,
+          agentBatch,
+          userBatch,
+        );
         terminated += result.terminated;
         pending += result.pending;
       } catch {
-        failed += batch.length;
+        failed += agentBatch.length + userBatch.length;
         console.error(
           JSON.stringify({
             level: "error",
             message: "environment.project_connection.revocation_notification_failed",
             projectId,
-            agentCount: batch.length,
+            agentCount: agentBatch.length,
+            userCount: userBatch.length,
           }),
         );
       }
     }
-    return { requested: uniqueAgentIds.length, terminated, pending, failed };
+    return { requested: uniqueAgentIds.length + uniqueUserIds.length, terminated, pending, failed };
   }
 
   async revokeEnvironment(
     projectId: string,
     environmentId: string,
     agentIds: readonly string[],
+    userIds: readonly string[] = [],
   ): Promise<{
     requested: number;
     terminated: number;
@@ -199,26 +241,19 @@ export class ProjectEnvironmentConnectionRevoker {
     failed: number;
   }> {
     const uniqueAgentIds = [...new Set(agentIds)];
+    const uniqueUserIds = [...new Set(userIds)];
     let terminated = 0;
     let pending = 0;
     let failed = 0;
-    const batches =
-      uniqueAgentIds.length === 0
-        ? [[]]
-        : Array.from(
-            { length: Math.ceil(uniqueAgentIds.length / MAX_AGENTS_PER_GATEWAY_REQUEST) },
-            (_, index) =>
-              uniqueAgentIds.slice(
-                index * MAX_AGENTS_PER_GATEWAY_REQUEST,
-                (index + 1) * MAX_AGENTS_PER_GATEWAY_REQUEST,
-              ),
-          );
-    for (const batch of batches) {
+    const batches = principalBatches(uniqueAgentIds, uniqueUserIds);
+    if (batches.length === 0) batches.push({ agentIds: [], userIds: [] });
+    for (const { agentIds: agentBatch, userIds: userBatch } of batches) {
       try {
         const result = await this.gateway.revokeEnvironmentConnections(
           projectId,
           environmentId,
-          batch,
+          agentBatch,
+          userBatch,
         );
         terminated += result.terminated;
         pending += result.pending;
@@ -226,19 +261,20 @@ export class ProjectEnvironmentConnectionRevoker {
         // The empty batch is a real Environment-wide barrier notification.
         // Count its failure so archive returns a retryable error instead of
         // claiming that revocation succeeded.
-        failed += Math.max(1, batch.length);
+        failed += Math.max(1, agentBatch.length + userBatch.length);
         console.error(
           JSON.stringify({
             level: "error",
             message: "environment.resource_connection.revocation_notification_failed",
             projectId,
             environmentId,
-            agentCount: batch.length,
+            agentCount: agentBatch.length,
+            userCount: userBatch.length,
           }),
         );
       }
     }
-    return { requested: uniqueAgentIds.length, terminated, pending, failed };
+    return { requested: uniqueAgentIds.length + uniqueUserIds.length, terminated, pending, failed };
   }
 }
 

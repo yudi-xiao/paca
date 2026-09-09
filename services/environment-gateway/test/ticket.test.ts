@@ -6,7 +6,9 @@ import { accessTokenFromRequest, signTicket, TicketError, verifyTicket } from ".
 const NOW = new Date("2026-09-09T01:00:00.000Z");
 const SECRET = "test-only-ticket-secret-with-at-least-32-bytes";
 
-function claims(overrides: Partial<TicketClaims> = {}): TicketClaims {
+type AgentTicketClaims = Extract<TicketClaims, { actorType: "agent" }>;
+
+function claims(overrides: Partial<AgentTicketClaims> = {}): AgentTicketClaims {
   const issuedAt = Math.floor(NOW.getTime() / 1000);
   return {
     version: 1,
@@ -17,6 +19,7 @@ function claims(overrides: Partial<TicketClaims> = {}): TicketClaims {
     backend: "cloudflare-sandbox",
     reference: "environment-1",
     operationMode: "execute",
+    actorType: "agent",
     agentId: "agent-1",
     hostId: "host-1",
     issuedAt,

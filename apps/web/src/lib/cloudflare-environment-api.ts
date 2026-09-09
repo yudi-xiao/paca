@@ -23,6 +23,32 @@ export async function listCloudflareEnvironments(
 	return data.data.environments;
 }
 
+export async function getCloudflareEnvironment(
+	projectId: string,
+	environmentId: string,
+): Promise<CloudflareEnvironment> {
+	const { data } = await apiClient.instance.get<
+		SuccessEnvelope<CloudflareEnvironment>
+	>(`/projects/${projectId}/environments/${environmentId}`);
+	return data.data;
+}
+
+export type CloudflareEnvironmentTerminalTicket = {
+	ticket: string;
+	ws_url: string;
+	expires_at: string;
+};
+
+export async function getCloudflareEnvironmentTerminalTicket(
+	projectId: string,
+	environmentId: string,
+): Promise<CloudflareEnvironmentTerminalTicket> {
+	const { data } = await apiClient.instance.post<
+		SuccessEnvelope<CloudflareEnvironmentTerminalTicket>
+	>(`/projects/${projectId}/environments/${environmentId}/terminal-ticket`);
+	return data.data;
+}
+
 export async function createCloudflareEnvironment(
 	projectId: string,
 	name: string,
@@ -57,4 +83,13 @@ export const cloudflareEnvironmentsQueryOptions = (projectId: string) =>
 	queryOptions({
 		queryKey: ["projects", projectId, "cloudflare-environments"],
 		queryFn: () => listCloudflareEnvironments(projectId),
+	});
+
+export const cloudflareEnvironmentQueryOptions = (
+	projectId: string,
+	environmentId: string,
+) =>
+	queryOptions({
+		queryKey: ["projects", projectId, "cloudflare-environments", environmentId],
+		queryFn: () => getCloudflareEnvironment(projectId, environmentId),
 	});

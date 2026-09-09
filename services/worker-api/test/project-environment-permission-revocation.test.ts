@@ -52,6 +52,37 @@ describe("project environment permission revocation", () => {
     expect(revokeProjectConnections.mock.calls[1]?.[1]).toHaveLength(2);
   });
 
+  it("bounds mixed Agent and user revocations by total principal count", async () => {
+    const revokeProjectConnections = vi.fn(
+      async (_projectId: string, agentIds: string[], userIds: string[]) => ({
+        terminated: agentIds.length + userIds.length,
+        pending: 0,
+      }),
+    );
+    const revoker = new ProjectEnvironmentConnectionRevoker({
+      revokeProjectConnections,
+      revokeEnvironmentConnections,
+    });
+    const agentIds = Array.from({ length: 60 }, (_, index) => `agent-${index}`);
+    const userIds = Array.from({ length: 60 }, (_, index) => `user-${index}`);
+
+    await expect(revoker.revoke(PROJECT_ID, agentIds, userIds)).resolves.toEqual({
+      requested: 120,
+      terminated: 120,
+      pending: 0,
+      failed: 0,
+    });
+    expect(revokeProjectConnections).toHaveBeenCalledTimes(2);
+    expect(
+      (revokeProjectConnections.mock.calls[0]?.[1]?.length ?? 0) +
+        (revokeProjectConnections.mock.calls[0]?.[2]?.length ?? 0),
+    ).toBe(100);
+    expect(
+      (revokeProjectConnections.mock.calls[1]?.[1]?.length ?? 0) +
+        (revokeProjectConnections.mock.calls[1]?.[2]?.length ?? 0),
+    ).toBe(20);
+  });
+
   it("reports a failed batch without losing successful revocations", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const revokeProjectConnections = vi
@@ -120,7 +151,7 @@ describe("project environment permission revocation", () => {
       failed: 0,
     });
     expect(revokeEnvironmentConnections).toHaveBeenCalledOnce();
-    expect(revokeEnvironmentConnections).toHaveBeenCalledWith(PROJECT_ID, ENVIRONMENT_ID, []);
+    expect(revokeEnvironmentConnections).toHaveBeenCalledWith(PROJECT_ID, ENVIRONMENT_ID, [], []);
   });
 
   it("fails closed when the environment-only barrier notification fails", async () => {

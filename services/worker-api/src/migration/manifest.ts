@@ -65,6 +65,10 @@ export const apiMigrationManifest = [
       { method: "GET", path: "/api/v1/projects/:projectId/environments/:environmentId" },
       { method: "PATCH", path: "/api/v1/projects/:projectId/environments/:environmentId" },
       { method: "DELETE", path: "/api/v1/projects/:projectId/environments/:environmentId" },
+      {
+        method: "POST",
+        path: "/api/v1/projects/:projectId/environments/:environmentId/terminal-ticket",
+      },
     ],
   },
   {

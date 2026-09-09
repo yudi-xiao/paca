@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import "xterm/css/xterm.css";
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
+import { getCloudflareEnvironmentTerminalTicket } from "@/lib/cloudflare-environment-api";
 import {
 	ENVIRONMENT_HEARTBEAT_INTERVAL_MS,
 	getTerminalTicket,
@@ -52,6 +53,7 @@ export function EnvironmentTerminal({
 	projectId,
 	environmentId,
 	slug,
+	cloudflareNative = false,
 }: {
 	projectId: string;
 	environmentId: string;
@@ -62,6 +64,7 @@ export function EnvironmentTerminal({
 	// only so a caller that hasn't loaded the environment yet (a brief
 	// loading flash) doesn't need a placeholder value.
 	slug?: string;
+	cloudflareNative?: boolean;
 }) {
 	const { t } = useTranslation("projects");
 	const containerRef = useRef<HTMLDivElement | null>(null);
@@ -119,28 +122,53 @@ export function EnvironmentTerminal({
 
 		const sendCurrentSize = () => {
 			if (ws?.readyState === WebSocket.OPEN) {
-				ws.send(encodeResizeFrame(term.rows, term.cols));
+				ws.send(
+					cloudflareNative
+						? JSON.stringify({
+								type: "resize",
+								rows: term.rows,
+								cols: term.cols,
+							})
+						: encodeResizeFrame(term.rows, term.cols),
+				);
 			}
 		};
 
 		term.onResize(({ rows, cols }) => {
 			if (ws?.readyState === WebSocket.OPEN) {
-				ws.send(encodeResizeFrame(rows, cols));
+				ws.send(
+					cloudflareNative
+						? JSON.stringify({ type: "resize", rows, cols })
+						: encodeResizeFrame(rows, cols),
+				);
 			}
 		});
 
 		const dataDisposable = term.onData((data) => {
 			if (ws?.readyState === WebSocket.OPEN) {
-				ws.send(encodeStdinFrame(data));
+				ws.send(
+					cloudflareNative
+						? new TextEncoder().encode(data)
+						: encodeStdinFrame(data),
+				);
 			}
 		});
 
 		async function connect() {
 			try {
-				const ticket = await getTerminalTicket(projectId, environmentId);
+				const ticket = cloudflareNative
+					? await getCloudflareEnvironmentTerminalTicket(
+							projectId,
+							environmentId,
+						)
+					: await getTerminalTicket(projectId, environmentId);
 				if (cancelled) return;
 
-				const socket = new WebSocket(resolveWsUrl(ticket.ws_url));
+				const socket = cloudflareNative
+					? new WebSocket(resolveWsUrl(ticket.ws_url), [
+							`paca-ticket.${ticket.ticket}`,
+						])
+					: new WebSocket(resolveWsUrl(ticket.ws_url));
 				socket.binaryType = "arraybuffer";
 				ws = socket;
 
@@ -177,6 +205,20 @@ export function EnvironmentTerminal({
 				};
 
 				socket.onmessage = (event) => {
+					if (cloudflareNative) {
+						if (typeof event.data === "string") {
+							try {
+								const control = JSON.parse(event.data) as { type?: unknown };
+								if (control.type === "error" && !cancelled) setState("error");
+							} catch {
+								// Unknown text frames are not terminal output.
+							}
+							return;
+						}
+						if (event.data instanceof ArrayBuffer)
+							term.write(new Uint8Array(event.data));
+						return;
+					}
 					if (!(event.data instanceof ArrayBuffer)) return;
 					const bytes = new Uint8Array(event.data);
 					if (bytes.length === 0) return;
@@ -198,13 +240,15 @@ export function EnvironmentTerminal({
 				// Keeps the environment's idle timer from expiring while this
 				// terminal session is open — see ENVIRONMENT_HEARTBEAT_INTERVAL_MS's
 				// doc comment in environment-api.ts.
-				heartbeatTimer = setInterval(() => {
-					heartbeatEnvironment(projectId, environmentId).catch(() => {
-						// Best-effort — a missed heartbeat just means the idle
-						// reaper might catch this environment on its next sweep;
-						// the next tick will retry.
-					});
-				}, ENVIRONMENT_HEARTBEAT_INTERVAL_MS);
+				if (!cloudflareNative) {
+					heartbeatTimer = setInterval(() => {
+						heartbeatEnvironment(projectId, environmentId).catch(() => {
+							// Best-effort — a missed heartbeat just means the idle
+							// reaper might catch this environment on its next sweep;
+							// the next tick will retry.
+						});
+					}, ENVIRONMENT_HEARTBEAT_INTERVAL_MS);
+				}
 			} catch {
 				if (!cancelled) setState("error");
 			}
@@ -221,7 +265,7 @@ export function EnvironmentTerminal({
 			ws?.close();
 			term.dispose();
 		};
-	}, [projectId, environmentId]);
+	}, [projectId, environmentId, cloudflareNative]);
 
 	return (
 		<div className="flex flex-col h-full min-h-0 rounded-lg border border-border/60 bg-[#0d1117] overflow-hidden">

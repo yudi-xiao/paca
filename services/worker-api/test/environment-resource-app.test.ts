@@ -46,6 +46,9 @@ function runtime(overrides: Partial<EnvironmentRuntime> = {}): EnvironmentRuntim
     create: async () => environment,
     update: async () => environment,
     archive: async () => undefined,
+    connectUser: async () => {
+      throw new Error("not implemented in resource test");
+    },
     ...overrides,
   };
 }
@@ -175,6 +178,66 @@ describe("environment resource HTTP contract", () => {
     );
     expect(archived.status).toBe(204);
     expect(archive).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, ENVIRONMENT_ID);
+  });
+
+  it("issues a user-scoped terminal ticket only after Session and environments.connect checks", async () => {
+    const expiresAt = new Date(NOW.getTime() + 30_000);
+    const connectUser = vi.fn<EnvironmentRuntime["connectUser"]>(async () => ({
+      protocolVersion: "paca.environment.connection.v1",
+      requestId: "33333333-3333-4333-8333-333333333333",
+      environmentId: ENVIRONMENT_ID,
+      operationMode: "execute",
+      transport: "websocket",
+      url: "wss://paca-env.howlearnwood.com/v1/connect",
+      accessToken: "short-lived-ticket",
+      expiresAt,
+    }));
+    const authorizeProjectPermission = authorize();
+    const app = createApp({
+      authorizeProjectPermission,
+      currentUserSession: async () => ({
+        id: "session-1",
+        user: {
+          id: "user-1",
+          name: "Test user",
+          email: "user@example.test",
+          emailVerified: true,
+          image: null,
+          createdAt: NOW.toISOString(),
+        },
+        expiresAt: new Date(NOW.getTime() + 60_000).toISOString(),
+      }),
+      environments: runtime({ connectUser }),
+      log: vi.fn(),
+    });
+
+    const response = await app.request(
+      `/api/v1/projects/${PROJECT_ID}/environments/${ENVIRONMENT_ID}/terminal-ticket`,
+      { method: "POST" },
+      bindings(),
+    );
+    expect(response.status).toBe(200);
+    expect(authorizeProjectPermission).toHaveBeenCalledWith(
+      expect.any(Request),
+      expect.anything(),
+      PROJECT_ID,
+      { environments: ["connect"] },
+    );
+    expect(connectUser).toHaveBeenCalledWith(
+      expect.anything(),
+      PROJECT_ID,
+      ENVIRONMENT_ID,
+      "user-1",
+      new Date(NOW.getTime() + 60_000),
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      data: {
+        ticket: "short-lived-ticket",
+        ws_url: "wss://paca-env.howlearnwood.com/v1/connect",
+        expires_at: expiresAt.toISOString(),
+      },
+    });
   });
 
   it("maps resource conflicts and rejects malformed ids before the runtime", async () => {

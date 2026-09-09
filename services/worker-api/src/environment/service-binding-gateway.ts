@@ -11,6 +11,8 @@ import {
 const ENVIRONMENT_GATEWAY_ENDPOINT = "https://environment-gateway.internal/v1/connections";
 const ENVIRONMENT_GATEWAY_REVOCATION_ENDPOINT =
   "https://environment-gateway.internal/v1/revocations/agent";
+const ENVIRONMENT_GATEWAY_USER_REVOCATION_ENDPOINT =
+  "https://environment-gateway.internal/v1/revocations/user";
 const ENVIRONMENT_GATEWAY_PROJECT_REVOCATION_ENDPOINT =
   "https://environment-gateway.internal/v1/revocations/project";
 const ENVIRONMENT_GATEWAY_RESOURCE_REVOCATION_ENDPOINT =
@@ -28,6 +30,13 @@ const responseSchema = z
     url: z.string().min(1).max(2_048),
     accessToken: z.string().min(1).max(4_096),
     expiresAt: z.iso.datetime(),
+  })
+  .strict();
+
+const prepareResponseSchema = z
+  .object({
+    status: z.literal("ready"),
+    environmentId: z.uuid(),
   })
   .strict();
 
@@ -151,11 +160,7 @@ export class ServiceBindingEnvironmentConnectionGateway implements EnvironmentCo
             reference: input.scope.gatewayReference,
           },
           operationMode: input.operationMode,
-          actor: {
-            type: "agent",
-            agentId: input.actor.agentId,
-            hostId: input.actor.hostId,
-          },
+          actor: input.actor,
           authorizationExpiresAt: input.authorizationExpiresAt.toISOString(),
         }),
       });
@@ -176,6 +181,38 @@ export class ServiceBindingEnvironmentConnectionGateway implements EnvironmentCo
       throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayResponseInvalid);
     }
     return { ...parsed.data, expiresAt: new Date(parsed.data.expiresAt) };
+  }
+
+  async prepare(connection: EnvironmentConnection): Promise<void> {
+    if (!this.binding) {
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable);
+    }
+    let response: Response;
+    try {
+      response = await this.binding.fetch(connection.url.replace(/^wss:/u, "https:"), {
+        method: "POST",
+        redirect: "manual",
+        headers: {
+          authorization: `Bearer ${connection.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "prepare" }),
+      });
+    } catch {
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable);
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return throwGatewayIssueFailure(response);
+    }
+    const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
+    if (contentType !== "application/json") {
+      void response.body?.cancel().catch(() => undefined);
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayResponseInvalid);
+    }
+    const parsed = prepareResponseSchema.safeParse(await readBoundedJson(response));
+    if (!parsed.success || parsed.data.environmentId !== connection.environmentId) {
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayResponseInvalid);
+    }
   }
 
   async revokeAgentConnections(agentId: string): Promise<{ terminated: number; pending: number }> {
@@ -217,9 +254,51 @@ export class ServiceBindingEnvironmentConnectionGateway implements EnvironmentCo
     return parsed.data;
   }
 
+  async revokeUserConnections(userId: string): Promise<{ terminated: number; pending: number }> {
+    return this.revokePrincipals(ENVIRONMENT_GATEWAY_USER_REVOCATION_ENDPOINT, { userId });
+  }
+
+  private async revokePrincipals(
+    endpoint: string,
+    principal: { userId: string },
+  ): Promise<{ terminated: number; pending: number }> {
+    if (!this.binding) {
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable);
+    }
+    let response: Response;
+    try {
+      response = await this.binding.fetch(endpoint, {
+        method: "POST",
+        redirect: "manual",
+        headers: {
+          "content-type": "application/json",
+          "x-paca-environment-gateway-protocol": ENVIRONMENT_GATEWAY_PROTOCOL,
+        },
+        body: JSON.stringify({ protocolVersion: ENVIRONMENT_GATEWAY_PROTOCOL, ...principal }),
+      });
+    } catch {
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable);
+    }
+    if (response.status < 200 || response.status >= 300) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable);
+    }
+    const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
+    if (contentType !== "application/json") {
+      void response.body?.cancel().catch(() => undefined);
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayResponseInvalid);
+    }
+    const parsed = revocationResponseSchema.safeParse(await readBoundedJson(response));
+    if (!parsed.success) {
+      throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayResponseInvalid);
+    }
+    return parsed.data;
+  }
+
   async revokeProjectConnections(
     projectId: string,
     agentIds: string[],
+    userIds: string[] = [],
   ): Promise<{ terminated: number; pending: number }> {
     if (!this.binding) {
       throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable);
@@ -238,6 +317,7 @@ export class ServiceBindingEnvironmentConnectionGateway implements EnvironmentCo
           protocolVersion: ENVIRONMENT_GATEWAY_PROTOCOL,
           projectId,
           agentIds,
+          userIds,
         }),
       });
     } catch {
@@ -264,6 +344,7 @@ export class ServiceBindingEnvironmentConnectionGateway implements EnvironmentCo
     projectId: string,
     environmentId: string,
     agentIds: string[],
+    userIds: string[] = [],
   ): Promise<{ terminated: number; pending: number }> {
     if (!this.binding) {
       throw new EnvironmentConnectionError(environmentConnectionErrorCodes.gatewayUnavailable);
@@ -283,6 +364,7 @@ export class ServiceBindingEnvironmentConnectionGateway implements EnvironmentCo
           projectId,
           environmentId,
           agentIds,
+          userIds,
         }),
       });
     } catch {

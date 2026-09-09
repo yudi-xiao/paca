@@ -20,8 +20,11 @@ vi.mock("./api-client", () => ({
 
 import {
 	archiveCloudflareEnvironment,
+	cloudflareEnvironmentQueryOptions,
 	cloudflareEnvironmentsQueryOptions,
 	createCloudflareEnvironment,
+	getCloudflareEnvironment,
+	getCloudflareEnvironmentTerminalTicket,
 	listCloudflareEnvironments,
 	renameCloudflareEnvironment,
 } from "./cloudflare-environment-api";
@@ -71,6 +74,38 @@ describe("cloudflare environment api", () => {
 		expect(mockPatch).toHaveBeenCalledWith(
 			"/projects/project-1/environments/environment-1",
 			{ name: "Renamed" },
+		);
+	});
+
+	it("loads one environment and issues a browser terminal ticket", async () => {
+		const ticket = {
+			ticket: "short-lived-ticket",
+			ws_url: "wss://paca-env.howlearnwood.com/v1/connect",
+			expires_at: "2026-09-09T00:01:00.000Z",
+		};
+		mockGet.mockResolvedValue(ok(environment));
+		mockPost.mockResolvedValue(ok(ticket));
+
+		await expect(
+			getCloudflareEnvironment("project-1", "environment-1"),
+		).resolves.toEqual(environment);
+		expect(mockGet).toHaveBeenCalledWith(
+			"/projects/project-1/environments/environment-1",
+		);
+		expect(
+			cloudflareEnvironmentQueryOptions("project-1", "environment-1").queryKey,
+		).toEqual([
+			"projects",
+			"project-1",
+			"cloudflare-environments",
+			"environment-1",
+		]);
+
+		await expect(
+			getCloudflareEnvironmentTerminalTicket("project-1", "environment-1"),
+		).resolves.toEqual(ticket);
+		expect(mockPost).toHaveBeenCalledWith(
+			"/projects/project-1/environments/environment-1/terminal-ticket",
 		);
 	});
 

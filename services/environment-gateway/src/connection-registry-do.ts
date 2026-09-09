@@ -12,7 +12,7 @@ const REVOCATION_BARRIER_KEY = "revocation-barrier-ms";
 const PROJECT_REVOCATION_BARRIER_PREFIX = "project-revocation-barrier:";
 const ENVIRONMENT_REVOCATION_BARRIER_PREFIX = "environment-revocation-barrier:";
 const REVOCATION_RETRY_KEY = "revocation-retry-attempt";
-const MAX_CONNECTIONS_PER_AGENT = 100;
+const MAX_CONNECTIONS_PER_PRINCIPAL = 100;
 const REVOCATION_RETRY_MS = 5_000;
 const MAX_REVOCATION_RETRY_MS = 60_000;
 
@@ -97,9 +97,9 @@ export class AgentConnectionRegistryDO extends DurableObject<Env> {
       }
       if (
         !records.has(this.key(connection.connectionId)) &&
-        records.size >= MAX_CONNECTIONS_PER_AGENT
+        records.size >= MAX_CONNECTIONS_PER_PRINCIPAL
       ) {
-        throw new Error("GATEWAY_AGENT_CONNECTION_LIMIT_EXCEEDED");
+        throw new Error("GATEWAY_PRINCIPAL_CONNECTION_LIMIT_EXCEEDED");
       }
       await transaction.put(this.key(connection.connectionId), connection);
       return true;
@@ -237,3 +237,6 @@ export class AgentConnectionRegistryDO extends DurableObject<Env> {
     else await this.schedule(records.values());
   }
 }
+
+/** Separate namespace for Better Auth user sessions. */
+export class UserConnectionRegistryDO extends AgentConnectionRegistryDO {}

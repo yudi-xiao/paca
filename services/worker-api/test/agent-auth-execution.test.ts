@@ -799,7 +799,7 @@ describe("Paca Agent Auth execution boundary", () => {
       projectId: PROJECT_ID,
       environmentId: ENVIRONMENT_ID,
       operationMode,
-      actor: { agentId: "agent-1", hostId: "host-1" },
+      actor: { type: "agent", agentId: "agent-1", hostId: "host-1" },
       authorizationExpiresAt: expect.any(Date),
     });
   });

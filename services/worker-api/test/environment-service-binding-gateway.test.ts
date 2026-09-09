@@ -23,7 +23,7 @@ function input(): Parameters<EnvironmentConnectionGateway["issue"]>[0] {
       gatewayReference: "workspace-1",
     },
     operationMode: "execute",
-    actor: { agentId: "agent-1", hostId: "host-1" },
+    actor: { type: "agent", agentId: "agent-1", hostId: "host-1" },
     authorizationExpiresAt: new Date(NOW.getTime() + 45_000),
   };
 }
@@ -91,6 +91,33 @@ describe("ServiceBindingEnvironmentConnectionGateway", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
+  it("issues an explicit Better Auth user principal and revokes its sessions privately", async () => {
+    const fetch = vi.fn<Fetcher["fetch"]>(async (requestInfo, init) => {
+      if (String(requestInfo).endsWith("/v1/connections")) {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          actor: { type: "user", userId: "user-1" },
+        });
+        return Response.json(gatewayResponse());
+      }
+      expect(String(requestInfo)).toBe("https://environment-gateway.internal/v1/revocations/user");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        protocolVersion: "paca.environment.gateway.v1",
+        userId: "user-1",
+      });
+      return Response.json({ terminated: 1, pending: 0 });
+    });
+    const gateway = new ServiceBindingEnvironmentConnectionGateway(fetcher(fetch));
+
+    await expect(
+      gateway.issue({ ...input(), actor: { type: "user", userId: "user-1" } }),
+    ).resolves.toMatchObject({ environmentId: ENVIRONMENT_ID });
+    await expect(gateway.revokeUserConnections("user-1")).resolves.toEqual({
+      terminated: 1,
+      pending: 0,
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("requests project-scoped connection termination for a bounded Agent batch", async () => {
     const fetch = vi.fn<Fetcher["fetch"]>(async (requestInfo, init) => {
       expect(String(requestInfo)).toBe(
@@ -105,6 +132,7 @@ describe("ServiceBindingEnvironmentConnectionGateway", () => {
         protocolVersion: "paca.environment.gateway.v1",
         projectId: PROJECT_ID,
         agentIds: ["agent-1", "agent-2"],
+        userIds: [],
       });
       return Response.json({ terminated: 2, pending: 0 });
     });
@@ -128,6 +156,7 @@ describe("ServiceBindingEnvironmentConnectionGateway", () => {
         projectId: PROJECT_ID,
         environmentId: ENVIRONMENT_ID,
         agentIds: ["agent-1", "agent-2"],
+        userIds: [],
       });
       return Response.json({ terminated: 1, pending: 0 });
     });

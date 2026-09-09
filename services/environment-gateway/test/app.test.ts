@@ -20,6 +20,7 @@ function bindings(): GatewayBindings {
     ENVIRONMENT_TICKET_BARRIERS: Object.create(null) as Env["ENVIRONMENT_TICKET_BARRIERS"],
     PUBLIC_ORIGIN: "https://paca-env.howlearnwood.com",
     SANDBOXES: Object.create(null) as Env["SANDBOXES"],
+    USER_CONNECTIONS: Object.create(null) as Env["USER_CONNECTIONS"],
   };
 }
 
@@ -51,6 +52,20 @@ function issueRequest(operationMode: "read" | "execute" = "execute") {
   });
 }
 
+function userIssueRequest(operationMode: "read" | "execute" = "execute") {
+  return new Request("https://environment-gateway.internal/v1/connections", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-paca-environment-gateway-protocol": "paca.environment.gateway.v1",
+    },
+    body: JSON.stringify({
+      ...issueBody(operationMode),
+      actor: { type: "user", userId: "user-1" },
+    }),
+  });
+}
+
 function provider() {
   return {
     supports: vi.fn<EnvironmentProvider["supports"]>(
@@ -74,6 +89,7 @@ function harness(input?: {
   isTicketAuthorized?: GatewayDependencies["isTicketAuthorized"];
   registerConnection?: GatewayDependencies["registerConnection"];
   revokeAgentConnections?: GatewayDependencies["revokeAgentConnections"];
+  revokeUserConnections?: GatewayDependencies["revokeUserConnections"];
   revokeProjectConnections?: GatewayDependencies["revokeProjectConnections"];
   revokeEnvironmentConnections?: GatewayDependencies["revokeEnvironmentConnections"];
   wait?: GatewayDependencies["wait"];
@@ -91,6 +107,12 @@ function harness(input?: {
   const revokeAgentConnections =
     input?.revokeAgentConnections ??
     vi.fn<GatewayDependencies["revokeAgentConnections"]>(async () => ({
+      terminated: 0,
+      pending: 0,
+    }));
+  const revokeUserConnections =
+    input?.revokeUserConnections ??
+    vi.fn<GatewayDependencies["revokeUserConnections"]>(async () => ({
       terminated: 0,
       pending: 0,
     }));
@@ -115,6 +137,7 @@ function harness(input?: {
     isTicketAuthorized,
     unregisterConnection,
     revokeAgentConnections,
+    revokeUserConnections,
     revokeProjectConnections,
     revokeEnvironmentConnections,
   };
@@ -127,6 +150,7 @@ function harness(input?: {
     isTicketAuthorized,
     unregisterConnection,
     revokeAgentConnections,
+    revokeUserConnections,
     revokeProjectConnections,
     revokeEnvironmentConnections,
   };
@@ -170,6 +194,32 @@ describe("Paca Environment Gateway", () => {
     });
     const rejected = await test.app.fetch(publicAttempt, test.env);
     expect(rejected.status).toBe(404);
+  });
+
+  it("keeps Better Auth users as an explicit non-Agent ticket principal", async () => {
+    const test = harness();
+    const issued = await test.app.fetch(userIssueRequest("read"), test.env);
+    expect(issued.status).toBe(200);
+    const connection = connectionResponseSchema.parse(await issued.json());
+    const response = await test.app.fetch(
+      new Request(connection.url, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${connection.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "status" }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(200);
+    expect(test.isTicketAuthorized).toHaveBeenCalledWith(
+      test.env,
+      { type: "user", userId: "user-1" },
+      PROJECT_ID,
+      ENVIRONMENT_ID,
+      NOW.getTime(),
+    );
   });
 
   it("keeps issued tickets below the API clock-skew ceiling and rejects overlong authorization", async () => {
@@ -229,23 +279,53 @@ describe("Paca Environment Gateway", () => {
       new Date(NOW.getTime() + 45_000).getTime(),
     );
     expect(test.provider.terminal).toHaveBeenCalledOnce();
-    expect(test.registerConnection).toHaveBeenCalledWith(test.env, {
-      connectionId: REQUEST_ID,
-      agentId: "agent-1",
-      environmentId: ENVIRONMENT_ID,
-      projectId: PROJECT_ID,
-      backend: "cloudflare-sandbox",
-      reference: "environment-1",
-      sessionId: `paca-${REQUEST_ID}`,
-      ticketIssuedAtMs: NOW.getTime(),
-      authorizationExpiresAtMs: NOW.getTime() + 45_000,
-    });
+    expect(test.registerConnection).toHaveBeenCalledWith(
+      test.env,
+      { type: "agent", agentId: "agent-1", hostId: "host-1" },
+      {
+        connectionId: REQUEST_ID,
+        principalType: "agent",
+        principalId: "agent-1",
+        environmentId: ENVIRONMENT_ID,
+        projectId: PROJECT_ID,
+        backend: "cloudflare-sandbox",
+        reference: "environment-1",
+        sessionId: `paca-${REQUEST_ID}`,
+        ticketIssuedAtMs: NOW.getTime(),
+        authorizationExpiresAtMs: NOW.getTime() + 45_000,
+      },
+    );
     const sessionId = test.provider.terminal.mock.calls[0]?.[1];
     expect(sessionId).toBe(`paca-${REQUEST_ID}`);
     const proxiedRequest = test.provider.terminal.mock.calls[0]?.[2];
     expect(proxiedRequest).toBeInstanceOf(Request);
     expect(proxiedRequest?.headers.get("authorization")).toBeNull();
     expect(proxiedRequest?.headers.get("cookie")).toBeNull();
+  });
+
+  it("echoes the browser ticket subprotocol without forwarding it to the Sandbox", async () => {
+    const test = harness();
+    const issued = await test.app.fetch(userIssueRequest(), test.env);
+    const connection = connectionResponseSchema.parse(await issued.json());
+    const protocol = `paca-ticket.${connection.accessToken}`;
+    const response = await test.app.fetch(
+      new Request(workerRequestUrl(connection.url), {
+        headers: {
+          "sec-websocket-protocol": protocol,
+          upgrade: "websocket",
+        },
+      }),
+      test.env,
+    );
+
+    expect(response.headers.get("sec-websocket-protocol")).toBe(protocol);
+    expect(test.provider.terminal).toHaveBeenCalledWith(
+      expect.objectContaining({ actorType: "user", userId: "user-1" }),
+      `paca-${REQUEST_ID}`,
+      expect.any(Request),
+    );
+    const proxiedRequest = test.provider.terminal.mock.calls[0]?.[2];
+    expect(proxiedRequest?.headers.has("sec-websocket-protocol")).toBe(false);
   });
 
   it("rejects a replayed execute ticket before reaching the provider", async () => {
@@ -280,7 +360,7 @@ describe("Paca Environment Gateway", () => {
     expect(test.provider.status).not.toHaveBeenCalled();
     expect(test.isTicketAuthorized).toHaveBeenCalledWith(
       test.env,
-      "agent-1",
+      { type: "agent", agentId: "agent-1", hostId: "host-1" },
       PROJECT_ID,
       ENVIRONMENT_ID,
       NOW.getTime(),
@@ -301,7 +381,8 @@ describe("Paca Environment Gateway", () => {
     expect(test.provider.terminate).toHaveBeenCalledWith(
       {
         connectionId: REQUEST_ID,
-        agentId: "agent-1",
+        principalType: "agent",
+        principalId: "agent-1",
         environmentId: ENVIRONMENT_ID,
         projectId: PROJECT_ID,
         backend: "cloudflare-sandbox",
@@ -526,6 +607,31 @@ describe("Paca Environment Gateway", () => {
     expect(publicResponse.status).toBe(404);
   });
 
+  it("revokes Better Auth user connections through the private binding origin", async () => {
+    const revokeUserConnections = vi.fn<GatewayDependencies["revokeUserConnections"]>(async () => ({
+      terminated: 1,
+      pending: 0,
+    }));
+    const test = harness({ revokeUserConnections });
+    const response = await test.app.fetch(
+      new Request("https://environment-gateway.internal/v1/revocations/user", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-paca-environment-gateway-protocol": "paca.environment.gateway.v1",
+        },
+        body: JSON.stringify({
+          protocolVersion: "paca.environment.gateway.v1",
+          userId: "user-1",
+        }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ terminated: 1, pending: 0 });
+    expect(revokeUserConnections).toHaveBeenCalledWith(test.env, "user-1");
+  });
+
   it("revokes only the requested project for a bounded set of Agents", async () => {
     const revokeProjectConnections = vi.fn<GatewayDependencies["revokeProjectConnections"]>(
       async () => ({ terminated: 2, pending: 1 }),
@@ -548,10 +654,34 @@ describe("Paca Environment Gateway", () => {
     );
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({ terminated: 2, pending: 1 });
-    expect(revokeProjectConnections).toHaveBeenCalledWith(test.env, PROJECT_ID, [
-      "agent-1",
-      "agent-2",
-    ]);
+    expect(revokeProjectConnections).toHaveBeenCalledWith(
+      test.env,
+      PROJECT_ID,
+      ["agent-1", "agent-2"],
+      [],
+    );
+  });
+
+  it("rejects a project revocation whose mixed principal set exceeds the bound", async () => {
+    const test = harness();
+    const response = await test.app.fetch(
+      new Request("https://environment-gateway.internal/v1/revocations/project", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-paca-environment-gateway-protocol": "paca.environment.gateway.v1",
+        },
+        body: JSON.stringify({
+          protocolVersion: "paca.environment.gateway.v1",
+          projectId: PROJECT_ID,
+          agentIds: Array.from({ length: 60 }, (_, index) => `agent-${index}`),
+          userIds: Array.from({ length: 41 }, (_, index) => `user-${index}`),
+        }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(400);
+    expect(test.revokeProjectConnections).not.toHaveBeenCalled();
   });
 
   it("revokes only the requested environment for a bounded set of Agents", async () => {
@@ -582,6 +712,7 @@ describe("Paca Environment Gateway", () => {
       PROJECT_ID,
       ENVIRONMENT_ID,
       ["agent-1", "agent-2"],
+      [],
     );
   });
 
@@ -612,6 +743,7 @@ describe("Paca Environment Gateway", () => {
       test.env,
       PROJECT_ID,
       ENVIRONMENT_ID,
+      [],
       [],
     );
   });

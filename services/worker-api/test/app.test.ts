@@ -1009,7 +1009,7 @@ describe("worker api", () => {
   it("distinguishes a retained Go domain from an unknown API route", async () => {
     const app = createApp({ log: vi.fn() });
     const response = await app.request(
-      "/api/v1/projects/project-1/environments/environment-1/terminal-ticket",
+      "/api/v1/projects/project-1/environments/environment-1/folders",
       {},
       testBindings(),
     );

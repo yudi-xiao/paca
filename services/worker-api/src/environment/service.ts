@@ -2,6 +2,9 @@ export const environmentConnectionProtocol = "paca.environment.connection.v1" as
 export const ENVIRONMENT_CONNECTION_MAX_TTL_MS = 60_000;
 
 export type EnvironmentOperationMode = "read" | "execute";
+export type EnvironmentConnectionActor =
+  | { type: "agent"; agentId: string; hostId: string }
+  | { type: "user"; userId: string };
 export type EnvironmentBackend =
   | "cloudflare-sandbox"
   | "cloudflare-computer"
@@ -149,7 +152,7 @@ export type EnvironmentConnectionGateway = {
     requestId: string;
     scope: EnvironmentScope;
     operationMode: EnvironmentOperationMode;
-    actor: { agentId: string; hostId: string };
+    actor: EnvironmentConnectionActor;
     authorizationExpiresAt: Date;
   }): Promise<EnvironmentConnection>;
 };
@@ -219,7 +222,7 @@ export class EnvironmentConnectionService {
     projectId: string;
     environmentId: string;
     operationMode: EnvironmentOperationMode;
-    actor: { agentId: string; hostId: string };
+    actor: EnvironmentConnectionActor;
     authorizationExpiresAt: Date;
   }): Promise<EnvironmentConnection> {
     const now = this.now();

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import {
 	Archive,
 	Loader2,
@@ -6,12 +7,13 @@ import {
 	Plus,
 	Server,
 	ShieldCheck,
+	TerminalSquare,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
 	Dialog,
 	DialogContent,
@@ -205,6 +207,7 @@ export function CloudflareEnvironmentPage({
 	const { t } = useTranslation("projects");
 	const { hasProjectPermission } = useProjectPermissions(projectId);
 	const canWrite = hasProjectPermission("environments.write");
+	const canConnect = hasProjectPermission("environments.connect");
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	const { data: environments = [], isLoading } = useQuery(
 		cloudflareEnvironmentsQueryOptions(projectId),
@@ -304,24 +307,40 @@ export function CloudflareEnvironmentPage({
 										{t("environments.cloudflare.readyOnDemand")}
 									</div>
 								</div>
-								{canWrite ? (
+								{canWrite || canConnect ? (
 									<div className="mt-5 flex gap-2 border-t border-border/50 pt-3">
-										<Button
-											size="sm"
-											variant="ghost"
-											onClick={() => setRenaming(environment)}
-										>
-											<Pencil className="size-3.5" />
-											{t("environments.cloudflare.rename")}
-										</Button>
-										<Button
-											size="sm"
-											variant="ghost"
-											onClick={() => setArchiving(environment)}
-										>
-											<Archive className="size-3.5" />
-											{t("environments.cloudflare.archive")}
-										</Button>
+										{canConnect ? (
+											<Link
+												to="/projects/$projectId/environments/$environmentId/terminal"
+												params={{ projectId, environmentId: environment.id }}
+												target="_blank"
+												rel="noopener noreferrer"
+												className={buttonVariants({ size: "sm" })}
+											>
+												<TerminalSquare className="size-3.5" />
+												{t("environments.connect.webApp.connect")}
+											</Link>
+										) : null}
+										{canWrite ? (
+											<>
+												<Button
+													size="sm"
+													variant="ghost"
+													onClick={() => setRenaming(environment)}
+												>
+													<Pencil className="size-3.5" />
+													{t("environments.cloudflare.rename")}
+												</Button>
+												<Button
+													size="sm"
+													variant="ghost"
+													onClick={() => setArchiving(environment)}
+												>
+													<Archive className="size-3.5" />
+													{t("environments.cloudflare.archive")}
+												</Button>
+											</>
+										) : null}
 									</div>
 								) : null}
 							</div>

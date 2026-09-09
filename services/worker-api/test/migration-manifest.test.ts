@@ -45,6 +45,6 @@ describe("API migration manifest", () => {
         "/api/v1/projects/project-1/environments/environment-1/terminal-ticket",
         "POST",
       ),
-    ).toMatchObject({ domain: "environments", status: "container-retained" });
+    ).toBeNull();
   });
 });

@@ -108,16 +108,19 @@ export async function verifyTicket(
   return claims;
 }
 
-export function accessTokenFromRequest(request: Request): string | null {
-  const authorization = request.headers.get("authorization");
-  const bearer = authorization?.match(/^Bearer ([A-Za-z0-9._-]+)$/u)?.[1] ?? null;
+export function ticketProtocolFromRequest(request: Request): string | null {
   const protocolTokens = (request.headers.get("sec-websocket-protocol") ?? "")
     .split(",")
     .map((value) => value.trim())
-    .filter((value) => value.startsWith("paca-ticket."))
-    .map((value) => value.slice("paca-ticket.".length));
-  if (protocolTokens.length > 1) return null;
-  const protocol = protocolTokens[0] ?? null;
+    .filter((value) => value.startsWith("paca-ticket."));
+  return protocolTokens.length === 1 ? (protocolTokens[0] ?? null) : null;
+}
+
+export function accessTokenFromRequest(request: Request): string | null {
+  const authorization = request.headers.get("authorization");
+  const bearer = authorization?.match(/^Bearer ([A-Za-z0-9._-]+)$/u)?.[1] ?? null;
+  const selectedProtocol = ticketProtocolFromRequest(request);
+  const protocol = selectedProtocol?.slice("paca-ticket.".length) ?? null;
   if (bearer && protocol && bearer !== protocol) return null;
   return bearer ?? protocol;
 }

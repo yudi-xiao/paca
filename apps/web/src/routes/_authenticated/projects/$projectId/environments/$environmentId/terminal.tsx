@@ -1,6 +1,10 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { CloudflareEnvironmentTerminalPage } from "@/components/projects/environments/cloudflare-environment-terminal-page";
 import { EnvironmentTerminalPage } from "@/components/projects/environments/environment-terminal-page";
+import { cloudflareEnvironmentQueryOptions } from "@/lib/cloudflare-environment-api";
 import { environmentQueryOptions } from "@/lib/environment-api";
+
+const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 
 // Opened in a new browser tab from the Connect page's "web app" tab — see
 // environment-terminal-page.tsx's own doc comment for why this renders as
@@ -9,18 +13,16 @@ import { environmentQueryOptions } from "@/lib/environment-api";
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/environments/$environmentId/terminal",
 )({
-	beforeLoad: ({ params: { projectId } }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
-			throw redirect({
-				to: "/projects/$projectId",
-				params: { projectId },
-			});
-		}
-	},
 	loader: async ({
 		context: { queryClient },
 		params: { projectId, environmentId },
 	}) => {
+		if (isInternalPreview) {
+			await queryClient.ensureQueryData(
+				cloudflareEnvironmentQueryOptions(projectId, environmentId),
+			);
+			return;
+		}
 		await queryClient.ensureQueryData(
 			environmentQueryOptions(projectId, environmentId),
 		);
@@ -30,6 +32,14 @@ export const Route = createFileRoute(
 
 function ProjectEnvironmentTerminalPage() {
 	const { projectId, environmentId } = Route.useParams();
+	if (isInternalPreview) {
+		return (
+			<CloudflareEnvironmentTerminalPage
+				projectId={projectId}
+				environmentId={environmentId}
+			/>
+		);
+	}
 	return (
 		<EnvironmentTerminalPage
 			projectId={projectId}

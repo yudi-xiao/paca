@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import {
   type ActiveEnvironmentConnection,
+  type ConnectionActor,
   connectionPath,
   connectionProtocol,
   connectionResponseSchema,
@@ -12,6 +13,7 @@ import {
   revokeAgentConnectionsRequestSchema,
   revokeEnvironmentConnectionsRequestSchema,
   revokeProjectConnectionsRequestSchema,
+  revokeUserConnectionsRequestSchema,
   type TicketClaims,
 } from "./protocol";
 import type { EnvironmentProvider } from "./provider";
@@ -20,11 +22,18 @@ import {
   type EnvironmentProviderFailure,
   type EnvironmentProviderOperation,
 } from "./provider-failure";
-import { accessTokenFromRequest, signTicket, TicketError, verifyTicket } from "./ticket";
+import {
+  accessTokenFromRequest,
+  signTicket,
+  TicketError,
+  ticketProtocolFromRequest,
+  verifyTicket,
+} from "./ticket";
 
 const MAX_ISSUE_REQUEST_BYTES = 16 * 1024;
 const PRIVATE_ISSUE_PATH = "/v1/connections";
 const PRIVATE_REVOCATION_PATH = "/v1/revocations/agent";
+const PRIVATE_USER_REVOCATION_PATH = "/v1/revocations/user";
 const PRIVATE_PROJECT_REVOCATION_PATH = "/v1/revocations/project";
 const PRIVATE_ENVIRONMENT_REVOCATION_PATH = "/v1/revocations/environment";
 const MAX_PROVIDER_ATTEMPTS = 3;
@@ -37,6 +46,7 @@ export type GatewayBindings = Pick<
   | "ENVIRONMENT_TICKET_BARRIERS"
   | "PUBLIC_ORIGIN"
   | "SANDBOXES"
+  | "USER_CONNECTIONS"
 > & { CONNECTION_TICKET_SECRET: string };
 
 export type GatewayDependencies = {
@@ -46,18 +56,19 @@ export type GatewayDependencies = {
   consumeTicket: (env: GatewayBindings, ticketId: string, expiresAtMs: number) => Promise<boolean>;
   registerConnection: (
     env: GatewayBindings,
+    actor: ConnectionActor,
     connection: ActiveEnvironmentConnection,
   ) => Promise<boolean>;
   isTicketAuthorized: (
     env: GatewayBindings,
-    agentId: string,
+    actor: ConnectionActor,
     projectId: string,
     environmentId: string,
     ticketIssuedAtMs: number,
   ) => Promise<boolean>;
   unregisterConnection: (
     env: GatewayBindings,
-    agentId: string,
+    actor: ConnectionActor,
     connectionId: string,
   ) => Promise<void>;
   revokeAgentConnections: (
@@ -67,10 +78,18 @@ export type GatewayDependencies = {
     terminated: number;
     pending: number;
   }>;
+  revokeUserConnections: (
+    env: GatewayBindings,
+    userId: string,
+  ) => Promise<{
+    terminated: number;
+    pending: number;
+  }>;
   revokeProjectConnections: (
     env: GatewayBindings,
     projectId: string,
     agentIds: string[],
+    userIds: string[],
   ) => Promise<{
     terminated: number;
     pending: number;
@@ -80,6 +99,7 @@ export type GatewayDependencies = {
     projectId: string,
     environmentId: string,
     agentIds: string[],
+    userIds: string[],
   ) => Promise<{
     terminated: number;
     pending: number;
@@ -241,6 +261,25 @@ function sanitizedTerminalRequest(request: Request): Request {
   return new Request(request.url, { method: "GET", headers });
 }
 
+function withAcceptedTicketProtocol(request: Request, response: Response): Response {
+  const protocol = ticketProtocolFromRequest(request);
+  if (!protocol) return response;
+  const headers = new Headers(response.headers);
+  headers.set("sec-websocket-protocol", protocol);
+  return new Response(response.webSocket ? null : response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+    ...(response.webSocket ? { webSocket: response.webSocket } : {}),
+  });
+}
+
+function actorFromClaims(claims: TicketClaims): ConnectionActor {
+  return claims.actorType === "agent"
+    ? { type: "agent", agentId: claims.agentId, hostId: claims.hostId }
+    : { type: "user", userId: claims.userId };
+}
+
 function claimsFromIssue(
   request: ReturnType<typeof issueRequestSchema.parse>,
   now: Date,
@@ -250,8 +289,8 @@ function claimsFromIssue(
   if (authorizationExpiry > nowSeconds + MAX_AUTHORIZATION_TTL_SECONDS) return null;
   const expiresAt = Math.min(nowSeconds + ISSUED_CONNECTION_TTL_SECONDS, authorizationExpiry);
   if (expiresAt <= nowSeconds) return null;
-  return {
-    version: 1,
+  const base = {
+    version: 1 as const,
     jti: request.requestId,
     environmentId: request.environment.id,
     organizationId: request.environment.organizationId,
@@ -259,13 +298,19 @@ function claimsFromIssue(
     backend: request.environment.backend,
     reference: request.environment.reference,
     operationMode: request.operationMode,
-    agentId: request.actor.agentId,
-    hostId: request.actor.hostId,
     issuedAt: nowSeconds,
     issuedAtMs: now.getTime(),
     expiresAt,
     authorizationExpiresAt: authorizationExpiry,
   };
+  return request.actor.type === "agent"
+    ? {
+        ...base,
+        actorType: "agent",
+        agentId: request.actor.agentId,
+        hostId: request.actor.hostId,
+      }
+    : { ...base, actorType: "user", userId: request.actor.userId };
 }
 
 export function createGatewayApp(
@@ -359,6 +404,39 @@ export function createGatewayApp(
     }
   });
 
+  app.post(PRIVATE_USER_REVOCATION_PATH, async (context) => {
+    const requestUrl = new URL(context.req.url);
+    if (
+      requestUrl.origin !== privateGatewayOrigin ||
+      context.req.header("x-paca-environment-gateway-protocol") !== gatewayProtocol ||
+      context.req.header("content-type")?.split(";", 1)[0]?.trim() !== "application/json"
+    ) {
+      return codeResponse("GATEWAY_PRIVATE_ROUTE_REQUIRED", 404);
+    }
+    let request: ReturnType<typeof revokeUserConnectionsRequestSchema.parse>;
+    try {
+      request = revokeUserConnectionsRequestSchema.parse(await boundedJson(context.req.raw));
+    } catch {
+      return codeResponse("GATEWAY_REQUEST_INVALID", 400);
+    }
+    try {
+      const result = await dependencies.revokeUserConnections(context.env, request.userId);
+      return Response.json(result, {
+        status: result.pending > 0 ? 202 : 200,
+        headers: { "cache-control": "no-store" },
+      });
+    } catch {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          message: "environment.user_revocation.failed",
+          userId: request.userId,
+        }),
+      );
+      return codeResponse("GATEWAY_REVOCATION_FAILED", 503);
+    }
+  });
+
   app.post(PRIVATE_PROJECT_REVOCATION_PATH, async (context) => {
     const requestUrl = new URL(context.req.url);
     if (
@@ -375,9 +453,12 @@ export function createGatewayApp(
       return codeResponse("GATEWAY_REQUEST_INVALID", 400);
     }
     try {
-      const result = await dependencies.revokeProjectConnections(context.env, request.projectId, [
-        ...new Set(request.agentIds),
-      ]);
+      const result = await dependencies.revokeProjectConnections(
+        context.env,
+        request.projectId,
+        [...new Set(request.agentIds)],
+        [...new Set(request.userIds)],
+      );
       return Response.json(result, {
         status: result.pending > 0 ? 202 : 200,
         headers: { "cache-control": "no-store" },
@@ -389,6 +470,7 @@ export function createGatewayApp(
           message: "environment.project_revocation.failed",
           projectId: request.projectId,
           agentCount: request.agentIds.length,
+          userCount: request.userIds.length,
         }),
       );
       return codeResponse("GATEWAY_REVOCATION_FAILED", 503);
@@ -416,6 +498,7 @@ export function createGatewayApp(
         request.projectId,
         request.environmentId,
         [...new Set(request.agentIds)],
+        [...new Set(request.userIds)],
       );
       return Response.json(result, {
         status: result.pending > 0 ? 202 : 200,
@@ -429,6 +512,7 @@ export function createGatewayApp(
           projectId: request.projectId,
           environmentId: request.environmentId,
           agentCount: request.agentIds.length,
+          userCount: request.userIds.length,
         }),
       );
       return codeResponse("GATEWAY_REVOCATION_FAILED", 503);
@@ -451,10 +535,11 @@ export function createGatewayApp(
     }
     const provider = dependencies.provider(context.env);
     if (!provider.supports(claims)) return unsupportedProviderResponse();
+    const actor = actorFromClaims(claims);
     if (
       !(await dependencies.isTicketAuthorized(
         context.env,
-        claims.agentId,
+        actor,
         claims.projectId,
         claims.environmentId,
         claims.issuedAtMs,
@@ -516,7 +601,8 @@ export function createGatewayApp(
       const sessionId = `paca-${claims.jti}`;
       const connection: ActiveEnvironmentConnection = {
         connectionId: claims.jti,
-        agentId: claims.agentId,
+        principalType: actor.type,
+        principalId: actor.type === "agent" ? actor.agentId : actor.userId,
         environmentId: claims.environmentId,
         projectId: claims.projectId,
         backend: claims.backend,
@@ -534,16 +620,16 @@ export function createGatewayApp(
           sanitizedTerminalRequest(context.req.raw),
         );
         terminalOpened = true;
-        registered = await dependencies.registerConnection(context.env, connection);
+        registered = await dependencies.registerConnection(context.env, actor, connection);
         if (!registered) {
           await provider.terminate(connection, sessionId);
           return codeResponse("GATEWAY_TICKET_REVOKED", 401);
         }
-        return terminalResponse;
+        return withAcceptedTicketProtocol(context.req.raw, terminalResponse);
       } catch (error) {
         if (registered) {
           await dependencies
-            .unregisterConnection(context.env, claims.agentId, claims.jti)
+            .unregisterConnection(context.env, actor, claims.jti)
             .catch(() => undefined);
         } else if (terminalOpened) {
           await provider.terminate(connection, sessionId).catch(() => undefined);

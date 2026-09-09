@@ -66,7 +66,7 @@ export const projectAccessRuntime: ProjectAccessRuntime = {
   createRole: (env, actorGrants, projectId, input) =>
     withService(env, (service) => service.createRole(actorGrants, projectId, input)),
   updateRole: async (env, actorGrants, projectId, roleId, input) => {
-    const { role, agentIds } = await withDatabase(env, async (database) => {
+    const { role, agentIds, userIds } = await withDatabase(env, async (database) => {
       const service = new ProjectAccessService(new PostgresProjectAccessRepository(database));
       const affectedUserIds = (await service.listMembers(projectId))
         .filter((member) => member.role.id === roleId)
@@ -82,15 +82,13 @@ export const projectAccessRuntime: ProjectAccessRuntime = {
         projectId,
         affectedUserIds,
       );
-      const agentIds = await listDelegatedAgentIds(
-        database,
-        usersWithProjectEnvironmentPermissionLoss(before, after),
-      );
-      return { role, agentIds };
+      const userIds = usersWithProjectEnvironmentPermissionLoss(before, after);
+      const agentIds = await listDelegatedAgentIds(database, userIds);
+      return { role, agentIds, userIds };
     });
     await Promise.all([
       invalidateProjectRoom(env, projectId),
-      projectEnvironmentConnectionRevoker(env).revoke(projectId, agentIds),
+      projectEnvironmentConnectionRevoker(env).revoke(projectId, agentIds, userIds),
     ]);
     return role;
   },
@@ -100,7 +98,7 @@ export const projectAccessRuntime: ProjectAccessRuntime = {
   addMember: (env, actorGrants, projectId, userId, roleId) =>
     withService(env, (service) => service.addMember(actorGrants, projectId, userId, roleId)),
   replaceMemberRole: async (env, actorGrants, projectId, memberId, roleId) => {
-    const { member, agentIds } = await withDatabase(env, async (database) => {
+    const { member, agentIds, userIds } = await withDatabase(env, async (database) => {
       const service = new ProjectAccessService(new PostgresProjectAccessRepository(database));
       const current = (await service.listMembers(projectId)).find(
         (candidate) => candidate.id === memberId,
@@ -117,20 +115,18 @@ export const projectAccessRuntime: ProjectAccessRuntime = {
         projectId,
         affectedUserIds,
       );
-      const agentIds = await listDelegatedAgentIds(
-        database,
-        usersWithProjectEnvironmentPermissionLoss(before, after),
-      );
-      return { member, agentIds };
+      const userIds = usersWithProjectEnvironmentPermissionLoss(before, after);
+      const agentIds = await listDelegatedAgentIds(database, userIds);
+      return { member, agentIds, userIds };
     });
     await Promise.all([
       invalidateProjectActor(env, projectId, "user", member.userId),
-      projectEnvironmentConnectionRevoker(env).revoke(projectId, agentIds),
+      projectEnvironmentConnectionRevoker(env).revoke(projectId, agentIds, userIds),
     ]);
     return member;
   },
   removeMember: async (env, projectId, memberId) => {
-    const { member, agentIds } = await withDatabase(env, async (database) => {
+    const { member, agentIds, userIds } = await withDatabase(env, async (database) => {
       const service = new ProjectAccessService(new PostgresProjectAccessRepository(database));
       const current = (await service.listMembers(projectId)).find(
         (candidate) => candidate.id === memberId,
@@ -147,15 +143,13 @@ export const projectAccessRuntime: ProjectAccessRuntime = {
         projectId,
         affectedUserIds,
       );
-      const agentIds = await listDelegatedAgentIds(
-        database,
-        usersWithProjectEnvironmentPermissionLoss(before, after),
-      );
-      return { member, agentIds };
+      const userIds = usersWithProjectEnvironmentPermissionLoss(before, after);
+      const agentIds = await listDelegatedAgentIds(database, userIds);
+      return { member, agentIds, userIds };
     });
     await Promise.all([
       invalidateProjectActor(env, projectId, "user", member.userId),
-      projectEnvironmentConnectionRevoker(env).revoke(projectId, agentIds),
+      projectEnvironmentConnectionRevoker(env).revoke(projectId, agentIds, userIds),
     ]);
   },
   listUsers: (env, page, pageSize) =>

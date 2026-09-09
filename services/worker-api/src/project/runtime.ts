@@ -2,6 +2,7 @@ import type { AppBindings } from "../bindings";
 import { withDatabase } from "../database";
 import {
   listProjectEnvironmentAgentIds,
+  listProjectEnvironmentUserIds,
   projectEnvironmentConnectionRevoker,
 } from "../environment/project-permission-revocation";
 import { invalidateProjectRoom } from "../realtime/invalidation";
@@ -53,15 +54,18 @@ export const projectRuntime: ProjectRuntime = {
   update: (env, projectId, input) =>
     withService(env, (service) => service.update(projectId, input)),
   archive: async (env, projectId) => {
-    const agentIds = await withDatabase(env, async (database) => {
+    const { agentIds, userIds } = await withDatabase(env, async (database) => {
       const service = new ProjectService(new PostgresProjectRepository(database));
-      const agentIds = await listProjectEnvironmentAgentIds(database, projectId);
+      const [agentIds, userIds] = await Promise.all([
+        listProjectEnvironmentAgentIds(database, projectId),
+        listProjectEnvironmentUserIds(database, projectId),
+      ]);
       await service.archive(projectId);
-      return agentIds;
+      return { agentIds, userIds };
     });
     await Promise.all([
       invalidateProjectRoom(env, projectId),
-      projectEnvironmentConnectionRevoker(env).revoke(projectId, agentIds),
+      projectEnvironmentConnectionRevoker(env).revoke(projectId, agentIds, userIds),
     ]);
   },
 };

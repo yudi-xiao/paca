@@ -32,6 +32,7 @@ import type { DocumentScope } from "../document/postgres-scope-repository";
 import { PostgresEnvironmentScopeRepository } from "../environment/postgres-repository";
 import {
   type EnvironmentConnection,
+  type EnvironmentConnectionActor,
   EnvironmentConnectionError,
   EnvironmentConnectionService,
   type EnvironmentOperationMode,
@@ -102,7 +103,7 @@ export type PacaAgentExecutionDependencies = {
     projectId: string;
     environmentId: string;
     operationMode: EnvironmentOperationMode;
-    actor: { agentId: string; hostId: string };
+    actor: EnvironmentConnectionActor;
     authorizationExpiresAt: Date;
   }): Promise<EnvironmentConnection>;
 };
@@ -496,7 +497,7 @@ export function createPacaAgentExecutor(
             projectId,
             environmentId,
             operationMode,
-            actor: { agentId: context.agentSession.agentId, hostId: host.id },
+            actor: { type: "agent", agentId: context.agentSession.agentId, hostId: host.id },
             authorizationExpiresAt: new Date(agentAuthorizationExpiresAt(context.grant)),
           });
         } catch (error) {

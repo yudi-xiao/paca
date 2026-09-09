@@ -73,8 +73,10 @@ import { type DocumentRuntime, documentRuntime } from "./document/runtime";
 import { DocumentError, documentErrorCodes, type PacaDocument } from "./document/service";
 import { type EnvironmentRuntime, environmentRuntime } from "./environment/runtime";
 import {
+  EnvironmentConnectionError,
   type EnvironmentResource,
   EnvironmentResourceError,
+  environmentConnectionErrorCodes,
   environmentResourceErrorCodes,
 } from "./environment/service";
 import { type IterationRuntime, iterationRuntime } from "./iteration/runtime";
@@ -626,6 +628,21 @@ function environmentFailure(context: AppContext, error: unknown) {
       return legacyFailure(context, 409, error.code, error.message);
     case environmentResourceErrorCodes.revocationFailed:
       return legacyFailure(context, 503, error.code, error.message);
+  }
+}
+
+function environmentConnectionFailure(context: AppContext, error: unknown) {
+  if (!(error instanceof EnvironmentConnectionError)) throw error;
+  switch (error.code) {
+    case environmentConnectionErrorCodes.scopeMismatch:
+      return legacyFailure(context, 404, "ENVIRONMENT_NOT_FOUND", "Environment not found");
+    case environmentConnectionErrorCodes.authorizationExpired:
+      return legacyFailure(context, 403, "SESSION_EXPIRED", "Session has expired");
+    case environmentConnectionErrorCodes.gatewayResponseInvalid:
+    case environmentConnectionErrorCodes.gatewayUnavailable:
+    case environmentConnectionErrorCodes.providerFailed:
+    case environmentConnectionErrorCodes.providerUnsupported:
+      return legacyFailure(context, 503, error.code, "Environment connection unavailable");
   }
 }
 
@@ -2238,6 +2255,36 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
         );
       } catch (error) {
         return environmentFailure(context, error);
+      }
+    },
+  );
+  app.post(
+    "/api/v1/projects/:projectId/environments/:environmentId/terminal-ticket",
+    requireValidProjectId,
+    requireValidEnvironmentId,
+    requireProjectPermission(dependencies.authorizeProjectPermission, {
+      environments: ["connect"],
+    }),
+    async (context) => {
+      const session = await dependencies.currentUserSession(context.req.raw, context.env);
+      if (!session) {
+        return legacyFailure(context, 403, "SESSION_REQUIRED", "Session required");
+      }
+      try {
+        const connection = await dependencies.environments.connectUser(
+          context.env,
+          context.req.param("projectId"),
+          context.req.param("environmentId"),
+          session.user.id,
+          new Date(session.expiresAt),
+        );
+        return legacySuccess(context, {
+          ticket: connection.accessToken,
+          ws_url: connection.url,
+          expires_at: connection.expiresAt.toISOString(),
+        });
+      } catch (error) {
+        return environmentConnectionFailure(context, error);
       }
     },
   );

@@ -42,7 +42,7 @@ function input() {
     projectId: PROJECT_ID,
     environmentId: ENVIRONMENT_ID,
     operationMode: "execute" as const,
-    actor: { agentId: "agent-1", hostId: "host-1" },
+    actor: { type: "agent" as const, agentId: "agent-1", hostId: "host-1" },
     authorizationExpiresAt: new Date(NOW.getTime() + 45_000),
   };
 }
@@ -61,7 +61,7 @@ describe("EnvironmentConnectionService", () => {
       requestId: REQUEST_ID,
       scope,
       operationMode: "execute",
-      actor: { agentId: "agent-1", hostId: "host-1" },
+      actor: { type: "agent", agentId: "agent-1", hostId: "host-1" },
       authorizationExpiresAt: new Date(NOW.getTime() + 45_000),
     });
   });

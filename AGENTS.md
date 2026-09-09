@@ -227,6 +227,10 @@ Environment Gateway 必须把 provider 冷启动、容量不足、瞬时传输�
 
 Environment 在 Paca 领域中是 Project-scoped 的长期逻辑资源，不等于一个持续运行的容器实例。用户创建时只允许提交名称；环境 UUID、provider 类型和 opaque Gateway reference 由服务端生成，公开 API 不返回 Gateway reference、票据、Session ID 或 provider secret。Cloudflare Sandbox provider 按首次实际连接惰性启动，因此 UI/API 状态使用 `ready_on_demand`，不得伪造需要人工维护的 `running`/`stopped` 状态。环境归档采用软删除，并必须同步推进一个按不可变 Environment UUID 稳定命名、只保存撤销时间戳的全局 Gateway 票据栅栏；票据使用时同时检查该全局栅栏与 Agent/用户主体 registry 的 Project/Environment 栅栏。这样即使环境当前没有任何 Agent Grant，归档前签发给未来浏览器主体的票据也会失效；既有连接仍由对应主体 registry 精确关闭。撤销通知失败时归档请求必须可幂等重试，不能误报成功。
 
+浏览器 Environment 终端与 Agent Harness 必须使用显式分离的 principal。项目成员由 Hono 在同源请求上验证 Better Auth Session 和 `environments.connect`，再签发 `actorType=user` 的短期一次性 PTY 票据；Cloudflare Agent、本地 Codex、Claude Code、DeepSeek 等 Harness 只能使用 Better Auth Agent Auth JWT、精确 `environment.connect` Grant 和可信 Agent/Host 身份取得 `actorType=agent` 票据，禁止用用户 Session 冒充 Agent 或反向复用。Gateway 使用独立的 User/Agent registry DO namespace 保存各自主体的有界连接摘要与撤销栅栏；用户退出登录、失去 Project 环境权限、项目归档或环境归档时必须推进对应栅栏并关闭已有 Sandbox Session。项目级批量撤销的 Agent 与用户主体总数必须有统一上限，不能分别达到上限后拼成一个超大请求。
+
+浏览器无法设置自定义 Authorization header，WebSocket PTY 票据应放在 `paca-ticket.<token>` 子协议中；Gateway 验证后必须在 `101` 响应回显同一子协议，同时从转发给 provider 的请求中移除 Authorization、Cookie 和票据子协议。API 可以先用一张仅供服务端 `prepare` 的票据经 Service Binding 完成按需冷启动，再为浏览器签发全新的未消费票据；不能把预热票据暴露给客户端，也不能在冷启动重试中重放 PTY 输入。浏览器收到的 Sandbox PTY 二进制帧是原始输出，输入也是原始 UTF-8 bytes，resize 使用 provider 约定的 JSON 控制帧；不要复用 legacy Agent Runner 的私有帧前缀协议。
+
 Cloudflare Agents SDK 的默认 `/agents/*` 路由不得直接公开。浏览器、Cloudflare Agent 和外部 Harness 都先经过 Hono 的 Better Auth Session 或 Agent Auth JWT 校验，再由服务端按 Better Auth Agent ID 获取 AgentDO stub；AgentDO RPC 与 Workflow 在执行敏感工具前仍需重查 active Grant、constraints 和 delegated 用户权限交集。
 
 Agent Tracing 是运行可观测性，不是权限、业务审计或可靠事件日志。生产默认不记录 prompt、文档内容、JWT、Grant、secret 和工具原始 payload；只记录 run ID、Agent ID、Harness 类型、工具名、安全状态码、耗时和关联 span。Tracing 可能采样或丢失，业务审计必须继续写入 PostgreSQL。若后续使用 AI SDK，应采用 Cloudflare 官方 tracing 包装或自定义 span，并保持 payload 脱敏。

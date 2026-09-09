@@ -279,6 +279,19 @@ export async function handleAuthRequest(request: Request, env: AppBindings): Pro
           .where(eq(schema.pacaProjectMembers.userId, current.user.id))
       : [];
 
+    if (current && env.ENVIRONMENT_GATEWAY) {
+      try {
+        await new ServiceBindingEnvironmentConnectionGateway(
+          env.ENVIRONMENT_GATEWAY,
+        ).revokeUserConnections(current.user.id);
+      } catch {
+        return Response.json(
+          { code: "ENVIRONMENT_CONNECTION_REVOCATION_FAILED" },
+          { status: 503, headers: { "cache-control": "no-store" } },
+        );
+      }
+    }
+
     const response = await auth.handler(request);
     if (response.ok && current) {
       await Promise.all([

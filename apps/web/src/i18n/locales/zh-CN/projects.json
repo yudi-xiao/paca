@@ -342,9 +342,9 @@
 	"environments": {
 		"cloudflare": {
 			"subtitle": "由 Cloudflare Sandbox 按需启动的 Agent 执行环境",
-			"agentAccessTitle": "由 Agent Auth 授权连接",
-			"agentAccessDescription": "本地 Codex、Claude Code、DeepSeek 或 Cloudflare Agent 取得精确的 environment.connect Grant 后才能连接。环境会按需启动，无需手动维护运行或停止状态。",
-			"emptyDescription": "创建一个项目级执行环境。系统只在 Agent 实际使用时启动 Sandbox，并通过短期授权连接。",
+			"agentAccessTitle": "用户与 Agent 分离授权",
+			"agentAccessDescription": "项目成员通过 Better Auth Session 与 environments.connect 权限打开网页终端；本地 Codex、Claude Code、DeepSeek 或 Cloudflare Agent 则使用精确的 Agent Auth Grant。环境按需启动。",
+			"emptyDescription": "创建一个项目级执行环境。用户或 Agent 实际连接时才会启动 Sandbox，并使用各自的短期授权。",
 			"readyOnDemand": "按需就绪",
 			"createTitle": "创建 Cloudflare 环境",
 			"renameTitle": "重命名环境",
@@ -352,7 +352,7 @@
 			"rename": "重命名",
 			"archive": "归档",
 			"archiveTitle": "归档 {{name}}？",
-			"archiveDescription": "归档后 Agent 将无法再申请连接；现有连接和未使用票据也会被撤销。",
+			"archiveDescription": "归档后用户与 Agent 都无法再申请连接；现有连接和未使用票据也会被撤销。",
 			"saveFailed": "保存环境失败，请检查名称是否重复后重试。",
 			"archiveFailed": "归档环境失败，请重试。"
 		},

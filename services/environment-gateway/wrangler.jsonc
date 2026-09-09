@@ -34,6 +34,7 @@
       { "name": "SANDBOXES", "class_name": "Sandbox" },
       { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" },
       { "name": "AGENT_CONNECTIONS", "class_name": "AgentConnectionRegistryDO" },
+      { "name": "USER_CONNECTIONS", "class_name": "UserConnectionRegistryDO" },
       {
         "name": "ENVIRONMENT_TICKET_BARRIERS",
         "class_name": "EnvironmentTicketBarrierDO"
@@ -52,6 +53,10 @@
     {
       "tag": "v3-environment-ticket-barrier",
       "new_sqlite_classes": ["EnvironmentTicketBarrierDO"]
+    },
+    {
+      "tag": "v4-user-connection-registry",
+      "new_sqlite_classes": ["UserConnectionRegistryDO"]
     }
   ],
   "env": {
@@ -81,6 +86,7 @@
           { "name": "SANDBOXES", "class_name": "Sandbox" },
           { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" },
           { "name": "AGENT_CONNECTIONS", "class_name": "AgentConnectionRegistryDO" },
+          { "name": "USER_CONNECTIONS", "class_name": "UserConnectionRegistryDO" },
           {
             "name": "ENVIRONMENT_TICKET_BARRIERS",
             "class_name": "EnvironmentTicketBarrierDO"

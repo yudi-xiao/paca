@@ -342,9 +342,9 @@
 	"environments": {
 		"cloudflare": {
 			"subtitle": "Agent execution environments started on demand by Cloudflare Sandbox",
-			"agentAccessTitle": "Connections are authorized by Agent Auth",
-			"agentAccessDescription": "Local Codex, Claude Code, DeepSeek, or Cloudflare Agents connect only after receiving an exact environment.connect Grant. Environments start on demand, so there is no manual running or stopped state to maintain.",
-			"emptyDescription": "Create a project-scoped execution environment. Its Sandbox starts only when an Agent uses it and connections use short-lived authorization.",
+			"agentAccessTitle": "Users and Agents are authorized separately",
+			"agentAccessDescription": "Project members open the web terminal with a Better Auth Session and environments.connect permission. Local Codex, Claude Code, DeepSeek, and Cloudflare Agents use exact Agent Auth Grants. Environments start on demand.",
+			"emptyDescription": "Create a project-scoped execution environment. Its Sandbox starts only when a user or Agent connects, using a principal-specific short-lived authorization.",
 			"readyOnDemand": "Ready on demand",
 			"createTitle": "Create Cloudflare environment",
 			"renameTitle": "Rename environment",
@@ -352,7 +352,7 @@
 			"rename": "Rename",
 			"archive": "Archive",
 			"archiveTitle": "Archive {{name}}?",
-			"archiveDescription": "Agents can no longer request connections after archival. Existing connections and unused tickets are revoked as well.",
+			"archiveDescription": "Users and Agents can no longer request connections after archival. Existing connections and unused tickets are revoked as well.",
 			"saveFailed": "Could not save the environment. Check for a duplicate name and try again.",
 			"archiveFailed": "Could not archive the environment. Please try again."
 		},

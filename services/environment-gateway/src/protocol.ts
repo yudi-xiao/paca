@@ -39,6 +39,23 @@ export type EnvironmentBackend = z.infer<typeof backendSchema>;
 export const operationModeSchema = z.enum(["read", "execute"]);
 export type OperationMode = z.infer<typeof operationModeSchema>;
 
+export const connectionActorSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("agent"),
+      agentId: z.string().trim().min(1).max(255),
+      hostId: z.string().trim().min(1).max(255),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("user"),
+      userId: z.string().trim().min(1).max(255),
+    })
+    .strict(),
+]);
+export type ConnectionActor = z.infer<typeof connectionActorSchema>;
+
 export const issueRequestSchema = z
   .object({
     protocolVersion: z.literal(gatewayProtocol),
@@ -53,51 +70,67 @@ export const issueRequestSchema = z
       })
       .strict(),
     operationMode: operationModeSchema,
-    actor: z
-      .object({
-        type: z.literal("agent"),
-        agentId: z.string().trim().min(1).max(255),
-        hostId: z.string().trim().min(1).max(255),
-      })
-      .strict(),
+    actor: connectionActorSchema,
     authorizationExpiresAt: z.iso.datetime(),
   })
   .strict();
 export type IssueRequest = z.infer<typeof issueRequestSchema>;
 
-export const ticketClaimsSchema = z
-  .object({
-    version: z.literal(1),
-    jti: z.uuid(),
-    environmentId: z.uuid(),
-    organizationId: z.string().trim().min(1).max(255),
-    projectId: z.uuid(),
-    backend: backendSchema,
-    reference: z.string().trim().min(1).max(500),
-    operationMode: operationModeSchema,
-    agentId: z.string().trim().min(1).max(255),
-    hostId: z.string().trim().min(1).max(255),
-    issuedAt: z.number().int().nonnegative(),
-    issuedAtMs: z.number().int().positive(),
-    expiresAt: z.number().int().positive(),
-    authorizationExpiresAt: z.number().int().positive(),
-  })
-  .strict();
+const ticketClaimsBaseSchema = z.object({
+  version: z.literal(1),
+  jti: z.uuid(),
+  environmentId: z.uuid(),
+  organizationId: z.string().trim().min(1).max(255),
+  projectId: z.uuid(),
+  backend: backendSchema,
+  reference: z.string().trim().min(1).max(500),
+  operationMode: operationModeSchema,
+  issuedAt: z.number().int().nonnegative(),
+  issuedAtMs: z.number().int().positive(),
+  expiresAt: z.number().int().positive(),
+  authorizationExpiresAt: z.number().int().positive(),
+});
+
+export const ticketClaimsSchema = z.discriminatedUnion("actorType", [
+  ticketClaimsBaseSchema
+    .extend({
+      actorType: z.literal("agent"),
+      agentId: z.string().trim().min(1).max(255),
+      hostId: z.string().trim().min(1).max(255),
+    })
+    .strict(),
+  ticketClaimsBaseSchema
+    .extend({
+      actorType: z.literal("user"),
+      userId: z.string().trim().min(1).max(255),
+    })
+    .strict(),
+]);
 export type TicketClaims = z.infer<typeof ticketClaimsSchema>;
 
-export const activeEnvironmentConnectionSchema = z
-  .object({
-    connectionId: z.uuid(),
-    agentId: z.string().trim().min(1).max(255),
-    environmentId: z.uuid(),
-    projectId: z.uuid(),
-    backend: backendSchema,
-    reference: z.string().trim().min(1).max(500),
-    sessionId: z.string().regex(/^paca-[0-9a-f-]{36}$/u),
-    ticketIssuedAtMs: z.number().int().positive(),
-    authorizationExpiresAtMs: z.number().int().positive(),
-  })
-  .strict();
+const activeEnvironmentConnectionBaseSchema = z.object({
+  connectionId: z.uuid(),
+  environmentId: z.uuid(),
+  projectId: z.uuid(),
+  backend: backendSchema,
+  reference: z.string().trim().min(1).max(500),
+  sessionId: z.string().regex(/^paca-[0-9a-f-]{36}$/u),
+  ticketIssuedAtMs: z.number().int().positive(),
+  authorizationExpiresAtMs: z.number().int().positive(),
+});
+
+export const activeEnvironmentConnectionSchema = z.union([
+  activeEnvironmentConnectionBaseSchema
+    .extend({
+      principalType: z.enum(["agent", "user"]),
+      principalId: z.string().trim().min(1).max(255),
+    })
+    .strict(),
+  // Existing Agent registry rows remain readable during a rolling deploy.
+  activeEnvironmentConnectionBaseSchema
+    .extend({ agentId: z.string().trim().min(1).max(255) })
+    .strict(),
+]);
 export type ActiveEnvironmentConnection = z.infer<typeof activeEnvironmentConnectionSchema>;
 
 export const revokeAgentConnectionsRequestSchema = z
@@ -107,12 +140,22 @@ export const revokeAgentConnectionsRequestSchema = z
   })
   .strict();
 
+export const revokeUserConnectionsRequestSchema = z
+  .object({
+    protocolVersion: z.literal(gatewayProtocol),
+    userId: z.string().trim().min(1).max(255),
+  })
+  .strict();
+
 export const revokeProjectConnectionsRequestSchema = z
   .object({
     protocolVersion: z.literal(gatewayProtocol),
     projectId: z.uuid(),
-    agentIds: z.array(z.string().trim().min(1).max(255)).min(1).max(100),
+    agentIds: z.array(z.string().trim().min(1).max(255)).max(100).default([]),
+    userIds: z.array(z.string().trim().min(1).max(255)).max(100).default([]),
   })
+  .refine((value) => value.agentIds.length > 0 || value.userIds.length > 0)
+  .refine((value) => value.agentIds.length + value.userIds.length <= 100)
   .strict();
 
 export const revokeEnvironmentConnectionsRequestSchema = z
@@ -122,8 +165,10 @@ export const revokeEnvironmentConnectionsRequestSchema = z
     environmentId: z.uuid(),
     // An empty list is valid: archiving an Environment must still advance
     // its global ticket barrier before browser principals are introduced.
-    agentIds: z.array(z.string().trim().min(1).max(255)).max(100),
+    agentIds: z.array(z.string().trim().min(1).max(255)).max(100).default([]),
+    userIds: z.array(z.string().trim().min(1).max(255)).max(100).default([]),
   })
+  .refine((value) => value.agentIds.length + value.userIds.length <= 100)
   .strict();
 
 export const connectionResponseSchema = z
