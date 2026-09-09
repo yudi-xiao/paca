@@ -105,4 +105,40 @@ describe("project environment permission revocation", () => {
     expect(revokeEnvironmentConnections.mock.calls[0]?.[2]).toHaveLength(100);
     expect(revokeEnvironmentConnections.mock.calls[1]?.[2]).toHaveLength(1);
   });
+
+  it("advances the environment barrier even when no Agent has a historical Grant", async () => {
+    const revokeEnvironmentConnections = vi.fn(async () => ({ terminated: 0, pending: 0 }));
+    const revoker = new ProjectEnvironmentConnectionRevoker({
+      revokeProjectConnections: async () => ({ terminated: 0, pending: 0 }),
+      revokeEnvironmentConnections,
+    });
+
+    await expect(revoker.revokeEnvironment(PROJECT_ID, ENVIRONMENT_ID, [])).resolves.toEqual({
+      requested: 0,
+      terminated: 0,
+      pending: 0,
+      failed: 0,
+    });
+    expect(revokeEnvironmentConnections).toHaveBeenCalledOnce();
+    expect(revokeEnvironmentConnections).toHaveBeenCalledWith(PROJECT_ID, ENVIRONMENT_ID, []);
+  });
+
+  it("fails closed when the environment-only barrier notification fails", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const revoker = new ProjectEnvironmentConnectionRevoker({
+      revokeProjectConnections: async () => ({ terminated: 0, pending: 0 }),
+      revokeEnvironmentConnections: async () => {
+        throw new Error("gateway unavailable");
+      },
+    });
+
+    await expect(revoker.revokeEnvironment(PROJECT_ID, ENVIRONMENT_ID, [])).resolves.toEqual({
+      requested: 0,
+      terminated: 0,
+      pending: 0,
+      failed: 1,
+    });
+    expect(log).toHaveBeenCalledOnce();
+    log.mockRestore();
+  });
 });

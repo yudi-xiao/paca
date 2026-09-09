@@ -33,7 +33,11 @@
     "bindings": [
       { "name": "SANDBOXES", "class_name": "Sandbox" },
       { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" },
-      { "name": "AGENT_CONNECTIONS", "class_name": "AgentConnectionRegistryDO" }
+      { "name": "AGENT_CONNECTIONS", "class_name": "AgentConnectionRegistryDO" },
+      {
+        "name": "ENVIRONMENT_TICKET_BARRIERS",
+        "class_name": "EnvironmentTicketBarrierDO"
+      }
     ]
   },
   "migrations": [
@@ -44,6 +48,10 @@
     {
       "tag": "v2-agent-connection-registry",
       "new_sqlite_classes": ["AgentConnectionRegistryDO"]
+    },
+    {
+      "tag": "v3-environment-ticket-barrier",
+      "new_sqlite_classes": ["EnvironmentTicketBarrierDO"]
     }
   ],
   "env": {
@@ -72,7 +80,11 @@
         "bindings": [
           { "name": "SANDBOXES", "class_name": "Sandbox" },
           { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" },
-          { "name": "AGENT_CONNECTIONS", "class_name": "AgentConnectionRegistryDO" }
+          { "name": "AGENT_CONNECTIONS", "class_name": "AgentConnectionRegistryDO" },
+          {
+            "name": "ENVIRONMENT_TICKET_BARRIERS",
+            "class_name": "EnvironmentTicketBarrierDO"
+          }
         ]
       }
     }

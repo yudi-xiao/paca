@@ -17,6 +17,7 @@ function bindings(): GatewayBindings {
     CONNECTION_TICKET_SECRET: SECRET,
     CONNECTION_TICKETS: Object.create(null) as Env["CONNECTION_TICKETS"],
     ENVIRONMENT: "internal",
+    ENVIRONMENT_TICKET_BARRIERS: Object.create(null) as Env["ENVIRONMENT_TICKET_BARRIERS"],
     PUBLIC_ORIGIN: "https://paca-env.howlearnwood.com",
     SANDBOXES: Object.create(null) as Env["SANDBOXES"],
   };
@@ -581,6 +582,37 @@ describe("Paca Environment Gateway", () => {
       PROJECT_ID,
       ENVIRONMENT_ID,
       ["agent-1", "agent-2"],
+    );
+  });
+
+  it("accepts an environment barrier revocation without Agent principals", async () => {
+    const revokeEnvironmentConnections = vi.fn<GatewayDependencies["revokeEnvironmentConnections"]>(
+      async () => ({ terminated: 0, pending: 0 }),
+    );
+    const test = harness({ revokeEnvironmentConnections });
+    const response = await test.app.fetch(
+      new Request("https://environment-gateway.internal/v1/revocations/environment", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-paca-environment-gateway-protocol": "paca.environment.gateway.v1",
+        },
+        body: JSON.stringify({
+          protocolVersion: "paca.environment.gateway.v1",
+          projectId: PROJECT_ID,
+          environmentId: ENVIRONMENT_ID,
+          agentIds: [],
+        }),
+      }),
+      test.env,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ terminated: 0, pending: 0 });
+    expect(revokeEnvironmentConnections).toHaveBeenCalledWith(
+      test.env,
+      PROJECT_ID,
+      ENVIRONMENT_ID,
+      [],
     );
   });
 

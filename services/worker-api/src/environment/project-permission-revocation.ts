@@ -202,8 +202,18 @@ export class ProjectEnvironmentConnectionRevoker {
     let terminated = 0;
     let pending = 0;
     let failed = 0;
-    for (let offset = 0; offset < uniqueAgentIds.length; offset += MAX_AGENTS_PER_GATEWAY_REQUEST) {
-      const batch = uniqueAgentIds.slice(offset, offset + MAX_AGENTS_PER_GATEWAY_REQUEST);
+    const batches =
+      uniqueAgentIds.length === 0
+        ? [[]]
+        : Array.from(
+            { length: Math.ceil(uniqueAgentIds.length / MAX_AGENTS_PER_GATEWAY_REQUEST) },
+            (_, index) =>
+              uniqueAgentIds.slice(
+                index * MAX_AGENTS_PER_GATEWAY_REQUEST,
+                (index + 1) * MAX_AGENTS_PER_GATEWAY_REQUEST,
+              ),
+          );
+    for (const batch of batches) {
       try {
         const result = await this.gateway.revokeEnvironmentConnections(
           projectId,
@@ -213,7 +223,10 @@ export class ProjectEnvironmentConnectionRevoker {
         terminated += result.terminated;
         pending += result.pending;
       } catch {
-        failed += batch.length;
+        // The empty batch is a real Environment-wide barrier notification.
+        // Count its failure so archive returns a retryable error instead of
+        // claiming that revocation succeeded.
+        failed += Math.max(1, batch.length);
         console.error(
           JSON.stringify({
             level: "error",

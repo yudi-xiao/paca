@@ -120,7 +120,9 @@ export const revokeEnvironmentConnectionsRequestSchema = z
     protocolVersion: z.literal(gatewayProtocol),
     projectId: z.uuid(),
     environmentId: z.uuid(),
-    agentIds: z.array(z.string().trim().min(1).max(255)).min(1).max(100),
+    // An empty list is valid: archiving an Environment must still advance
+    // its global ticket barrier before browser principals are introduced.
+    agentIds: z.array(z.string().trim().min(1).max(255)).max(100),
   })
   .strict();
 

@@ -3,6 +3,7 @@ import { CloudflareSandboxProvider } from "./provider";
 
 export { Sandbox } from "@cloudflare/sandbox";
 export { AgentConnectionRegistryDO } from "./connection-registry-do";
+export { EnvironmentTicketBarrierDO } from "./environment-ticket-barrier-do";
 export { ConnectionTicketDO } from "./ticket-do";
 
 const dependencies: GatewayDependencies = {
@@ -17,13 +18,14 @@ const dependencies: GatewayDependencies = {
     const id = env.AGENT_CONNECTIONS.idFromName(connection.agentId);
     return env.AGENT_CONNECTIONS.get(id).register(connection);
   },
-  isTicketAuthorized: (env, agentId, projectId, environmentId, ticketIssuedAtMs) => {
+  isTicketAuthorized: async (env, agentId, projectId, environmentId, ticketIssuedAtMs) => {
     const id = env.AGENT_CONNECTIONS.idFromName(agentId);
-    return env.AGENT_CONNECTIONS.get(id).isTicketAuthorized(
-      projectId,
-      environmentId,
-      ticketIssuedAtMs,
-    );
+    const barrierId = env.ENVIRONMENT_TICKET_BARRIERS.idFromName(environmentId);
+    const [principalAuthorized, environmentAuthorized] = await Promise.all([
+      env.AGENT_CONNECTIONS.get(id).isTicketAuthorized(projectId, environmentId, ticketIssuedAtMs),
+      env.ENVIRONMENT_TICKET_BARRIERS.get(barrierId).isTicketAuthorized(ticketIssuedAtMs),
+    ]);
+    return principalAuthorized && environmentAuthorized;
   },
   unregisterConnection: (env, agentId, connectionId) => {
     const id = env.AGENT_CONNECTIONS.idFromName(agentId);
@@ -49,6 +51,8 @@ const dependencies: GatewayDependencies = {
     );
   },
   revokeEnvironmentConnections: async (env, projectId, environmentId, agentIds) => {
+    const barrierId = env.ENVIRONMENT_TICKET_BARRIERS.idFromName(environmentId);
+    await env.ENVIRONMENT_TICKET_BARRIERS.get(barrierId).revoke();
     const results = await Promise.all(
       agentIds.map((agentId) => {
         const id = env.AGENT_CONNECTIONS.idFromName(agentId);
