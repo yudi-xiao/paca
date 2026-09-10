@@ -142,9 +142,9 @@ See [repository-plugin-adapter.md](repository-plugin-adapter.md) for the full to
 
 ### MCP Servers
 
-`internal/executor/executor.go`'s `buildMCPServers` sends the agent's own configured `agent_mcp_servers` rows first, then appends the built-in Paca MCP server last so it cannot be shadowed by a same-named user entry. For the Agent named by `PACA_AGENT_CONFIG`, every ephemeral Project-scoped sandbox receives only `PACA_CAPABILITY_BROKER_URL`, a random 256-bit opaque bearer, and a public capability/Grant summary. The Runner retains the Ed25519 private key and mints a fresh Agent JWT only after the broker has checked the exact Project route, requested Capability, method, request size, and body scope. The Broker indexes sessions by a SHA-256 digest; the bearer is never persisted or logged, expires after 45 minutes of inactivity, and is revoked before sandbox teardown. It cannot forward arbitrary URLs or caller headers, and the public config contains no JWT, provider endpoint, Host key, or Agent key.
+`internal/executor/executor.go`'s `buildMCPServers` sends the agent's own configured `agent_mcp_servers` rows first, then appends the built-in Paca MCP server last so it cannot be shadowed by a same-named user entry. For the Agent named by `PACA_AGENT_CONFIG`, every Project-scoped conversation receives only `PACA_CAPABILITY_BROKER_URL`, a random 256-bit opaque bearer, and a public capability/Grant summary. The Runner retains the Ed25519 private key and mints a fresh Agent JWT only after the broker has checked the exact Project route, requested Capability, method, request size, and body scope. The Broker indexes sessions by a SHA-256 digest; the bearer is never persisted or logged, expires after 45 minutes of inactivity, and is revoked before ephemeral sandbox teardown or immediately after a static-Environment turn. It cannot forward arbitrary URLs or caller headers, and the public config contains no JWT, provider endpoint, Host key, or Agent key.
 
-The first broker contract deliberately excludes `task.execute` (owned by the Runner's lease coordinator) and `environment.connect` (returns another bearer and belongs behind the dedicated Environment Gateway contract). A broker-managed Agent attached to a legacy static Environment therefore fails closed until that container path can receive a fresh per-conversation broker session. Agents outside the configured Agent Auth identity can still use `PACA_API_KEY` during the explicit staged rollout; a managed Agent never falls back to that key. The wire shape remains ACP's real schema (a `type`-discriminated stdio/http/sse enum, `env` as an array of `{name, value}` pairs). `oauth`-transport servers have no ACP equivalent yet and are skipped.
+The first broker contract deliberately excludes `task.execute` (owned by the Runner's lease coordinator) and `environment.connect` (returns another bearer and belongs behind the dedicated Environment Gateway contract). A static Environment cannot refresh its container OS environment per turn, so the Runner writes the Paca MCP values to Goose's secret store under a deterministic conversation namespace, activates or resumes the session with only those env-key names, then removes every stored value. Different conversations therefore do not share a secret slot, while a resumed Goose session can keep its persisted extension definition. The MCP process clears any inherited legacy auth mode before mapping the namespaced values to canonical `PACA_*` names. Failure to issue, install, activate, or remove this secret set fails the turn; it never falls back to a legacy key. Agents outside the configured Agent Auth identity can still use `PACA_API_KEY` during the explicit staged rollout. The wire shape remains ACP's real schema (a `type`-discriminated stdio/http/sse enum, `env` as an array of `{name, value}` pairs). `oauth`-transport servers have no ACP equivalent yet and are skipped.
 
 ---
 
@@ -187,9 +187,10 @@ This is an incremental migration boundary. The Valkey trigger transport remains,
 for the configured Agent Auth identity now uses a Project-scoped Capability Broker instead of
 `PACA_API_KEY`; other Agent IDs may retain the legacy path behind the rollout gate. The heartbeat
 does not grant access by itself; the Worker intersects reported labels with administrator-approved
-Host labels and rechecks active Grants and constraints. Repository/plugin tools and legacy static
-Environment attachment still need broker-aware contracts before the global API-key compatibility
-path can be removed.
+Host labels and rechecks active Grants and constraints. Static Environment attachment now receives
+a fresh per-turn bearer through a conversation-isolated Goose secret namespace; repository/plugin
+tools still need an Agent Auth execution contract before the global API-key compatibility path can
+be removed.
 
 For a `task_assigned` trigger whose legacy Agent UUID equals the configured Agent Auth identity,
 the runner now discovers the task through `GET /api/v1/agent/tasks/claimable` and refuses to start

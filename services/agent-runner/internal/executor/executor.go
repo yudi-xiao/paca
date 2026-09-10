@@ -5,6 +5,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -221,6 +222,7 @@ func (e *Executor) Run(ctx context.Context, cfg agent.Config, trigger agent.Trig
 	var client *acp.Client
 	var sessionID string
 	var message string
+	var turnBrokerSession *capabilitybroker.Session
 
 	switch {
 	case resume != nil:
@@ -228,7 +230,16 @@ func (e *Executor) Run(ctx context.Context, cfg agent.Config, trigger agent.Trig
 		message = trigger.Message
 	case trigger.EnvironmentID != nil:
 		if e.opts.CapabilityBroker != nil && e.opts.CapabilityBroker.Manages(trigger.AgentID.String()) {
-			return Result{}, fmt.Errorf("executor: Agent Auth capability broker does not support legacy static environments")
+			issued, err := e.opts.CapabilityBroker.Issue(
+				trigger.AgentID.String(),
+				trigger.ConversationID.String(),
+				trigger.ProjectID.String(),
+			)
+			if err != nil {
+				return Result{}, fmt.Errorf("executor: issue static Environment Agent Capability Broker session: %w", err)
+			}
+			turnBrokerSession = &issued
+			defer e.opts.CapabilityBroker.Revoke(issued.Token)
 		}
 		// A static environment's conversations never populate ChatSandboxes
 		// in the first place (see handler.Handler.keepSandboxAlive's own
@@ -255,7 +266,7 @@ func (e *Executor) Run(ctx context.Context, cfg agent.Config, trigger agent.Trig
 		attachCtx, cancelAttach := timeoutFor()
 		defer cancelAttach()
 		var err error
-		client, sessionID, err = e.coldStartEnvironment(ctx, attachCtx, cfg, trigger)
+		client, sessionID, err = e.coldStartEnvironment(ctx, attachCtx, cfg, trigger, turnBrokerSession)
 		if err != nil {
 			return Result{}, err
 		}
@@ -559,7 +570,7 @@ func (e *Executor) environmentPortMappings(ctx context.Context, env *postgres.En
 // bootstrapInstruction nudge to call load_skill(paca) first for an
 // environment-backed conversation), not an oversight — see
 // docs/ai-agent/environment-management.md's Phase 1 scope.
-func (e *Executor) coldStartEnvironment(ctx, turnCtx context.Context, cfg agent.Config, trigger agent.Trigger) (*acp.Client, string, error) {
+func (e *Executor) coldStartEnvironment(ctx, turnCtx context.Context, cfg agent.Config, trigger agent.Trigger, brokerSession *capabilitybroker.Session) (*acp.Client, string, error) {
 	if e.envRepo == nil {
 		return nil, "", fmt.Errorf("executor: no environment repository configured")
 	}
@@ -629,12 +640,19 @@ func (e *Executor) coldStartEnvironment(ctx, turnCtx context.Context, cfg agent.
 	containerEnv["GIT_COMMITTER_NAME"] = gitName
 	containerEnv["GIT_COMMITTER_EMAIL"] = gitEmail
 
-	mcpServers := e.buildMCPServers(trigger, cfg, nil)
+	mcpServers := e.buildMCPServers(trigger, cfg, brokerSession)
 	for _, s := range mcpServers {
 		if s.Type != acp.McpServerStdio || s.Env == nil {
 			continue
 		}
 		for _, ev := range *s.Env {
+			// Brokered Paca values are deliberately installed into goose's
+			// per-conversation secret store below. Putting them in the static
+			// container environment would both make the bearer long-lived and
+			// force a container recreate on every turn.
+			if brokerSession != nil && strings.HasPrefix(ev.Name, brokerEnvironmentPrefix(trigger.ConversationID)+"_") {
+				continue
+			}
 			containerEnv[ev.Name] = ev.Value
 		}
 	}
@@ -723,7 +741,30 @@ func (e *Executor) coldStartEnvironment(ctx, turnCtx context.Context, cfg agent.
 		return nil, "", fmt.Errorf("executor: acp initialize (environment %s): %w", environmentID, err)
 	}
 
+	// A static Environment cannot receive fresh OS env without a container
+	// recreate. For a managed Agent, install the conversation-prefixed Paca
+	// values into goose's own secret store just long enough for session/new
+	// or session/load to spawn the MCP subprocess. The subprocess receives a
+	// copy; the persisted store is scrubbed immediately afterward.
+	var installedSecretKeys []string
+	if brokerSession != nil {
+		pacaServer := findMCPServer(mcpServers, "paca")
+		if pacaServer == nil || pacaServer.Env == nil {
+			client.Close()
+			return nil, "", fmt.Errorf("executor: brokered static Environment has no Paca MCP environment")
+		}
+		for _, env := range *pacaServer.Env {
+			if err := client.UpsertSecret(turnCtx, env.Name, env.Value); err != nil {
+				e.removeACPSecrets(client, installedSecretKeys)
+				client.Close()
+				return nil, "", fmt.Errorf("executor: install static Environment broker secret: %w", err)
+			}
+			installedSecretKeys = append(installedSecretKeys, env.Name)
+		}
+	}
+
 	sessionID, err := e.attachEnvironmentSession(turnCtx, client, trigger.ConversationID, *trigger.Workdir, mcpServers)
+	cleanupErr := e.removeACPSecrets(client, installedSecretKeys)
 	if err != nil {
 		// Same reasoning as coldStart's matching branch: Initialize above
 		// already started client's connection-scoped SSE reader goroutine,
@@ -731,8 +772,39 @@ func (e *Executor) coldStartEnvironment(ctx, turnCtx context.Context, cfg agent.
 		client.Close()
 		return nil, "", fmt.Errorf("executor: acp session attach (environment %s): %w", environmentID, err)
 	}
+	if cleanupErr != nil {
+		client.Close()
+		return nil, "", fmt.Errorf("executor: remove static Environment broker secrets: %w", cleanupErr)
+	}
 
 	return client, sessionID, nil
+}
+
+// removeACPSecrets makes cleanup independent of a turn/attach deadline that
+// may already have expired. Every key is attempted even after one failure so
+// a partial cleanup cannot strand all remaining short-lived values.
+func (e *Executor) removeACPSecrets(client *acp.Client, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var errs []error
+	for _, key := range keys {
+		if err := client.RemoveSecret(ctx, key); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func findMCPServer(servers []acp.MCPServerConfig, name string) *acp.MCPServerConfig {
+	for i := range servers {
+		if servers[i].Name == name {
+			return &servers[i]
+		}
+	}
+	return nil
 }
 
 // attachEnvironmentSession gives an environment-backed conversation goose's
@@ -953,6 +1025,15 @@ func (e *Executor) buildMCPServers(trigger agent.Trigger, cfg agent.Config, brok
 		command = "/usr/bin/node"
 		args = []string{sandbox.MCPDevMountPath + "/build/index.js"}
 	}
+	if brokerSession != nil {
+		prefix := brokerEnvironmentPrefix(trigger.ConversationID)
+		prefixed := make(map[string]string, len(env))
+		for name, value := range env {
+			prefixed[prefix+"_"+strings.TrimPrefix(name, "PACA_")] = value
+		}
+		env = prefixed
+		args = append(args, "--paca-env-prefix", prefix)
+	}
 	pacaEnv := envMapToList(env)
 	servers = append(servers, acp.MCPServerConfig{
 		Type:    acp.McpServerStdio,
@@ -962,6 +1043,14 @@ func (e *Executor) buildMCPServers(trigger agent.Trigger, cfg agent.Config, brok
 		Env:     &pacaEnv,
 	})
 	return servers
+}
+
+// brokerEnvironmentPrefix is stable for one conversation so a resumed Goose
+// session keeps referencing the same envKeys, but distinct across concurrent
+// conversations sharing a static Environment. The bearer itself is still new
+// for every turn and is never used to derive a persisted key name.
+func brokerEnvironmentPrefix(conversationID uuid.UUID) string {
+	return "PACA_SESSION_" + strings.ToUpper(strings.ReplaceAll(conversationID.String(), "-", ""))
 }
 
 func envMapToList(env map[string]string) []acp.EnvVariable {

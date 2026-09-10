@@ -10,7 +10,7 @@ import {
 	loadCapabilityBrokerConfig,
 } from "./agent-auth/client.js";
 import { createAgentCapabilityServer } from "./agent-auth/server.js";
-import { createServer } from "./server.js";
+import { applyPacaEnvironmentPrefix } from "./runtime-env.js";
 import type { PacaConfig } from "./types/index.js";
 
 const require = createRequire(import.meta.url);
@@ -26,6 +26,8 @@ async function main() {
 		console.log(version);
 		process.exit(0);
 	}
+
+	applyPacaEnvironmentPrefix(process.argv, process.env);
 
 	// Get configuration from environment variables
 	const apiKey = process.env.PACA_API_KEY;
@@ -132,6 +134,9 @@ async function main() {
 	};
 
 	// Create and configure MCP server (loads plugin modules asynchronously)
+	// Dynamic on purpose: runtime-env must restore a conversation-prefixed
+	// PACA_WORKDIR before repo-tools evaluates its module-level default.
+	const { createServer } = await import("./server.js");
 	const server = await createServer(config);
 
 	// Connect to stdio transport

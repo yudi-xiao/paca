@@ -87,19 +87,45 @@ func TestBuildMCPServers_UsesCapabilityBrokerWithoutLegacyCredential(t *testing.
 	}
 
 	paca := findPacaServer(t, e.buildMCPServers(trigger, cfg, session))
+	prefix := brokerEnvironmentPrefix(trigger.ConversationID)
 	for name, want := range map[string]string{
-		"PACA_CAPABILITY_BROKER_URL":    "http://agent-runner:8080/agent-capabilities",
-		"PACA_CAPABILITY_BROKER_TOKEN":  "opaque-broker-token",
-		"PACA_CAPABILITY_BROKER_CONFIG": "public-config",
+		prefix + "_CAPABILITY_BROKER_URL":    "http://agent-runner:8080/agent-capabilities",
+		prefix + "_CAPABILITY_BROKER_TOKEN":  "opaque-broker-token",
+		prefix + "_CAPABILITY_BROKER_CONFIG": "public-config",
+		prefix + "_PROJECT_ID":               trigger.ProjectID.String(),
 	} {
 		if got, ok := envValue(paca.Env, name); !ok || got != want {
 			t.Fatalf("%s = %q, %v; want %q", name, got, ok, want)
 		}
 	}
-	for _, forbidden := range []string{"PACA_API_KEY", "PACA_AGENT_CONFIG"} {
+	for _, forbidden := range []string{
+		"PACA_API_KEY",
+		"PACA_AGENT_CONFIG",
+		"PACA_CAPABILITY_BROKER_URL",
+		"PACA_CAPABILITY_BROKER_TOKEN",
+		"PACA_CAPABILITY_BROKER_CONFIG",
+	} {
 		if value, ok := envValue(paca.Env, forbidden); ok {
 			t.Fatalf("%s leaked into brokered sandbox as %q", forbidden, value)
 		}
+	}
+	if paca.Args == nil || len(*paca.Args) < 2 {
+		t.Fatalf("paca args = %v, want a conversation environment prefix", paca.Args)
+	}
+	args := *paca.Args
+	if args[len(args)-2] != "--paca-env-prefix" || args[len(args)-1] != prefix {
+		t.Fatalf("paca args = %v, want suffix [--paca-env-prefix %s]", args, prefix)
+	}
+}
+
+func TestBrokerEnvironmentPrefixIsStablePerConversationAndIsolated(t *testing.T) {
+	conversationA := uuid.MustParse("01234567-89ab-cdef-0123-456789abcdef")
+	conversationB := uuid.MustParse("11234567-89ab-cdef-0123-456789abcdef")
+	if got, want := brokerEnvironmentPrefix(conversationA), "PACA_SESSION_0123456789ABCDEF0123456789ABCDEF"; got != want {
+		t.Fatalf("prefix = %q, want %q", got, want)
+	}
+	if brokerEnvironmentPrefix(conversationA) == brokerEnvironmentPrefix(conversationB) {
+		t.Fatal("different conversations shared one broker environment prefix")
 	}
 }
 

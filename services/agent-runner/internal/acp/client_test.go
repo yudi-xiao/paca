@@ -183,6 +183,61 @@ func TestInitialize(t *testing.T) {
 	}
 }
 
+func TestEphemeralSecretLifecycle(t *testing.T) {
+	const (
+		key   = "PACA_SESSION_0123456789ABCDEF_CAPABILITY_BROKER_TOKEN"
+		value = "short-lived-secret"
+	)
+	srv := newACPMockServer(t)
+	srv.onInitialize = initializeOK
+	var methods []string
+	srv.onPost = func(s *acpMockServer, req rpcRequest, hdrSessionID string) {
+		methods = append(methods, req.Method)
+		raw, _ := json.Marshal(req.Params)
+		switch req.Method {
+		case "_goose/unstable/config/upsert":
+			var params struct {
+				Key      string `json:"key"`
+				Value    string `json:"value"`
+				IsSecret bool   `json:"isSecret"`
+			}
+			_ = json.Unmarshal(raw, &params)
+			if params.Key != key || params.Value != value || !params.IsSecret {
+				t.Errorf("upsert params = %+v", params)
+			}
+		case "_goose/unstable/config/remove":
+			var params struct {
+				Key      string `json:"key"`
+				IsSecret bool   `json:"isSecret"`
+			}
+			_ = json.Unmarshal(raw, &params)
+			if params.Key != key || !params.IsSecret {
+				t.Errorf("remove params = %+v", params)
+			}
+		default:
+			t.Fatalf("unexpected method %q", req.Method)
+		}
+		s.enqueueConn(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{}}`, req.ID))
+	}
+	ts := httptest.NewServer(srv.handler())
+	defer ts.Close()
+
+	c := NewClient(ts.URL, testSecret, nil)
+	defer c.Close()
+	if err := c.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if err := c.UpsertSecret(context.Background(), key, value); err != nil {
+		t.Fatalf("UpsertSecret: %v", err)
+	}
+	if err := c.RemoveSecret(context.Background(), key); err != nil {
+		t.Fatalf("RemoveSecret: %v", err)
+	}
+	if got, want := strings.Join(methods, ","), "_goose/unstable/config/upsert,_goose/unstable/config/remove"; got != want {
+		t.Fatalf("methods = %q, want %q", got, want)
+	}
+}
+
 func TestNewSession_MissingProvider(t *testing.T) {
 	srv := newACPMockServer(t)
 	srv.onInitialize = initializeOK

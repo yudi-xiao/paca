@@ -206,6 +206,69 @@ func (c *Client) Initialize(ctx context.Context) error {
 	return nil
 }
 
+// UpsertSecret writes one short-lived value into goose's secret store before
+// a session is activated. This is used by static Environments, whose OS
+// environment is fixed for the lifetime of the container: session/new and
+// session/load can reference the secret by name through envKeys without
+// putting the value in either request body.
+//
+// Callers must use a conversation-unique key and pair every successful call
+// with RemoveSecret after session activation. The value is deliberately not
+// included in any error returned by this method.
+func (c *Client) UpsertSecret(ctx context.Context, key, value string) error {
+	if c.connectionID == "" {
+		return errors.New("acp: UpsertSecret called before Initialize")
+	}
+	if key == "" {
+		return errors.New("acp: UpsertSecret called with an empty key")
+	}
+	id := c.nextID.Add(1)
+	params := struct {
+		Key      string `json:"key"`
+		Value    string `json:"value"`
+		IsSecret bool   `json:"isSecret"`
+	}{Key: key, Value: value, IsSecret: true}
+	if err := c.post(ctx, id, "_goose/unstable/config/upsert", params, ""); err != nil {
+		return fmt.Errorf("acp: upsert secret %q: %w", key, err)
+	}
+	frame, err := c.awaitResponse(ctx, id, c.connStream)
+	if err != nil {
+		return fmt.Errorf("acp: upsert secret %q: %w", key, err)
+	}
+	if frame.Error != nil {
+		return fmt.Errorf("acp: upsert secret %q: %w", key, frame.Error)
+	}
+	return nil
+}
+
+// RemoveSecret removes a value previously installed by UpsertSecret. It is
+// safe to call after session activation: goose has already copied the value
+// into the spawned MCP subprocess's environment by then.
+func (c *Client) RemoveSecret(ctx context.Context, key string) error {
+	if c.connectionID == "" {
+		return errors.New("acp: RemoveSecret called before Initialize")
+	}
+	if key == "" {
+		return errors.New("acp: RemoveSecret called with an empty key")
+	}
+	id := c.nextID.Add(1)
+	params := struct {
+		Key      string `json:"key"`
+		IsSecret bool   `json:"isSecret"`
+	}{Key: key, IsSecret: true}
+	if err := c.post(ctx, id, "_goose/unstable/config/remove", params, ""); err != nil {
+		return fmt.Errorf("acp: remove secret %q: %w", key, err)
+	}
+	frame, err := c.awaitResponse(ctx, id, c.connStream)
+	if err != nil {
+		return fmt.Errorf("acp: remove secret %q: %w", key, err)
+	}
+	if frame.Error != nil {
+		return fmt.Errorf("acp: remove secret %q: %w", key, frame.Error)
+	}
+	return nil
+}
+
 // NewSession opens a new ACP conversation session inside the container and
 // returns its sessionId, used in every subsequent Prompt call. cwd must be
 // a directory the container's own user can access — /root is a common trap

@@ -145,14 +145,12 @@ type GooseExtension struct {
 	// UntaggedMcpServer's doc comment) — goose rejects any *inline* env
 	// value reaching it through this path ("extension env values must be
 	// passed via envKeys referencing stored secrets, not inline env").
-	// EnvKeys instead names environment variables the mcp server subprocess
-	// should inherit from its own container's OS environment — confirmed
-	// empirically that this resolves real values there, not only from
-	// goose's own (here, nonexistent) stored-secrets config. The caller
-	// (executor.go) is responsible for actually setting those names in the
-	// container's env (see coldStart) before this request goes out — an
-	// EnvKeys name with no matching container env var resolves to empty,
-	// not an error.
+	// EnvKeys instead names values in goose's secret store or, for an
+	// ephemeral container, its OS environment. Both paths are verified
+	// against the pinned goose 1.46.0 behavior. The caller (executor.go)
+	// either sets those names before container start or installs
+	// conversation-scoped values with acp.Client.UpsertSecret before session
+	// activation. An unresolved EnvKeys name is an extension error.
 	//
 	// A StreamableHttp server's Headers, by contrast, travel inline with
 	// real values with no equivalent restriction — confirmed against the
