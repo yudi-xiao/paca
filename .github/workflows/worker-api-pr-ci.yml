@@ -25,6 +25,21 @@ jobs:
       run:
         working-directory: services/worker-api
 
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: paca_worker_test
+          POSTGRES_PASSWORD: paca_test
+          POSTGRES_USER: paca_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U paca_test -d paca_worker_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -69,6 +84,11 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - name: Apply migrations and run PostgreSQL repository contracts
+        env:
+          PACA_TEST_DATABASE_URL: postgresql://paca_test:paca_test@127.0.0.1:5432/paca_worker_test
+        run: bun run test:postgres
 
       - name: Build deployment bundle
         run: bun run deploy:dry-run

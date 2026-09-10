@@ -133,8 +133,8 @@
 - [x] `drizzle.config.ts` 仅从本地/CI `DATABASE_URL` 读取直接连接串，不使用 Hyperdrive runtime URL。
 - [x] migration 使用临时 admin role；internal runtime 已切换到持久、无继承管理角色且仅显式 47 表 CRUD 的 `paca-worker-internal` role 与独立 Hyperdrive，migration ledger 不授予 runtime。
 - [x] 生成第一版 Better Auth Core/Organization + Paca Project Permission SQL migration，并人工审查 UUID、索引、复合外键、默认值和 migration ledger。
-- [ ] 建立 migration dry-run/测试数据库流程，禁止生产启动时自动 `push` 或自动迁移。
-- [ ] 建立 PostgreSQL repository contract test 基础设施。
+- [x] 建立 migration dry-run/测试数据库流程：Worker CI 使用隔离的本地 `paca_worker_test` PostgreSQL，从空 `public` schema 顺序应用全部受版本控制 migration 并核对完整 ledger；脚本强制 localhost 与 `_test` 库名，不读取根 `.env`，生产启动仍不执行 `push` 或自动迁移。
+- [x] 建立 PostgreSQL repository contract test 基础设施：首个 `ProjectRepository` 共用契约覆盖聚合 CRUD、分页/统计、大小写唯一性与子记录失败时的事务回滚；PostgreSQL adapter 在上述全新迁移数据库中执行，后续 D1 adapter 可复用同一领域契约。
 - [ ] 验证 PlanetScale branch、备份/恢复和回滚策略。
 
 ### M2 验收
