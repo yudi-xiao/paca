@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "global_exact_grant",
+      "actor": "user",
+      "scope": "global",
+      "grantSets": [["users.read"]],
+      "required": ["users.read"],
+      "allowed": true
+    },
+    {
+      "name": "global_missing_grant",
+      "actor": "user",
+      "scope": "global",
+      "grantSets": [["users.read"]],
+      "required": ["users.write"],
+      "allowed": false
+    },
+    {
+      "name": "global_future_proof_wildcard",
+      "actor": "user",
+      "scope": "global",
+      "grantSets": [["*"]],
+      "required": ["settings.write", "projects.delete"],
+      "allowed": true
+    },
+    {
+      "name": "project_resource_wildcard",
+      "actor": "user",
+      "scope": "project",
+      "grantSets": [["tasks.*"]],
+      "required": ["tasks.read", "tasks.write"],
+      "allowed": true
+    },
+    {
+      "name": "project_wildcard_does_not_cross_resource",
+      "actor": "user",
+      "scope": "project",
+      "grantSets": [["tasks.*"]],
+      "required": ["docs.read"],
+      "allowed": false
+    },
+    {
+      "name": "project_multiple_roles_union",
+      "actor": "user",
+      "scope": "project",
+      "grantSets": [["tasks.read"], ["tasks.write", "docs.read"]],
+      "required": ["tasks.read", "tasks.write", "docs.read"],
+      "allowed": true
+    },
+    {
+      "name": "project_requires_every_permission",
+      "actor": "user",
+      "scope": "project",
+      "grantSets": [["tasks.read"], ["docs.read"]],
+      "required": ["tasks.read", "tasks.write"],
+      "allowed": false
+    },
+    {
+      "name": "project_no_membership_or_inherited_grant",
+      "actor": "user",
+      "scope": "project",
+      "grantSets": [],
+      "required": ["projects.read"],
+      "allowed": false
+    },
+    {
+      "name": "legacy_agent_explicit_project_role",
+      "actor": "legacy_agent",
+      "scope": "project",
+      "projectMember": true,
+      "grantSets": [["tasks.read", "tasks.write"]],
+      "required": ["tasks.write"],
+      "allowed": true
+    },
+    {
+      "name": "legacy_agent_without_project_membership",
+      "actor": "legacy_agent",
+      "scope": "project",
+      "projectMember": false,
+      "grantSets": [],
+      "required": ["tasks.read"],
+      "allowed": false
+    }
+  ]
+}

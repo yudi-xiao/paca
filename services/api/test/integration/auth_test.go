@@ -26,19 +26,35 @@ import (
 // -- fakes -------------------------------------------------------------------
 
 type fakeUserRepo struct {
-	byUsername map[string]*userdom.User
-	byID       map[uuid.UUID]*userdom.User
+	byUsername        map[string]*userdom.User
+	byID              map[uuid.UUID]*userdom.User
+	globalPermissions map[uuid.UUID][]authz.Permission
 }
 
 var (
 	fakeRoleIDUser  = uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	fakeRoleIDAdmin = uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	testAdminUserID = uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 )
+
+func defaultTestRolePermissions(roleName string) []authz.Permission {
+	for _, role := range authz.DefaultGlobalRoles() {
+		if role.Name == roleName {
+			return append([]authz.Permission(nil), role.Permissions...)
+		}
+	}
+	return nil
+}
 
 func newFakeUserRepo() *fakeUserRepo {
 	return &fakeUserRepo{
-		byUsername: make(map[string]*userdom.User),
-		byID:       make(map[uuid.UUID]*userdom.User),
+		byUsername: map[string]*userdom.User{},
+		byID:       map[uuid.UUID]*userdom.User{},
+		// This map models explicit global-role assignment rows. It is keyed by
+		// subject ID and is deliberately independent of the JWT role claim.
+		globalPermissions: map[uuid.UUID][]authz.Permission{
+			testAdminUserID: defaultTestRolePermissions(userdom.RoleAdmin),
+		},
 	}
 }
 
@@ -85,13 +101,23 @@ func (r *fakeUserRepo) FindByName(_ context.Context, name string) (*globalroledo
 func (r *fakeUserRepo) Create(_ context.Context, u *userdom.User) error {
 	r.byUsername[u.Username] = u
 	r.byID[u.ID] = u
+	r.globalPermissions[u.ID] = defaultTestRolePermissions(u.Role)
 	return nil
 }
 
 func (r *fakeUserRepo) Update(_ context.Context, u *userdom.User) error {
 	r.byUsername[u.Username] = u
 	r.byID[u.ID] = u
+	r.globalPermissions[u.ID] = defaultTestRolePermissions(u.Role)
 	return nil
+}
+
+func (r *fakeUserRepo) ListGlobalPermissions(_ context.Context, userID uuid.UUID) ([]authz.Permission, error) {
+	return append([]authz.Permission(nil), r.globalPermissions[userID]...), nil
+}
+
+func (r *fakeUserRepo) ListProjectPermissions(context.Context, uuid.UUID, uuid.UUID) ([]authz.Permission, error) {
+	return nil, nil
 }
 func (r *fakeUserRepo) List(_ context.Context, offset, limit int) ([]*userdom.User, int64, error) {
 	all := make([]*userdom.User, 0, len(r.byID))
@@ -119,6 +145,7 @@ func (r *fakeUserRepo) Delete(_ context.Context, id uuid.UUID) error {
 	}
 	delete(r.byUsername, u.Username)
 	delete(r.byID, id)
+	delete(r.globalPermissions, id)
 	return nil
 }
 

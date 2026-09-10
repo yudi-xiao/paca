@@ -22,14 +22,14 @@ func (s *stubPermissionStore) ListProjectPermissions(context.Context, uuid.UUID,
 	return s.projectPerms, nil
 }
 
-func TestAuthorizer_LegacyAdminFallback(t *testing.T) {
+func TestAuthorizer_RequiresExplicitRolePermissions(t *testing.T) {
 	a := authz.NewAuthorizer(nil)
-	ok, err := a.HasPermissions(context.Background(), uuid.New(), nil, "ADMIN", authz.PermissionUsersDelete)
+	ok, err := a.HasPermissions(context.Background(), uuid.New(), nil, authz.PermissionUsersDelete)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !ok {
-		t.Fatal("expected ADMIN legacy role to authorize users.delete")
+	if ok {
+		t.Fatal("expected a JWT role string without explicit role grants to be denied")
 	}
 }
 
@@ -40,7 +40,7 @@ func TestAuthorizer_GlobalAndProjectPermissions(t *testing.T) {
 		projectPerms: []authz.Permission{authz.PermissionTasksWrite},
 	})
 
-	ok, err := a.HasPermissions(context.Background(), uuid.New(), &projectID, "USER", authz.PermissionTasksWrite)
+	ok, err := a.HasPermissions(context.Background(), uuid.New(), &projectID, authz.PermissionTasksWrite)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestAuthorizer_GlobalAndProjectPermissions(t *testing.T) {
 
 func TestAuthorizer_WildcardMatch(t *testing.T) {
 	a := authz.NewAuthorizer(&stubPermissionStore{globalPerms: []authz.Permission{authz.PermissionTasksAll}})
-	ok, err := a.HasPermissions(context.Background(), uuid.New(), nil, "USER", authz.PermissionTasksWrite)
+	ok, err := a.HasPermissions(context.Background(), uuid.New(), nil, authz.PermissionTasksWrite)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

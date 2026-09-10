@@ -101,7 +101,7 @@ func TestAgentAuthorization(t *testing.T) {
 	})
 
 	t.Run("user permissions remain unchanged", func(t *testing.T) {
-		allowed, err := authorizer.HasPermissions(context.Background(), userID, &projectID, "user", authz.PermissionTasksRead)
+		allowed, err := authorizer.HasPermissions(context.Background(), userID, &projectID, authz.PermissionTasksRead)
 		require.NoError(t, err)
 		assert.False(t, allowed)
 	})

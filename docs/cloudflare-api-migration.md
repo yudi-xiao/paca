@@ -14,10 +14,10 @@
 
 | 领域 | 当前所有者/权威 | 状态 | 后续依赖 |
 | --- | --- | --- | --- |
-| Better Auth 用户 Session | Worker / PostgreSQL | Worker 原生 | 旧用户 ID/Account/Session 迁移策略与拒绝用例补齐 |
-| Organization、Project Permission、系统角色 | Worker / PostgreSQL | Worker 原生 | 旧 Authorizer shadow comparison、最终删除重复 RBAC |
-| Project、成员、角色 | Worker / PostgreSQL | Worker 原生 | 新旧 contract/data comparison |
-| Task、Activity、父子/关联、附件 | Worker / PostgreSQL + R2 | Worker 原生 | 新旧 contract/data comparison |
+| Better Auth 用户 Session | Worker / PostgreSQL | Worker 原生 | clean-slate 重建，不迁移旧 User/Account/Session |
+| Organization、Project Permission、系统角色 | Worker / PostgreSQL | Worker 原生 | 共享 shadow corpus 已通过；剩余路由迁移后删除旧 Authorizer 和重复 RBAC |
+| Project、成员、角色 | Worker / PostgreSQL | Worker 原生 | API contract 回归；不迁移旧业务数据 |
+| Task、Activity、父子/关联、附件 | Worker / PostgreSQL + R2 | Worker 原生 | API contract 回归；不迁移旧任务或附件数据 |
 | Sprint、View、Custom Field、任务位置 | Worker / PostgreSQL | Worker 原生 | 真实登录浏览器 E2E |
 | Document、Yjs、实时协作 | Worker / PostgreSQL + DO + Queue + R2 | Worker 原生 | BlockNote 浏览器恢复证据与并发压测 |
 | Agent Auth、Grant、Host、Task Harness | Worker / PostgreSQL + AgentDO | Worker 原生 | autonomous 总验收、旧 Runner 身份迁移 |
@@ -49,7 +49,7 @@ Better Auth Session / Agent Auth
 
 1. repository 与数据库权威来源明确，不能让新旧服务同时主写同一聚合。
 2. 用户使用 Better Auth Session + Paca Permission；Agent 使用 Agent Auth active Grant + constraints。
-3. 新旧 API contract、错误码、分页/排序和数据一致性测试通过。
+3. 新旧 API contract、错误码、分页/排序等仍需保留的产品行为通过回归；clean-slate 模式不要求旧数据迁移或双写一致性。
 4. Queue/Workflow 消费者具备业务幂等键；实时广播不能代替可靠处理。
 5. 前端只在对应 Worker API 可用后开放入口，权限判断只影响 UI，最终授权仍在服务端。
 6. `migration/manifest.ts`、本清单、`TODO.md`、部署烟测和回滚记录在同一变更节点更新。

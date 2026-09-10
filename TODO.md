@@ -24,7 +24,7 @@
 
 ### 当前优先顺序
 
-1. 推进旧 Go Authorizer shadow comparison 与 Better Auth 单权威切换。
+1. 完成 Worker 领域路由权限审计并推进 Better Auth 单权威切换。
 2. 部署 Runner Agent Auth 身份配置，完成后删除对应 legacy `PACA_API_KEY` 回退路径。
 3. 迁移 Agent Conversation、Automation 和剩余 Environment/API 能力。
 4. 完成真实浏览器 BlockNote 与 Sprint/View E2E。
@@ -68,8 +68,8 @@
 - [x] 已实现类型化权限 API、Hono 统一中间件和前端能力展示；服务端始终是最终授权边界。
 - [x] 项目成员可在不同项目拥有不同角色；角色/成员/项目变更会使 HTTP、PartyServer 和 Environment 连接失效。
 - [ ] 系统审计一遍所有 Worker 领域路由，确认对象归属、状态转换和数据完整性只属于领域服务，没有形成第二套 RBAC。
-- [ ] 建立旧 Go Authorizer 与 Better Auth shadow decision comparison，覆盖全局/项目权限、多角色、wildcard、无成员和 legacy Agent 样本。
-- [ ] 修复全部 shadow decision 差异并完成回归。
+- [x] 旧 Go Authorizer 与 Better Auth evaluator 已共用版本化 shadow decision corpus，覆盖全局/项目权限、多角色、wildcard、无成员和 legacy Agent 样本。
+- [x] 已删除 Go 对 JWT legacy `role` claim 的授权 fallback，修复 `ADMIN` 在旧入口被错误扩成全局 `*` 的差异；共享 corpus 与 Go/Worker 回归均通过。
 - [ ] 将 Better Auth/`pacaPermission` 切换为唯一用户权限权威来源。
 - [ ] 删除或正式接管旧 `PermissionStore`、`Authorizer`、legacy role 合并及重复权限 schema，确认无长期双写/双权威。
 

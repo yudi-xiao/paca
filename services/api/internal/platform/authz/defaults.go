@@ -1,7 +1,5 @@
 package authz
 
-import "strings"
-
 // RoleDefinition binds a role name to the permissions it grants.
 type RoleDefinition struct {
 	Name        string
@@ -99,21 +97,5 @@ func DefaultProjectRoles() []RoleDefinition {
 				PermissionEnvironmentsRead,
 			},
 		},
-	}
-}
-
-// LegacyPermissionsForRole preserves compatibility with the existing
-// users.role claim until all callers are migrated to explicit role assignment.
-func LegacyPermissionsForRole(role string) []Permission {
-	normalized := strings.ToUpper(strings.TrimSpace(role))
-	switch normalized {
-	case "SUPER_ADMIN":
-		return []Permission{PermissionAll}
-	case "ADMIN":
-		return []Permission{PermissionAll}
-	case "USER":
-		return []Permission{PermissionUsersRead}
-	default:
-		return nil
 	}
 }

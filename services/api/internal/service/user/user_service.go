@@ -64,10 +64,10 @@ const passwordSetTokenTTL = 24 * time.Hour
 func New(repo userdom.Repository, opts ...any) *Service {
 	s := &Service{repo: repo}
 	for _, opt := range opts {
-		switch v := opt.(type) {
-		case GlobalPermissionReader:
+		if v, ok := opt.(GlobalPermissionReader); ok {
 			s.globalPermissionReader = v
-		case RoleByNameFinder:
+		}
+		if v, ok := opt.(RoleByNameFinder); ok {
 			s.roleRepo = v
 		}
 	}
@@ -120,15 +120,12 @@ func (s *Service) CountUsers(ctx context.Context) (int64, error) {
 
 // ListGlobalPermissions returns effective global permissions for the user.
 func (s *Service) ListGlobalPermissions(ctx context.Context, id uuid.UUID) ([]string, error) {
-	u, err := s.repo.FindByID(ctx, id)
+	_, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
 	seen := map[string]struct{}{}
-	for _, p := range authz.LegacyPermissionsForRole(u.Role) {
-		seen[string(p)] = struct{}{}
-	}
 
 	if s.globalPermissionReader != nil {
 		perms, err := s.globalPermissionReader.ListGlobalPermissions(ctx, id)

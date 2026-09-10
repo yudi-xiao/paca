@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func buildUserTestRouter(repo *fakeUserRepo) http.Handler {
 
 	return router.New(router.Deps{
 		TokenManager: tm,
-		Authorizer:   authz.NewAuthorizer(nil),
+		Authorizer:   authz.NewAuthorizer(repo),
 		Health:       handler.NewHealthHandler(),
 		Auth:         handler.NewAuthHandler(authService, testCookieCfg),
 		User:         handler.NewUserHandler(userService),
@@ -44,7 +45,7 @@ func buildUserTestRouter(repo *fakeUserRepo) http.Handler {
 func issueAdminToken(t *testing.T) string {
 	t.Helper()
 	tm := jwttoken.New(testSecret, 15*time.Minute, 168*time.Hour)
-	tok, err := tm.IssueAccess(uuid.NewString(), "admin-user", "ADMIN", "fam-admin", false)
+	tok, err := tm.IssueAccess(testAdminUserID.String(), "admin-user", "ADMIN", "fam-admin", false)
 	if err != nil {
 		t.Fatalf("issue admin token: %v", err)
 	}
@@ -186,7 +187,7 @@ func TestGetMyGlobalPermissions_Unauthorized(t *testing.T) {
 	}
 }
 
-func TestGetMyGlobalPermissions_AdminRoleIncludesWildcard(t *testing.T) {
+func TestGetMyGlobalPermissions_AdminRoleUsesExplicitSeededGrants(t *testing.T) {
 	repo := newFakeUserRepo()
 	hash, err := bcrypt.GenerateFromPassword([]byte("secret123"), bcrypt.MinCost)
 	if err != nil {
@@ -243,14 +244,14 @@ func TestGetMyGlobalPermissions_AdminRoleIncludesWildcard(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	foundWildcard := false
-	for _, p := range env.Data.Permissions {
-		if p == string(authz.PermissionAll) {
-			foundWildcard = true
-		}
+	want := []string{
+		string(authz.PermissionGlobalRolesAll),
+		string(authz.PermissionProjectsAll),
+		string(authz.PermissionSettingsWrite),
+		string(authz.PermissionUsersAll),
 	}
-	if !foundWildcard {
-		t.Fatalf("expected %q in permissions, got %v", authz.PermissionAll, env.Data.Permissions)
+	if !reflect.DeepEqual(env.Data.Permissions, want) {
+		t.Fatalf("unexpected explicit ADMIN permissions: want %v got %v", want, env.Data.Permissions)
 	}
 }
 
@@ -643,7 +644,7 @@ func TestAdminResetPassword_SetsMustChangePassword(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	r := router.New(router.Deps{
 		TokenManager: tm,
-		Authorizer:   authz.NewAuthorizer(nil),
+		Authorizer:   authz.NewAuthorizer(repo),
 		Health:       handler.NewHealthHandler(),
 		Auth:         handler.NewAuthHandler(authService, testCookieCfg),
 		User:         handler.NewUserHandler(userService, authService),
@@ -743,7 +744,7 @@ func TestMustChangePassword_ChangeAllowedAndUnblocks(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	r := router.New(router.Deps{
 		TokenManager: tm,
-		Authorizer:   authz.NewAuthorizer(nil),
+		Authorizer:   authz.NewAuthorizer(repo),
 		Health:       handler.NewHealthHandler(),
 		Auth:         handler.NewAuthHandler(authService, testCookieCfg),
 		User:         handler.NewUserHandler(userService, authService),

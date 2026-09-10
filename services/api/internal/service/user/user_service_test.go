@@ -171,7 +171,7 @@ func TestGetByID_NotFound(t *testing.T) {
 	}
 }
 
-func TestListGlobalPermissions_LegacyOnly(t *testing.T) {
+func TestListGlobalPermissions_DoesNotTrustLegacyRole(t *testing.T) {
 	id := uuid.New()
 	svc := usersvc.New(&stubRepo{
 		findByID: func(_ context.Context, got uuid.UUID) (*userdom.User, error) {
@@ -186,7 +186,7 @@ func TestListGlobalPermissions_LegacyOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := []string{string(authz.PermissionUsersRead)}
+	want := []string{}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected permissions: want %v got %v", want, got)
 	}
