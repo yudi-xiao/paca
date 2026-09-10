@@ -73,11 +73,6 @@ SELECT (
     'public.paca_schema_migration',
     'SELECT,INSERT,UPDATE,DELETE'
   )
-  AND NOT has_table_privilege(
-    :'runtime_role',
-    'public.paca_attachment_migration_item',
-    'SELECT,INSERT,UPDATE,DELETE'
-  )
 ) AS boundary_is_valid
 \gset
 

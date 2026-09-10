@@ -161,12 +161,13 @@ bun run db:generate
 bun run db:check
 ```
 
-Reviewed migrations through `drizzle/0014_clear_ultron.sql` have been applied to both the isolated
-`paca/internal` branch and, after explicit authorization for this not-yet-live setup, `paca/main`.
-`0012_yielding_the_executioner.sql` adds the attachment-migration ledger,
-`0013_glorious_miracleman.sql` adds typed task links, and `0014_clear_ultron.sql` prevents one
-source attachment from belonging to multiple active migration runs. `TODO.md` records the remote
-checksums and remaining production safeguards.
+Reviewed migrations through `drizzle/0014_clear_ultron.sql` were historically applied to both
+`paca/internal` and, after explicit authorization for this not-yet-live setup, `paca/main`.
+`paca/internal` has since been rebuilt from an empty schema and advanced independently.
+`0012_yielding_the_executioner.sql` and `0014_clear_ultron.sql` retain migration-history
+compatibility, while `0027_goofy_warstar.sql` removes their obsolete attachment-migration ledger;
+the product no longer supports importing legacy attachment data. `TODO.md` records the current
+internal ledger and remaining production safeguards.
 
 `0015_dry_quasimodo.sql` adds the PostgreSQL realtime outbox and transaction-bound triggers for
 Task, activity, link, attachment, Sprint and saved-view changes. It was applied to `paca/internal`

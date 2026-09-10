@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCleanSlateSchemaResetSQL,
   CLEAN_SLATE_RESET_CONFIRMATION,
   parseCleanSlateResetConfiguration,
   selectCleanSlateMigrationFiles,
@@ -59,6 +60,15 @@ describe("clean-slate internal database reset policy", () => {
     );
     expect(() => selectCleanSlateMigrationFiles(["0000_auth.sql", "0002_project.sql"])).toThrow(
       "PACA_RESET_MIGRATION_SEQUENCE_INVALID",
+    );
+  });
+
+  it("drops a postgres-owned schema and restores ownership to the temporary role", () => {
+    expect(buildCleanSlateSchemaResetSQL("pscale_api_123abc")).toBe(
+      'set role postgres; drop schema public cascade; reset role; create schema public authorization "pscale_api_123abc"; revoke create on schema public from public',
+    );
+    expect(() => buildCleanSlateSchemaResetSQL('pscale_api_bad"; drop database postgres')).toThrow(
+      "TEMP_MIGRATION_DATABASE_ROLE_INVALID",
     );
   });
 });

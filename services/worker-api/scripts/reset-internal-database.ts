@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import {
+  buildCleanSlateSchemaResetSQL,
   type CleanSlateResetConfiguration,
   parseCleanSlateResetConfiguration,
   selectCleanSlateMigrationFiles,
@@ -34,6 +35,10 @@ function redact(value: string): string {
     .replace(/(postgres(?:ql)?:\/\/[^:\s/]+:)[^@\s/]+@/giu, "$1[REDACTED]@")
     .replace(/("password"\s*:\s*")[^"]+/giu, "$1[REDACTED]")
     .slice(0, 4_000);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function run(
@@ -109,6 +114,58 @@ async function resolveRuntimeDatabaseRole(
     throw new Error("RUNTIME_DATABASE_ROLE_INVALID");
   }
   return databaseRole;
+}
+
+async function roleExists(
+  configuration: CleanSlateResetConfiguration,
+  roleId: string,
+): Promise<boolean> {
+  const roles = JSON.parse(
+    await pscale(configuration, ["role", "list", configuration.database, configuration.branch]),
+  ) as unknown;
+  if (!Array.isArray(roles)) throw new Error("TEMP_ROLE_LIST_INVALID");
+  return roles.some(
+    (candidate) =>
+      typeof candidate === "object" &&
+      candidate !== null &&
+      "id" in candidate &&
+      candidate.id === roleId,
+  );
+}
+
+async function retireTemporaryRole(
+  configuration: CleanSlateResetConfiguration,
+  roleId: string,
+): Promise<void> {
+  try {
+    await pscale(configuration, [
+      "role",
+      "reassign",
+      configuration.database,
+      configuration.branch,
+      roleId,
+      "--successor",
+      "postgres",
+      "--force",
+    ]);
+  } catch (error) {
+    if (!(await roleExists(configuration, roleId))) return;
+    throw error;
+  }
+
+  try {
+    await pscale(configuration, [
+      "role",
+      "delete",
+      configuration.database,
+      configuration.branch,
+      roleId,
+      "--force",
+    ]);
+  } catch (error) {
+    if (!(await roleExists(configuration, roleId))) return;
+    throw error;
+  }
 }
 
 async function query(databaseURL: string, sql: string): Promise<string> {
@@ -192,14 +249,13 @@ async function main(): Promise<void> {
     ]),
   );
   let deleted = false;
+  let resetFailure: unknown;
+  let successPayload: Record<string, unknown> | undefined;
   try {
     const currentUser = await query(role.databaseURL, "select current_user");
     if (currentUser !== role.databaseRole) throw new Error("RESET_DATABASE_IDENTITY_MISMATCH");
 
-    await query(
-      role.databaseURL,
-      "drop schema public cascade; create schema public authorization current_user; revoke create on schema public from public",
-    );
+    await query(role.databaseURL, buildCleanSlateSchemaResetSQL(role.databaseRole));
     for (const [index, migrationFile] of migrationFiles.entries()) {
       await psqlFile(role.databaseURL, `drizzle/${migrationFile}`, {
         singleTransaction: index === 0,
@@ -226,49 +282,32 @@ async function main(): Promise<void> {
     if (userCount !== 0) throw new Error("RESET_BOOTSTRAP_USER_COUNT_INVALID");
     await verifyWorkerAfterReset(role.databaseURL);
 
-    await pscale(configuration, [
-      "role",
-      "reassign",
-      configuration.database,
-      configuration.branch,
-      role.id,
-      "--successor",
-      "postgres",
-      "--force",
-    ]);
-    await pscale(configuration, [
-      "role",
-      "delete",
-      configuration.database,
-      configuration.branch,
-      role.id,
-      "--force",
-    ]);
+    await retireTemporaryRole(configuration, role.id);
     deleted = true;
-    console.log(
-      JSON.stringify({
-        status: "ok",
-        database: configuration.database,
-        branch: configuration.branch,
-        migrations: actualLedger.length,
-        users: userCount,
-        edgeVerified: true,
-      }),
-    );
-  } finally {
-    if (!deleted) {
-      await pscale(configuration, [
-        "role",
-        "delete",
-        configuration.database,
-        configuration.branch,
-        role.id,
-        "--successor",
-        "postgres",
-        "--force",
-      ]).catch(() => undefined);
+    successPayload = {
+      status: "ok",
+      database: configuration.database,
+      branch: configuration.branch,
+      migrations: actualLedger.length,
+      users: userCount,
+      edgeVerified: true,
+    };
+  } catch (error) {
+    resetFailure = error;
+  }
+
+  if (!deleted) {
+    try {
+      await retireTemporaryRole(configuration, role.id);
+    } catch (cleanupError) {
+      throw new Error(
+        `RESET_FAILED: ${errorMessage(resetFailure)}; TEMP_ROLE_CLEANUP_FAILED: ${errorMessage(cleanupError)}`,
+      );
     }
   }
+
+  if (resetFailure) throw resetFailure;
+  console.log(JSON.stringify(successPayload));
 }
 
 main().catch((error: unknown) => {

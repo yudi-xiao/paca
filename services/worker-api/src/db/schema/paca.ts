@@ -867,48 +867,6 @@ export const pacaTaskAttachments = pgTable(
   ],
 );
 
-export const pacaAttachmentMigrationItems = pgTable(
-  "paca_attachment_migration_item",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    runId: uuid("run_id").notNull(),
-    sourceBucket: text("source_bucket").notNull(),
-    sourceKey: text("source_key").notNull(),
-    sourceFileId: uuid("source_file_id").notNull(),
-    sourceAttachmentId: uuid("source_attachment_id").notNull(),
-    targetFileId: uuid("target_file_id").notNull(),
-    targetAttachmentId: uuid("target_attachment_id").notNull(),
-    targetBucket: text("target_bucket").notNull(),
-    targetStorageKey: text("target_storage_key").notNull(),
-    sourceSize: bigint("source_size", { mode: "number" }).notNull(),
-    sha256: text("sha256"),
-    targetEtag: text("target_etag"),
-    status: text("status").default("planned").notNull(),
-    attempts: integer("attempts").default(0).notNull(),
-    ownsTargetObject: boolean("owns_target_object").default(false).notNull(),
-    ownsTargetFile: boolean("owns_target_file").default(false).notNull(),
-    ownsTargetAttachment: boolean("owns_target_attachment").default(false).notNull(),
-    errorCode: text("error_code"),
-    rollbackStartedAt: timestamp("rollback_started_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [
-    unique("paca_attachment_migration_run_source_unique").on(table.runId, table.sourceAttachmentId),
-    uniqueIndex("paca_attachment_migration_active_source_uidx")
-      .on(table.sourceAttachmentId)
-      .where(sql`${table.status} <> 'rolled_back'`),
-    index("paca_attachment_migration_run_status_idx").on(table.runId, table.status),
-    index("paca_attachment_migration_target_idx").on(table.targetAttachmentId, table.targetFileId),
-    check("paca_attachment_migration_source_size_check", sql`${table.sourceSize} > 0`),
-    check(
-      "paca_attachment_migration_status_check",
-      sql`${table.status} in ('planned', 'copied', 'imported', 'rollback_started', 'rolled_back', 'failed')`,
-    ),
-    check("paca_attachment_migration_attempts_check", sql`${table.attempts} >= 0`),
-  ],
-);
-
 export const pacaViewTaskPositions = pgTable(
   "paca_view_task_position",
   {

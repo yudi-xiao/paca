@@ -26,11 +26,6 @@ const iterationMigrationURL = new URL("../drizzle/0007_yummy_microbe.sql", impor
 const iterationSnapshotURL = new URL("../drizzle/meta/0007_snapshot.json", import.meta.url);
 const taskLinkMigrationURL = new URL("../drizzle/0013_glorious_miracleman.sql", import.meta.url);
 const taskLinkSnapshotURL = new URL("../drizzle/meta/0013_snapshot.json", import.meta.url);
-const attachmentRunGuardMigrationURL = new URL("../drizzle/0014_clear_ultron.sql", import.meta.url);
-const attachmentRunGuardSnapshotURL = new URL(
-  "../drizzle/meta/0014_snapshot.json",
-  import.meta.url,
-);
 const documentMigrationURL = new URL("../drizzle/0016_busy_changeling.sql", import.meta.url);
 const documentSnapshotURL = new URL("../drizzle/meta/0016_snapshot.json", import.meta.url);
 const documentSnapshotMigrationURL = new URL("../drizzle/0017_last_toro.sql", import.meta.url);
@@ -64,6 +59,14 @@ const environmentResourceMigrationURL = new URL(
 );
 const environmentResourceSnapshotURL = new URL(
   "../drizzle/meta/0026_snapshot.json",
+  import.meta.url,
+);
+const removeAttachmentMigrationLedgerURL = new URL(
+  "../drizzle/0027_goofy_warstar.sql",
+  import.meta.url,
+);
+const removeAttachmentMigrationLedgerSnapshotURL = new URL(
+  "../drizzle/meta/0027_snapshot.json",
   import.meta.url,
 );
 
@@ -258,24 +261,6 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain("in ('blocks', 'relates_to', 'duplicates')");
   });
 
-  it("prevents one source attachment from belonging to multiple active migration runs", async () => {
-    const [migration, snapshot] = await Promise.all([
-      readFile(attachmentRunGuardMigrationURL, "utf8"),
-      readFile(attachmentRunGuardSnapshotURL),
-    ]);
-    const checksum = createHash("sha256").update(snapshot).digest("hex");
-
-    expect(migration.trimStart()).toMatch(/^BEGIN;/);
-    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
-    expect(migration).toContain(`VALUES ('0014_clear_ultron', '${checksum}')`);
-    expect(migration).toContain(
-      'CREATE UNIQUE INDEX "paca_attachment_migration_active_source_uidx"',
-    );
-    expect(migration).toContain(
-      'WHERE "paca_attachment_migration_item"."status" <> \'rolled_back\'',
-    );
-  });
-
   it("adds the document projection and its project realtime outbox trigger transactionally", async () => {
     const [migration, snapshot] = await Promise.all([
       readFile(documentMigrationURL, "utf8"),
@@ -409,6 +394,20 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain("'cloudflare-sandbox'");
     expect(migration).toContain("'cloudflare-computer'");
     expect(migration).toContain("'legacy-agent-runner'");
+  });
+
+  it("removes the obsolete attachment migration ledger without cascading", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(removeAttachmentMigrationLedgerURL, "utf8"),
+      readFile(removeAttachmentMigrationLedgerSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0027_goofy_warstar', '${checksum}')`);
+    expect(migration).toContain('DROP TABLE "paca_attachment_migration_item";');
+    expect(migration).not.toContain("CASCADE");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

@@ -62,6 +62,5 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
 TO :"runtime_role";
 
 REVOKE ALL PRIVILEGES ON TABLE public.paca_schema_migration FROM :"runtime_role";
-REVOKE ALL PRIVILEGES ON TABLE public.paca_attachment_migration_item FROM :"runtime_role";
 
 COMMIT;

@@ -2,6 +2,7 @@ export const CLEAN_SLATE_RESET_CONFIRMATION = "RESET_PACA_INTERNAL_DATABASE";
 
 const SAFE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 const MIGRATION_FILE = /^(\d{4})_[a-z0-9_]+\.sql$/u;
+const PLANETSCALE_DATABASE_ROLE = /^pscale_api_[a-z0-9]+$/u;
 
 export type CleanSlateResetConfiguration = {
   organization: string;
@@ -57,4 +58,18 @@ export function selectCleanSlateMigrationFiles(fileNames: string[]): string[] {
     }
   });
   return migrations;
+}
+
+export function buildCleanSlateSchemaResetSQL(databaseRole: string): string {
+  if (!PLANETSCALE_DATABASE_ROLE.test(databaseRole)) {
+    throw new Error("TEMP_MIGRATION_DATABASE_ROLE_INVALID");
+  }
+
+  return [
+    "set role postgres",
+    "drop schema public cascade",
+    "reset role",
+    `create schema public authorization "${databaseRole}"`,
+    "revoke create on schema public from public",
+  ].join("; ");
 }

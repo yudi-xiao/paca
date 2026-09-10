@@ -17,9 +17,9 @@
 当前可用基线：**M1～M9 的核心路径已形成 internal 纵向切片；当前优先收尾 M4 权限单权威切换、M5 Runner 身份迁移和剩余 API。**
 
 - internal 入口为 `https://paca.howlearnwood.com`，React Static Assets、Hono API、Better Auth、Hyperdrive、R2、PartyServer/DO、Queues、Workflows、Agents SDK 与 Cloudflare Sandbox 已连通。
-- `paca/internal` 已通过 clean-slate 工具从空 schema 重放至 `0026_nosy_gamma_corps.sql`，27 项 ledger 完全匹配且 Better Auth 用户数为 0；`paca/main` 仍停在 `0014`。internal Worker runtime role 仅拥有 47 张业务表 CRUD，不可访问迁移账本。
+- `paca/internal` 已通过 clean-slate 工具从空 schema 重放，并继续应用至 `0027_goofy_warstar.sql`；28 项 ledger 完全匹配、Better Auth 用户数为 0，legacy attachment migration 账本已删除。`paca/main` 仍停在 `0014`。internal Worker runtime role 仅拥有 47 张业务表 CRUD，不可访问迁移账本。
 - Agent Auth 的用户审批、Agent/Host、受约束 Grant、任务/文档/环境执行、审计和撤销边界已可用；`capability.executed` 以真实 Agent 为 actor，delegated 用户仅保留为委托上下文。
-- PostgreSQL CI 已能从空库应用 27 个已提交 migration，并覆盖 migration ledger、前滚恢复演练和首个 repository contract。
+- PostgreSQL 测试流程已能从空库应用 28 个 migration，并覆盖 migration ledger、clean-slate schema、前滚恢复演练和 repository contract。
 - 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。
 
 ### 当前优先顺序
@@ -88,7 +88,7 @@
 
 - [x] development/internal/production bucket 已创建；development/internal binding、环境隔离守卫和 internal 定时清理已完成。
 - [x] 附件使用 R2 保存对象、PostgreSQL 保存作用域/哈希/ETag/状态；上传、Range 下载、软删除、恢复和分片取消均受 Paca Permission 保护。
-- [x] 已实现保留期、stale claim、失败重试和孤儿审计；历史附件迁移工具不再作为上线依赖。
+- [x] 已实现保留期、stale claim、失败重试和孤儿审计；clean-slate 决策后已删除历史附件迁移 CLI、运行手册和专用账本 schema。
 - [x] internal 真实 smoke 已覆盖小文件、multipart、重复/取消、权限撤销、恢复和物理清理。
 - [ ] 在生产 Worker/Hyperdrive 建立后接入并验收 production R2 binding。
 
@@ -164,6 +164,6 @@
 - `apps/web`：React + TanStack Router/Query/Form，以及 BlockNote + Yjs/PartySocket 前端。
 - `services/agent-runner`：legacy Runner 与进行中的 Agent Auth/Harness 迁移。
 - `apps/mcp`：本机 Agent Auth 与 managed Sandbox Capability Broker 工具边界。
-- `services/api`：尚未退出的 Go API、legacy PostgreSQL repository、旧 Authorizer 和历史附件迁移工具。
+- `services/api`：尚未退出的 Go API、legacy PostgreSQL repository 和旧 Authorizer。
 - `services/realtime`：待 M11 完全退役的 Socket.IO/Valkey 行为基线。
 - `docs/cloudflare-api-migration.md`：API 领域迁移清单和退出依赖。
