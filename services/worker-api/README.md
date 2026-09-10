@@ -97,46 +97,31 @@ This validates the project procedure without pretending that destructive product
 safe: after a committed migration, the default remains Worker version rollback plus a reviewed
 forward migration.
 
-The first data-preserving switch from `main` to `internal` is automated by
-`scripts/provision-internal-database.ts`. The command is intentionally gated because it copies
-users, sessions, Agent identities and Capability Grants in addition to the Demo project data, and
-it rotates the selected, not-yet-used runtime role credential before placing that credential in a
-new Hyperdrive. It refuses branches with different migration ledgers, refuses a target that is
-neither empty nor an exact prior copy, imports through one PostgreSQL transaction, verifies row
-counts and fingerprints, and never prints a database password. During that transaction only, the
-Task self-reference is made deferred so children can be loaded before parents; the script forces
-the complete FK check and restores `NOT DEFERRABLE` before commit. The two temporary admin roles
-expire after 15 minutes. Direct `psql`/`pg_dump` connections keep `sslmode=verify-full` and use
-the system CA store (`sslrootcert=system`), matching PlanetScale's current PostgreSQL connection
-requirements. Hyperdrive uses `sslmode=require`, which Cloudflare documents as enforcing TLS
-and validating publicly trusted server certificates; reserve Hyperdrive `verify-full` for an
-origin whose CA certificate has first been uploaded to Cloudflare.
+While the project is not live, `internal` uses a clean-slate database policy. The reset command
+never reads or copies `main`; it only accepts the `internal` branch and an exact destructive
+confirmation. It creates a 15-minute PlanetScale admin role, drops and recreates only the target
+branch's `public` schema, applies the complete contiguous migration sequence, restores the
+explicit runtime-role grants, verifies the migration ledger, and transfers object ownership to
+`postgres` before deleting the temporary role. It then exercises Better Auth registration,
+Session and `/api/me` through the deployed Worker/Hyperdrive path with a generated credential and
+removes that smoke user again. Successful completion therefore leaves zero users and no copied
+business data.
 
-After an operator has explicitly approved copying this internal-test data and rotating the new
-runtime role, run from `services/worker-api`:
+Run from `services/worker-api` only when erasing the current internal data is intended:
 
 ```bash
-PACA_PROVISION_INTERNAL_CONFIRM=PROVISION_INTERNAL_DATABASE \
+PACA_RESET_INTERNAL_CONFIRM=RESET_PACA_INTERNAL_DATABASE \
 PACA_PLANETSCALE_ORG={organization-id} \
-PACA_PLANETSCALE_RUNTIME_ROLE_ID={role-id} \
-PACA_POSTGRES_BIN={directory-containing-psql-and-pg_dump} \
-bun run database:provision:internal
+PACA_POSTGRES_BIN={directory-containing-psql} \
+bun run db:reset:internal
 ```
 
-`pg_dump` must have the same or a newer major version than the PlanetScale server. On the current
-development Mac, Homebrew `libpq` 18 is installed and the value is
-`/opt/homebrew/opt/libpq/bin`; other environments should point to their own PostgreSQL client
-directory instead of relying on this machine-specific path.
-
-The script returns the new Hyperdrive ID as non-secret JSON. Review the result, replace only
-`env.internal.hyperdrive[0].id` in `wrangler.jsonc`, regenerate binding types, run the deploy guard
-without the main-database exception, and deploy. Until that config change and smoke test succeed,
-the existing main Hyperdrive remains the rollback path and the new runtime role has no traffic.
-
-The current internal deployment completed this switch on 2026-08-31. Its dedicated Hyperdrive is
-backed by the `paca/internal` branch and a non-inheriting `paca-worker-internal` role with explicit
-CRUD grants on the 44 runtime business tables. The root/main Hyperdrive remains separate and is
-not accepted by the internal deployment guard.
+The command rejects missing/gapped migration files, unsafe identifiers, any branch other than
+`internal`, and a missing or incorrect confirmation before it creates a temporary role. The
+current dedicated Hyperdrive remains backed by `paca/internal`; its non-inheriting
+`paca-worker-internal` role has explicit CRUD grants on 47 runtime tables and no schema-create or
+migration-ledger access. The root/main Hyperdrive remains separate and is rejected by the internal
+deployment guard.
 
 Subsequent reviewed internal-only migrations use a separate confirmation gate and a 15-minute
 PlanetScale admin role. The command skips ledger entries already present, reapplies and verifies
