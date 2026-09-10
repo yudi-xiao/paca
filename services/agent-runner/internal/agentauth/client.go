@@ -124,6 +124,40 @@ func (client *Client) agentRequest(
 	return client.request(ctx, method, target.String(), capabilities, payload)
 }
 
+// RequestAgent calls one versioned Paca Agent API route with a fresh Agent
+// JWT. It is exported for the local Capability Broker, which keeps the
+// private Agent key in agent-runner while forwarding a narrowly scoped
+// request from an untrusted sandbox. The broker applies its own Project and
+// capability allow-list before this method is reached; this method still
+// rejects malformed paths and capabilities absent from the enrolled identity.
+func (client *Client) RequestAgent(
+	ctx context.Context,
+	method string,
+	path string,
+	capabilities []string,
+	payload []byte,
+) (json.RawMessage, error) {
+	switch method {
+	case http.MethodGet, http.MethodPost, http.MethodDelete:
+	default:
+		return nil, ErrConfigInvalid
+	}
+	if len(capabilities) == 0 || len(capabilities) > 8 {
+		return nil, ErrCapabilityDenied
+	}
+	seen := make(map[string]struct{}, len(capabilities))
+	for _, capability := range capabilities {
+		if !client.config.requestsCapability(capability) {
+			return nil, ErrCapabilityDenied
+		}
+		if _, duplicate := seen[capability]; duplicate {
+			return nil, ErrCapabilityDenied
+		}
+		seen[capability] = struct{}{}
+	}
+	return client.agentRequest(ctx, method, path, capabilities, payload)
+}
+
 func (client *Client) request(
 	ctx context.Context,
 	method string,

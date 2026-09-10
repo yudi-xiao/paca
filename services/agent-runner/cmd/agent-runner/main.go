@@ -25,6 +25,7 @@ import (
 	"github.com/Paca-AI/agent-runner/internal/acpbridge"
 	"github.com/Paca-AI/agent-runner/internal/agentauth"
 	"github.com/Paca-AI/agent-runner/internal/bundledskills"
+	"github.com/Paca-AI/agent-runner/internal/capabilitybroker"
 	"github.com/Paca-AI/agent-runner/internal/chatsandbox"
 	"github.com/Paca-AI/agent-runner/internal/config"
 	"github.com/Paca-AI/agent-runner/internal/executor"
@@ -69,6 +70,7 @@ func run(log *slog.Logger) error {
 	}
 
 	var agentAuthClient *agentauth.Client
+	var capabilityBroker *capabilitybroker.Broker
 	var agentHeartbeat agentauth.HeartbeatReport
 	var taskLeases agentauth.TaskLeaseCoordinator
 	if settings.AgentAuthConfigPath != "" {
@@ -101,6 +103,10 @@ func run(log *slog.Logger) error {
 		)
 		if err != nil {
 			return fmt.Errorf("main: create Agent Auth task lease coordinator: %w", err)
+		}
+		capabilityBroker, err = capabilitybroker.New(agentAuthClient, identity)
+		if err != nil {
+			return fmt.Errorf("main: create Agent Capability Broker: %w", err)
 		}
 	}
 
@@ -137,11 +143,13 @@ func run(log *slog.Logger) error {
 	convRepo := postgres.NewConversationRepository(db)
 
 	exec := executor.New(sandboxBackend, envRepo, convRepo, portForwardRepo, encryptor, executor.Options{
-		Image:           settings.AgentServerImage,
-		PacaAPIKey:      settings.PacaAPIKey,
-		PacaAPIURL:      settings.PacaAPIURL,
-		PacaGatewayURL:  settings.PacaGatewayURL,
-		MCPDevSourceDir: settings.MCPDevSourceDir,
+		Image:               settings.AgentServerImage,
+		PacaAPIKey:          settings.PacaAPIKey,
+		PacaAPIURL:          settings.PacaAPIURL,
+		PacaGatewayURL:      settings.PacaGatewayURL,
+		MCPDevSourceDir:     settings.MCPDevSourceDir,
+		CapabilityBroker:    capabilityBroker,
+		CapabilityBrokerURL: settings.AgentCapabilityBrokerURL,
 	}, log)
 
 	chatSandboxes := chatsandbox.New()
@@ -192,6 +200,7 @@ func run(log *slog.Logger) error {
 		PortForwardRangeEnd:   settings.PortForwardRangeEnd,
 		Backend:               settings.SandboxBackend,
 		MCPDevSourceDir:       settings.MCPDevSourceDir,
+		CapabilityBroker:      capabilityBroker,
 		Log:                   log,
 	}
 	httpServer := &http.Server{Addr: settings.HTTPAddr, Handler: acpServer.Routes()}

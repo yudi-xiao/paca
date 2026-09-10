@@ -38,7 +38,7 @@ inside the agent's own sandbox)                    (repository plugin adapter)
         │  result (apps/mcp/src/tools/repo-tools.ts)    │
 ```
 
-The Paca MCP server authenticates as the specific agent running the conversation — `PACA_API_KEY` is injected into its environment by `services/agent-runner` at sandbox start (see [agent-runner-service.md](agent-runner-service.md#skills--mcp-server-injection)), scoping every repository-adapter call to that one agent rather than to a shared internal service credential.
+This diagram describes the legacy API-key compatibility path. A Runner-managed Agent Auth sandbox no longer receives `PACA_API_KEY`; it receives a Project-scoped Capability Broker session instead (see [agent-runner-service.md](agent-runner-service.md#skills--mcp-server-injection)). The first broker contract intentionally does not expose repository/plugin routes, so `clone_repository`, `push_branch`, and plugin-contributed PR tools are unavailable to that migrated Agent until those endpoints have explicit Agent Auth capabilities, exact Project/repository constraints, and broker route coverage. Do not restore repository access by injecting the old key or mounting the Agent private enrollment file.
 
 ### Endpoint
 

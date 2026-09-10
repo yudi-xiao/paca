@@ -4,8 +4,10 @@ import { createRequire } from "node:module";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
 	AgentAuthClient,
+	CapabilityBrokerClient,
 	createAgentHeartbeatReport,
 	loadAgentAuthConfig,
+	loadCapabilityBrokerConfig,
 } from "./agent-auth/client.js";
 import { createAgentCapabilityServer } from "./agent-auth/server.js";
 import { createServer } from "./server.js";
@@ -28,6 +30,11 @@ async function main() {
 	// Get configuration from environment variables
 	const apiKey = process.env.PACA_API_KEY;
 	const agentConfigPath = process.env.PACA_AGENT_CONFIG?.trim();
+	const capabilityBrokerURL = process.env.PACA_CAPABILITY_BROKER_URL?.trim();
+	const capabilityBrokerToken =
+		process.env.PACA_CAPABILITY_BROKER_TOKEN?.trim();
+	const capabilityBrokerConfig =
+		process.env.PACA_CAPABILITY_BROKER_CONFIG?.trim();
 	const baseURL = process.env.PACA_API_URL || "http://localhost:8080";
 	const gatewayURL = process.env.PACA_GATEWAY_URL || undefined;
 	const agentId = process.env.PACA_AGENT_ID || undefined;
@@ -40,11 +47,39 @@ async function main() {
 		? process.env.PACA_REPO_PLUGIN_IDS.split(",").filter(Boolean)
 		: undefined;
 
-	if (apiKey && agentConfigPath) {
+	const brokerValues = [
+		capabilityBrokerURL,
+		capabilityBrokerToken,
+		capabilityBrokerConfig,
+	].filter(Boolean).length;
+	if (
+		(apiKey ? 1 : 0) + (agentConfigPath ? 1 : 0) + (brokerValues > 0 ? 1 : 0) >
+		1
+	) {
 		console.error(
-			"PACA_AUTH_MODE_AMBIGUOUS: set PACA_AGENT_CONFIG or PACA_API_KEY, not both.",
+			"PACA_AUTH_MODE_AMBIGUOUS: select exactly one Paca authentication mode.",
 		);
 		process.exit(1);
+	}
+	if (brokerValues > 0 && brokerValues !== 3) {
+		console.error(
+			"PACA_CAPABILITY_BROKER_CONFIG_INVALID: URL, token, and config are all required.",
+		);
+		process.exit(1);
+	}
+	if (capabilityBrokerURL && capabilityBrokerToken && capabilityBrokerConfig) {
+		const config = loadCapabilityBrokerConfig(capabilityBrokerConfig);
+		const server = createAgentCapabilityServer(
+			new CapabilityBrokerClient(
+				config,
+				capabilityBrokerURL,
+				capabilityBrokerToken,
+			),
+			config.projectId,
+		);
+		const transport = new StdioServerTransport();
+		await server.connect(transport);
+		return;
 	}
 	if (agentConfigPath) {
 		const config = await loadAgentAuthConfig(agentConfigPath);

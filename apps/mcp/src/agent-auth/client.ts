@@ -9,6 +9,8 @@ import { lstat, readFile } from "node:fs/promises";
 const MAX_CONFIG_BYTES = 64 * 1024;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const ERROR_CODE = /^[A-Z][A-Z0-9_]{0,127}$/;
+const UUID =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ENVIRONMENT_RETRY_MAX_ATTEMPTS = 3;
 const ENVIRONMENT_RETRY_DEFAULT_DELAY_MS = 500;
 const ENVIRONMENT_RETRY_MAX_DELAY_MS = 5_000;
@@ -19,6 +21,13 @@ type JsonRecord = Record<string, unknown>;
 export type AgentGrantRequest = {
 	capability: string;
 	constraints: JsonRecord;
+};
+
+export type AgentCapabilityConfig = {
+	version: 1;
+	agentId: string;
+	capabilities: string[];
+	grantRequests: AgentGrantRequest[];
 };
 
 export const agentHarnessKinds = [
@@ -40,8 +49,7 @@ export type AgentHeartbeatReport = {
 	labels: string[];
 };
 
-export type AgentAuthConfig = {
-	version: 1;
+export type AgentAuthConfig = AgentCapabilityConfig & {
 	providerOrigin: string;
 	issuer: string;
 	defaultLocation: string;
@@ -51,9 +59,11 @@ export type AgentAuthConfig = {
 	keyAlgorithm: "Ed25519";
 	publicKey: JsonWebKey;
 	privateKey: JsonWebKey;
-	capabilities: string[];
-	grantRequests: AgentGrantRequest[];
 	registeredAt: string;
+};
+
+export type CapabilityBrokerConfig = AgentCapabilityConfig & {
+	projectId: string;
 };
 
 export class AgentAuthClientError extends Error {
@@ -287,6 +297,77 @@ export async function loadAgentAuthConfig(
 		if (error instanceof AgentAuthClientError) throw error;
 		throw new AgentAuthClientError("PACA_AGENT_CONFIG_INVALID");
 	}
+}
+
+export function loadCapabilityBrokerConfig(
+	encoded: string,
+): CapabilityBrokerConfig {
+	if (
+		encoded.length === 0 ||
+		encoded.length > MAX_CONFIG_BYTES * 2 ||
+		!/^[A-Za-z0-9_-]+$/.test(encoded)
+	) {
+		throw new AgentAuthClientError("PACA_CAPABILITY_BROKER_CONFIG_INVALID");
+	}
+	let input: JsonRecord | null;
+	try {
+		const bytes = Buffer.from(encoded, "base64url");
+		if (bytes.byteLength > MAX_CONFIG_BYTES)
+			throw new Error("config too large");
+		input = record(JSON.parse(bytes.toString("utf8")) as unknown);
+	} catch {
+		throw new AgentAuthClientError("PACA_CAPABILITY_BROKER_CONFIG_INVALID");
+	}
+	const expectedKeys = new Set([
+		"version",
+		"agentId",
+		"projectId",
+		"capabilities",
+		"grantRequests",
+	]);
+	const capabilities = input?.capabilities;
+	const requests = input?.grantRequests;
+	if (
+		!input ||
+		Object.keys(input).some((key) => !expectedKeys.has(key)) ||
+		input.version !== 1 ||
+		!nonEmptyString(input.agentId) ||
+		!nonEmptyString(input.projectId) ||
+		!UUID.test(input.projectId) ||
+		!Array.isArray(capabilities) ||
+		capabilities.length === 0 ||
+		capabilities.length > 64 ||
+		capabilities.some((item) => !nonEmptyString(item, 128)) ||
+		new Set(capabilities).size !== capabilities.length ||
+		!Array.isArray(requests) ||
+		requests.length === 0 ||
+		requests.length > 64
+	) {
+		throw new AgentAuthClientError("PACA_CAPABILITY_BROKER_CONFIG_INVALID");
+	}
+	const grantRequests = requests.map((request) => {
+		const item = record(request);
+		const constraints = record(item?.constraints);
+		if (
+			!item ||
+			Object.keys(item).some(
+				(key) => key !== "capability" && key !== "constraints",
+			) ||
+			!nonEmptyString(item.capability, 128) ||
+			!constraints ||
+			!capabilities.includes(item.capability)
+		) {
+			throw new AgentAuthClientError("PACA_CAPABILITY_BROKER_CONFIG_INVALID");
+		}
+		return { capability: item.capability, constraints };
+	});
+	return {
+		version: 1,
+		agentId: input.agentId,
+		projectId: input.projectId,
+		capabilities: [...capabilities],
+		grantRequests,
+	};
 }
 
 function base64url(value: string | Uint8Array): string {
@@ -588,6 +669,158 @@ export class AgentAuthClient {
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify(report),
 		});
+	}
+}
+
+export class CapabilityBrokerClient {
+	readonly config: CapabilityBrokerConfig;
+	private readonly endpoint: string;
+
+	constructor(
+		config: CapabilityBrokerConfig,
+		endpoint: string,
+		private readonly token: string,
+		private readonly request: typeof fetch = fetch,
+	) {
+		this.config = config;
+		let parsed: URL;
+		try {
+			parsed = new URL(endpoint);
+		} catch {
+			throw new AgentAuthClientError("PACA_CAPABILITY_BROKER_CONFIG_INVALID");
+		}
+		if (
+			(parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+			parsed.username ||
+			parsed.password ||
+			parsed.search ||
+			parsed.hash ||
+			!/^[-_A-Za-z0-9]{43}$/.test(token)
+		) {
+			throw new AgentAuthClientError("PACA_CAPABILITY_BROKER_CONFIG_INVALID");
+		}
+		this.endpoint = parsed.toString();
+	}
+
+	private async brokerRequest(payload: JsonRecord): Promise<unknown> {
+		let response: Response;
+		try {
+			response = await this.request(this.endpoint, {
+				method: "POST",
+				redirect: "error",
+				headers: {
+					accept: "application/json",
+					authorization: `Bearer ${this.token}`,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify(payload),
+				signal: AbortSignal.timeout(15_000),
+			});
+		} catch {
+			throw new AgentAuthClientError("CAPABILITY_BROKER_UNAVAILABLE", true);
+		}
+		const declaredHeader = response.headers.get("content-length");
+		const declaredLength = declaredHeader === null ? 0 : Number(declaredHeader);
+		const contentType = response.headers
+			.get("content-type")
+			?.split(";", 1)[0]
+			?.trim();
+		if (
+			contentType !== "application/json" ||
+			!Number.isSafeInteger(declaredLength) ||
+			declaredLength < 0 ||
+			declaredLength > MAX_RESPONSE_BYTES
+		) {
+			void response.body?.cancel().catch(() => undefined);
+			throw new AgentAuthClientError("CAPABILITY_BROKER_RESPONSE_INVALID");
+		}
+		let bytes: Uint8Array;
+		try {
+			bytes = new Uint8Array(await response.arrayBuffer());
+		} catch {
+			throw new AgentAuthClientError("CAPABILITY_BROKER_UNAVAILABLE", true);
+		}
+		if (bytes.byteLength > MAX_RESPONSE_BYTES) {
+			throw new AgentAuthClientError("CAPABILITY_BROKER_RESPONSE_INVALID");
+		}
+		let body: unknown;
+		try {
+			body = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+		} catch {
+			throw new AgentAuthClientError("CAPABILITY_BROKER_RESPONSE_INVALID");
+		}
+		if (!response.ok) {
+			const failure = remoteError(body, response.status);
+			throw new AgentAuthClientError(
+				failure.code,
+				failure.retryable,
+				failure.retryAfterMs,
+			);
+		}
+		const envelope = record(body);
+		return envelope && "data" in envelope ? envelope.data : body;
+	}
+
+	async execute(capability: string, arguments_: JsonRecord): Promise<unknown> {
+		if (!this.config.capabilities.includes(capability)) {
+			throw new AgentAuthClientError("AGENT_CAPABILITY_NOT_REQUESTED");
+		}
+		return await this.brokerRequest({
+			operation: "execute",
+			capability,
+			arguments: arguments_,
+		});
+	}
+
+	async requestAgent(
+		path: string,
+		capabilities: string[],
+		init: RequestInit,
+	): Promise<unknown> {
+		const segments = path.split("/");
+		if (
+			!path.startsWith(`/api/v1/agent/projects/${this.config.projectId}/`) ||
+			path.includes("//") ||
+			path.includes("?") ||
+			path.includes("#") ||
+			path.includes("%") ||
+			segments.includes(".") ||
+			segments.includes("..") ||
+			capabilities.length === 0 ||
+			new Set(capabilities).size !== capabilities.length ||
+			capabilities.some(
+				(capability) => !this.config.capabilities.includes(capability),
+			)
+		) {
+			throw new AgentAuthClientError("AGENT_REQUEST_PATH_INVALID");
+		}
+		const method = init.method?.toUpperCase() ?? "GET";
+		if (!new Set(["GET", "POST", "DELETE"]).has(method)) {
+			throw new AgentAuthClientError("AGENT_REQUEST_PATH_INVALID");
+		}
+		let body: unknown = null;
+		if (init.body !== undefined && init.body !== null) {
+			try {
+				body = JSON.parse(String(init.body)) as unknown;
+			} catch {
+				throw new AgentAuthClientError("AGENT_REQUEST_BODY_INVALID");
+			}
+		}
+		return await this.brokerRequest({
+			operation: "agent_request",
+			method,
+			path,
+			capabilities,
+			body,
+		});
+	}
+
+	async discoverTasks(): Promise<unknown> {
+		throw new AgentAuthClientError("CAPABILITY_BROKER_OPERATION_DENIED");
+	}
+
+	async heartbeat(_report: AgentHeartbeatReport): Promise<unknown> {
+		throw new AgentAuthClientError("CAPABILITY_BROKER_OPERATION_DENIED");
 	}
 }
 

@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -33,14 +34,15 @@ type Settings struct {
 	// AgentAuthConfigPath opts this legacy conversation runner into the
 	// Worker Agent Auth control plane. It points to a delegated Agent's
 	// private 0600 identity config, not to a Host enrollment token. Presence
-	// is migrated first; task leasing and MCP capability execution remain
-	// separate cutover steps before PACA_API_KEY can be removed.
-	AgentAuthConfigPath    string
-	AgentHarnessKind       string
-	AgentHarnessVersion    string
-	AgentHarnessInstanceID string
-	AgentHeartbeatInterval time.Duration
-	AgentTaskLeaseDuration time.Duration
+	// and task leasing use that identity directly; sandbox MCP calls receive
+	// only a short-lived Project-scoped Capability Broker bearer.
+	AgentAuthConfigPath      string
+	AgentCapabilityBrokerURL string
+	AgentHarnessKind         string
+	AgentHarnessVersion      string
+	AgentHarnessInstanceID   string
+	AgentHeartbeatInterval   time.Duration
+	AgentTaskLeaseDuration   time.Duration
 
 	// PortPoolStart/PortPoolSize size the local-dev host-port pool (see
 	// internal/sandbox/docker.Manager).
@@ -174,6 +176,7 @@ func Load() (Settings, error) {
 		PacaAPIURL:                      os.Getenv("PACA_API_URL"),
 		PacaGatewayURL:                  os.Getenv("PACA_GATEWAY_URL"),
 		AgentAuthConfigPath:             os.Getenv("PACA_AGENT_CONFIG"),
+		AgentCapabilityBrokerURL:        os.Getenv("PACA_AGENT_CAPABILITY_BROKER_URL"),
 		AgentHarnessKind:                envOr("PACA_AGENT_HARNESS_KIND", "custom"),
 		AgentHarnessVersion:             os.Getenv("PACA_AGENT_HARNESS_VERSION"),
 		AgentHarnessInstanceID:          os.Getenv("PACA_AGENT_HARNESS_INSTANCE_ID"),
@@ -239,7 +242,13 @@ func Load() (Settings, error) {
 				"comma-separated list of agent UUIDs, or \"*\" to allow every agent " +
 				"(local dev / a fully cut-over deployment only)")
 	}
+	if s.AgentAuthConfigPath == "" && s.AgentCapabilityBrokerURL != "" {
+		return Settings{}, fmt.Errorf("config: PACA_AGENT_CAPABILITY_BROKER_URL requires PACA_AGENT_CONFIG")
+	}
 	if s.AgentAuthConfigPath != "" {
+		if err := validateCapabilityBrokerURL(s.AgentCapabilityBrokerURL); err != nil {
+			return Settings{}, err
+		}
 		switch s.AgentHarnessKind {
 		case "cloudflare-agent", "codex", "claude-code", "deepseek", "custom":
 		default:
@@ -282,6 +291,16 @@ func Load() (Settings, error) {
 	}
 
 	return s, nil
+}
+
+func validateCapabilityBrokerURL(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
+		parsed.User != nil || parsed.Path != "/agent-capabilities" || parsed.RawQuery != "" ||
+		parsed.Fragment != "" {
+		return fmt.Errorf("config: PACA_AGENT_CAPABILITY_BROKER_URL must be an absolute http(s) URL ending at /agent-capabilities")
+	}
+	return nil
 }
 
 // validatePortRange rejects a misconfigured start/end pair for one of the

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Paca-AI/agent-runner/internal/acp"
 	"github.com/Paca-AI/agent-runner/internal/agent"
+	"github.com/Paca-AI/agent-runner/internal/capabilitybroker"
 	"github.com/Paca-AI/agent-runner/internal/chatsandbox"
 	"github.com/Paca-AI/agent-runner/internal/repository/postgres"
 	"github.com/Paca-AI/agent-runner/internal/sandbox"
@@ -94,6 +95,11 @@ type Options struct {
 	// image's globally npm-installed @paca-ai/paca-mcp — see
 	// config.Settings.MCPDevSourceDir and buildMCPServers.
 	MCPDevSourceDir string
+	// CapabilityBroker keeps an Agent Auth private key in agent-runner and
+	// gives a managed sandbox only a short-lived, Project-scoped bearer.
+	// CapabilityBrokerURL is the internal URL reachable from that sandbox.
+	CapabilityBroker    *capabilitybroker.Broker
+	CapabilityBrokerURL string
 }
 
 // Executor runs conversations for one process — holds the shared sandbox
@@ -221,6 +227,9 @@ func (e *Executor) Run(ctx context.Context, cfg agent.Config, trigger agent.Trig
 		handle, client, sessionID = resume.Handle, resume.Client, resume.SessionID
 		message = trigger.Message
 	case trigger.EnvironmentID != nil:
+		if e.opts.CapabilityBroker != nil && e.opts.CapabilityBroker.Manages(trigger.AgentID.String()) {
+			return Result{}, fmt.Errorf("executor: Agent Auth capability broker does not support legacy static environments")
+		}
 		// A static environment's conversations never populate ChatSandboxes
 		// in the first place (see handler.Handler.keepSandboxAlive's own
 		// EnvironmentID guard), so resume above is always nil here — every
@@ -295,6 +304,13 @@ func (e *Executor) Run(ctx context.Context, cfg agent.Config, trigger agent.Trig
 // with, so callers (handler.Handle) don't need their own reference to it
 // just to finish what Run used to do unconditionally.
 func (e *Executor) StopSandbox(ctx context.Context, h *sandbox.Handle) error {
+	if h == nil {
+		return nil
+	}
+	if e.opts.CapabilityBroker != nil {
+		e.opts.CapabilityBroker.Revoke(h.CapabilityBrokerToken)
+		h.CapabilityBrokerToken = ""
+	}
 	return e.sandboxMgr.Stop(ctx, h)
 }
 
@@ -317,7 +333,24 @@ func (e *Executor) coldStart(ctx, turnCtx context.Context, cfg agent.Config, tri
 	// values already present in the container's own OS environment, not
 	// inline values, so those values have to land in containerEnv too, not
 	// only in the MCPServerConfig entries themselves.
-	mcpServers := e.buildMCPServers(trigger, cfg)
+	var brokerSession *capabilitybroker.Session
+	if e.opts.CapabilityBroker != nil && e.opts.CapabilityBroker.Manages(trigger.AgentID.String()) {
+		issued, err := e.opts.CapabilityBroker.Issue(
+			trigger.AgentID.String(),
+			trigger.ConversationID.String(),
+			trigger.ProjectID.String(),
+		)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("executor: issue Agent Capability Broker session: %w", err)
+		}
+		brokerSession = &issued
+		defer func() {
+			if brokerSession != nil {
+				e.opts.CapabilityBroker.Revoke(brokerSession.Token)
+			}
+		}()
+	}
+	mcpServers := e.buildMCPServers(trigger, cfg, brokerSession)
 	for _, s := range mcpServers {
 		if s.Type != acp.McpServerStdio || s.Env == nil {
 			continue
@@ -347,6 +380,11 @@ func (e *Executor) coldStart(ctx, turnCtx context.Context, cfg agent.Config, tri
 	})
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("executor: start sandbox: %w", err)
+	}
+	if brokerSession != nil {
+		handle.CapabilityBrokerToken = brokerSession.Token
+		// Ownership moves to StopSandbox, including paused-chat teardown.
+		brokerSession = nil
 	}
 
 	// Written before Initialize/NewSession, not after — Goose's own skills
@@ -591,7 +629,7 @@ func (e *Executor) coldStartEnvironment(ctx, turnCtx context.Context, cfg agent.
 	containerEnv["GIT_COMMITTER_NAME"] = gitName
 	containerEnv["GIT_COMMITTER_EMAIL"] = gitEmail
 
-	mcpServers := e.buildMCPServers(trigger, cfg)
+	mcpServers := e.buildMCPServers(trigger, cfg, nil)
 	for _, s := range mcpServers {
 		if s.Type != acp.McpServerStdio || s.Env == nil {
 			continue
@@ -801,7 +839,7 @@ const pacaMCPBinPath = "/usr/bin/paca"
 // direct equivalent in ACP's three-way stdio/http/sse enum and are skipped
 // entirely for now — mapping OAuth to an http entry's bearer-token header
 // wasn't attempted this pass.
-func (e *Executor) buildMCPServers(trigger agent.Trigger, cfg agent.Config) []acp.MCPServerConfig {
+func (e *Executor) buildMCPServers(trigger agent.Trigger, cfg agent.Config, brokerSession *capabilitybroker.Session) []acp.MCPServerConfig {
 	servers := make([]acp.MCPServerConfig, 0, len(cfg.MCPServers)+1)
 	for _, s := range cfg.MCPServers {
 		if !s.IsEnabled {
@@ -839,14 +877,23 @@ func (e *Executor) buildMCPServers(trigger agent.Trigger, cfg agent.Config) []ac
 		}
 	}
 
-	if e.opts.PacaAPIKey == "" {
+	if brokerSession == nil && e.opts.PacaAPIKey == "" {
 		return servers
 	}
-	env := map[string]string{
-		"PACA_API_KEY":     e.opts.PacaAPIKey,
-		"PACA_API_URL":     e.opts.PacaAPIURL,
-		"PACA_GATEWAY_URL": e.opts.PacaGatewayURL,
-		"PACA_AGENT_ID":    cfg.ID.String(),
+	var env map[string]string
+	if brokerSession != nil {
+		env = map[string]string{
+			"PACA_CAPABILITY_BROKER_URL":    e.opts.CapabilityBrokerURL,
+			"PACA_CAPABILITY_BROKER_TOKEN":  brokerSession.Token,
+			"PACA_CAPABILITY_BROKER_CONFIG": brokerSession.EncodedConfig,
+		}
+	} else {
+		env = map[string]string{
+			"PACA_API_KEY":     e.opts.PacaAPIKey,
+			"PACA_API_URL":     e.opts.PacaAPIURL,
+			"PACA_GATEWAY_URL": e.opts.PacaGatewayURL,
+			"PACA_AGENT_ID":    cfg.ID.String(),
+		}
 	}
 	if trigger.ProjectID != uuid.Nil {
 		env["PACA_PROJECT_ID"] = trigger.ProjectID.String()

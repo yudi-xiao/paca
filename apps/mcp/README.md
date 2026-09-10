@@ -10,7 +10,7 @@ Connect your AI assistant (Claude, Cursor, VS Code Copilot, etc.) to your Paca w
 
 - Node.js 18+
 - A running Paca instance (local or deployed)
-- A delegated Agent Auth enrollment file, or a legacy Paca API key
+- A delegated Agent Auth enrollment file, a Runner-issued Capability Broker session, or a legacy Paca API key
 
 ## Setup
 
@@ -21,6 +21,7 @@ No installation or build step required. Configure your AI agent client to use th
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `PACA_AGENT_CONFIG` | One auth mode | — | Absolute path to a local delegated Agent enrollment file; it must be a regular, non-symlink `0600` file |
+| `PACA_CAPABILITY_BROKER_URL` / `PACA_CAPABILITY_BROKER_TOKEN` / `PACA_CAPABILITY_BROKER_CONFIG` | One auth mode | — | Runner-managed sandbox mode; all three are required and are mutually exclusive with private Agent config and API key |
 | `PACA_AGENT_HARNESS_KIND` | ❌ | `custom` | `cloudflare-agent`, `codex`, `claude-code`, `deepseek`, or `custom`; presence metadata only, not a permission source |
 | `PACA_AGENT_HARNESS_VERSION` | ❌ | — | Harness version reported with Host presence |
 | `PACA_AGENT_HARNESS_INSTANCE_ID` | ❌ | — | Local Harness instance identifier reported with Host presence |
@@ -109,7 +110,7 @@ For a full setup walkthrough, see the [MCP Server Setup Guide](../../docs/guides
 
 ## Agent & User Permissions
 
-The MCP server supports two mutually exclusive authentication paths. Agent Auth is the preferred path for a local Codex, Claude Code, DeepSeek, or custom Harness. The API-key path remains for users and legacy integrations during migration.
+The MCP server supports three mutually exclusive authentication paths. Direct Agent Auth is preferred for a controlled local Codex, Claude Code, DeepSeek, or custom Harness. Runner-managed sandboxes use the internal Capability Broker mode. The API-key path remains only for users and legacy integrations during migration.
 
 ### Agent Auth Harness Mode
 
@@ -141,7 +142,13 @@ In this mode:
 7. `discover_tasks` reports Host/Harness presence before discovery so server-side matching can use approved labels and current online state.
 8. `connect_environment` requires an exact `environment.connect` Grant for the project, environment, and `read` or `execute` mode. It generates a fresh idempotency request ID and returns only the server-issued short-lived connection result. Harnesses must keep the returned access token in memory and must never log or persist it.
 
-The private enrollment file belongs only on the controlled Host. Do not copy or mount it into a Cloudflare Computer/Sandbox workload. Managed sandboxes will use a separate short-lived capability broker; until that broker is complete, the Runner's sandbox MCP path remains on the legacy key compatibility mode.
+The private enrollment file belongs only on the controlled Host. Do not copy or mount it into a Cloudflare Computer/Sandbox workload.
+
+### Runner-managed Capability Broker Mode
+
+`services/agent-runner` creates these three variables for an ephemeral Project-scoped sandbox; operators and end users should not create them manually. The config is a base64url-encoded public summary containing only the Agent ID, Project ID, capabilities, and matching Grant requests. The opaque bearer is not an Agent JWT and cannot be used against Paca directly. The Broker indexes sessions by a SHA-256 digest instead of the raw bearer; the bearer is never persisted or logged, its 45-minute idle expiry refreshes only on valid use, and teardown revokes it. Every accepted upstream request receives a fresh 45-second Agent JWT.
+
+Broker mode rejects Project escape paths, URL/query/header forwarding, unknown JSON fields, unsupported methods, oversized requests, and capabilities outside its public summary. `task.execute` remains in the Runner lease coordinator, while `environment.connect`, repository/plugin tools, executable-task discovery, and Host heartbeat are not exposed by the first broker contract. Broker-managed legacy static Environments fail closed until they can receive a fresh per-conversation broker session.
 
 ### Agent Mode vs. User Mode
 

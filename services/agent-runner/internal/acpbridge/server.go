@@ -99,6 +99,10 @@ type Server struct {
 	// later StartEnvironment call. See sandbox.EnvironmentConfig.
 	// MCPDevSourceDir's doc comment.
 	MCPDevSourceDir string
+	// CapabilityBroker is mounted only when this Runner has a delegated
+	// Agent Auth identity. The handler performs its own opaque-bearer and
+	// Project-scope validation; it must never be wrapped in InternalToken.
+	CapabilityBroker http.Handler
 
 	Log Logger
 }
@@ -110,6 +114,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /agent-bridge/status/{agentId}", s.requireInternalToken(s.handleStatus))
 	mux.HandleFunc("POST /agent-bridge/disconnect/{agentId}", s.requireInternalToken(s.handleDisconnect))
 	mux.HandleFunc("GET /llm/models", s.handleLLMModels)
+	if s.CapabilityBroker != nil {
+		mux.Handle("POST /agent-capabilities", s.CapabilityBroker)
+	}
 	s.registerEnvironmentRoutes(mux)
 	s.registerTerminalRoute(mux)
 	s.registerEnvironmentStatsRoute(mux)

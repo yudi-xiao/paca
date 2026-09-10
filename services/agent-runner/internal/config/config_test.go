@@ -34,6 +34,7 @@ func TestValidatePortRange(t *testing.T) {
 func TestLoadAgentAuthPresenceSettings(t *testing.T) {
 	setRequiredEnvironment(t)
 	t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
+	t.Setenv("PACA_AGENT_CAPABILITY_BROKER_URL", "http://agent-runner:8080/agent-capabilities")
 	t.Setenv("PACA_AGENT_HARNESS_KIND", "deepseek")
 	t.Setenv("PACA_AGENT_HARNESS_VERSION", "1.2.3")
 	t.Setenv("PACA_AGENT_HARNESS_INSTANCE_ID", "local-arm64")
@@ -45,6 +46,7 @@ func TestLoadAgentAuthPresenceSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if settings.AgentAuthConfigPath != "/private/agent.json" ||
+		settings.AgentCapabilityBrokerURL != "http://agent-runner:8080/agent-capabilities" ||
 		settings.AgentHarnessKind != "deepseek" ||
 		settings.AgentHarnessVersion != "1.2.3" ||
 		settings.AgentHarnessInstanceID != "local-arm64" ||
@@ -66,6 +68,7 @@ func TestLoadRejectsInvalidAgentAuthPresenceSettings(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			setRequiredEnvironment(t)
 			t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
+			t.Setenv("PACA_AGENT_CAPABILITY_BROKER_URL", "http://agent-runner:8080/agent-capabilities")
 			t.Setenv("PACA_AGENT_HARNESS_KIND", fixture.kind)
 			t.Setenv("PACA_AGENT_HEARTBEAT_SECONDS", fixture.seconds)
 			if _, err := Load(); err == nil {
@@ -76,8 +79,31 @@ func TestLoadRejectsInvalidAgentAuthPresenceSettings(t *testing.T) {
 	t.Run("lease duration invalid", func(t *testing.T) {
 		setRequiredEnvironment(t)
 		t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
+		t.Setenv("PACA_AGENT_CAPABILITY_BROKER_URL", "http://agent-runner:8080/agent-capabilities")
 		t.Setenv("PACA_AGENT_HARNESS_KIND", "codex")
 		t.Setenv("PACA_AGENT_TASK_LEASE_SECONDS", "301")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() error = nil")
+		}
+	})
+	t.Run("broker URL missing", func(t *testing.T) {
+		setRequiredEnvironment(t)
+		t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() error = nil")
+		}
+	})
+	t.Run("broker URL invalid", func(t *testing.T) {
+		setRequiredEnvironment(t)
+		t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
+		t.Setenv("PACA_AGENT_CAPABILITY_BROKER_URL", "https://example.com/agent-capabilities?token=leak")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() error = nil")
+		}
+	})
+	t.Run("broker URL without Agent identity", func(t *testing.T) {
+		setRequiredEnvironment(t)
+		t.Setenv("PACA_AGENT_CAPABILITY_BROKER_URL", "http://agent-runner:8080/agent-capabilities")
 		if _, err := Load(); err == nil {
 			t.Fatal("Load() error = nil")
 		}

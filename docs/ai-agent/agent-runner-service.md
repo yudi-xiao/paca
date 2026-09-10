@@ -142,7 +142,9 @@ See [repository-plugin-adapter.md](repository-plugin-adapter.md) for the full to
 
 ### MCP Servers
 
-`internal/executor/executor.go`'s `buildMCPServers` sends the agent's own configured `agent_mcp_servers` rows first, then always appends the built-in Paca MCP server last (so it can't be shadowed by a same-named user entry) whenever `PACA_API_KEY` is configured. The wire shape is ACP's real schema (a `type`-discriminated stdio/http/sse enum, `env` as an array of `{name, value}` pairs) — verified against the spec directly after a hand-guessed shape omitting both made `session/new` hang. `oauth`-transport servers (a value the DB schema allows) have no ACP equivalent yet and are skipped.
+`internal/executor/executor.go`'s `buildMCPServers` sends the agent's own configured `agent_mcp_servers` rows first, then appends the built-in Paca MCP server last so it cannot be shadowed by a same-named user entry. For the Agent named by `PACA_AGENT_CONFIG`, every ephemeral Project-scoped sandbox receives only `PACA_CAPABILITY_BROKER_URL`, a random 256-bit opaque bearer, and a public capability/Grant summary. The Runner retains the Ed25519 private key and mints a fresh Agent JWT only after the broker has checked the exact Project route, requested Capability, method, request size, and body scope. The Broker indexes sessions by a SHA-256 digest; the bearer is never persisted or logged, expires after 45 minutes of inactivity, and is revoked before sandbox teardown. It cannot forward arbitrary URLs or caller headers, and the public config contains no JWT, provider endpoint, Host key, or Agent key.
+
+The first broker contract deliberately excludes `task.execute` (owned by the Runner's lease coordinator) and `environment.connect` (returns another bearer and belongs behind the dedicated Environment Gateway contract). A broker-managed Agent attached to a legacy static Environment therefore fails closed until that container path can receive a fresh per-conversation broker session. Agents outside the configured Agent Auth identity can still use `PACA_API_KEY` during the explicit staged rollout; a managed Agent never falls back to that key. The wire shape remains ACP's real schema (a `type`-discriminated stdio/http/sse enum, `env` as an array of `{name, value}` pairs). `oauth`-transport servers have no ACP equivalent yet and are skipped.
 
 ---
 
@@ -166,8 +168,9 @@ There is no REST equivalent to `services/ai-agent`'s `/conversations/:id/pause` 
 | `GET` | `/agent-bridge/status/{agentId}` | Internal — is this agent's bridge daemon currently connected? Proxied by `services/api` |
 | `POST` | `/agent-bridge/disconnect/{agentId}` | Internal — force-disconnect an agent's bridge daemon. Proxied by `services/api` |
 | `GET` | `/llm/models` | Static provider/model catalog (`data/llm_models.json`), proxied by `services/api`'s `GetLLMModels` |
+| `POST` | `/agent-capabilities` | Internal sandbox Capability Broker; accepts only its per-sandbox bearer and bounded Project-scoped JSON protocol |
 
-The three internal endpoints require `X-Internal-Token` matching `INTERNAL_API_KEY` — `services/api`'s `AI_AGENT_INTERNAL_KEY` must equal this value.
+The three bridge/model internal endpoints require `X-Internal-Token` matching `INTERNAL_API_KEY` — `services/api`'s `AI_AGENT_INTERNAL_KEY` must equal this value. `/agent-capabilities` does not accept that service token; it accepts only the opaque bearer issued for its sandbox session.
 
 ---
 
@@ -180,11 +183,13 @@ requires that the registration requested `task.execute`, signs a fresh 45-second
 performs a synchronous Host heartbeat. It then refreshes presence periodically. A pending, revoked,
 expired, replayed, or otherwise rejected identity therefore fails closed at the Worker boundary.
 
-This is an incremental migration boundary: the current Valkey conversation consumer and built-in
-MCP server still use the legacy path described above. Do not remove `PACA_API_KEY` until task lease
-consumption and all required MCP business tools have been switched to Project-scoped Capability
-execution. The heartbeat does not grant access by itself; the Worker intersects reported labels with
-administrator-approved Host labels and rechecks active Grants and constraints.
+This is an incremental migration boundary. The Valkey trigger transport remains, but a conversation
+for the configured Agent Auth identity now uses a Project-scoped Capability Broker instead of
+`PACA_API_KEY`; other Agent IDs may retain the legacy path behind the rollout gate. The heartbeat
+does not grant access by itself; the Worker intersects reported labels with administrator-approved
+Host labels and rechecks active Grants and constraints. Repository/plugin tools and legacy static
+Environment attachment still need broker-aware contracts before the global API-key compatibility
+path can be removed.
 
 For a `task_assigned` trigger whose legacy Agent UUID equals the configured Agent Auth identity,
 the runner now discovers the task through `GET /api/v1/agent/tasks/claimable` and refuses to start
@@ -203,11 +208,12 @@ the legacy path during the rollout; one identity cannot accidentally claim anoth
 | `INTERNAL_API_KEY` | ✅ | Shared secret for `services/api`'s calls into the internal HTTP endpoints above; must equal `services/api`'s `AI_AGENT_INTERNAL_KEY` |
 | `AGENT_RUNNER_ALLOWED_AGENT_IDS` | ✅ | Comma-separated agent UUIDs, or `*` for every agent — see `config.Gate`'s doc comment |
 | `PACA_AGENT_CONFIG` | | Path to the delegated Agent's private `0600` config. Enables Agent Auth startup verification and Host presence heartbeats. |
+| `PACA_AGENT_CAPABILITY_BROKER_URL` | when `PACA_AGENT_CONFIG` is set | Absolute internal URL ending exactly in `/agent-capabilities`, reachable from ephemeral sandboxes. The Runner never places the private Agent config in a sandbox. |
 | `PACA_AGENT_HARNESS_KIND` | when `PACA_AGENT_CONFIG` is set | Execution implementation: `cloudflare-agent`, `codex`, `claude-code`, `deepseek`, or `custom`. Default: `custom`. |
 | `PACA_AGENT_HARNESS_VERSION` / `PACA_AGENT_HARNESS_INSTANCE_ID` | | Optional public runtime metadata included in the heartbeat. |
 | `PACA_AGENT_HEARTBEAT_SECONDS` | | Heartbeat interval from 10 through 60 seconds. Default: `30`. |
 | `PACA_AGENT_TASK_LEASE_SECONDS` | | `task.execute` lease duration from 10 through 300 seconds; renewed halfway through. Default: `60`. |
-| `PACA_API_KEY` | | Credential for the built-in Paca MCP server; omit to disable it entirely |
+| `PACA_API_KEY` | | Legacy credential used only by Agent IDs outside the configured Agent Auth rollout identity; a managed Agent never receives it |
 | `PACA_API_URL` / `PACA_GATEWAY_URL` | | Internal URLs the Paca MCP server calls out to |
 | `PORT_POOL_START` / `PORT_POOL_SIZE` | | Container port pool. Default: `10000` / `100` |
 | `WORKER_CONCURRENCY` | | Trigger goroutines in flight at once. Default: `5` |

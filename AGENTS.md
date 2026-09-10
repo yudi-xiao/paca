@@ -219,6 +219,10 @@ Paca 的 Agent 控制面不得绑定某一种模型或执行器。每个 Better 
 - 本地 Codex、Claude Code、DeepSeek harness 或其他 Agent Host：使用本机终端、文件系统和模型能力，通过 Better Auth Agent Auth 注册、审批和取得受约束 Grant，再通过 Paca Agent API 领取与提交任务。
 - 未来其他远程 Harness：只要实现同一版本化协议和安全约束即可接入，不得绕过 Agent Auth 直接读写业务数据库或 DocumentParty。
 
+本地受控 Host 与托管 Sandbox 必须使用不同的凭据交付方式。本地 Codex、Claude Code、DeepSeek 等 Harness 可以从宿主机私有 `0600` 配置读取 Agent Auth Ed25519 身份，并为每个请求签发短期 Agent JWT；不可信或托管 Sandbox 不得挂载该私钥，也不得注入 legacy `PACA_API_KEY`。Runner 应为每个 Project-scoped conversation 签发高熵、进程内保存、空闲短时失效且 teardown 立即撤销的 opaque Capability Broker bearer；Sandbox 只接收 bearer 与不含端点、JWT、Host/Agent 私钥的公开 Grant 摘要。Broker 必须校验固定 Project 路由、Capability allowlist、请求大小与方法，只代表 Host 为获准请求签发新鲜 Agent JWT，不能成为可转发任意 URL、Header 或 Capability 的认证代理。
+
+`task.execute` 继续由 Runner/Workflow 的 lease 协调器掌握，不下放给通用 Sandbox MCP；`environment.connect` 会返回另一张短期 bearer，必须经专用 Environment Gateway 契约处理，不能在未完成嵌套凭据威胁建模时通过通用 Broker 转发。静态 Environment 若暂时无法安全刷新每个 conversation 的 Broker bearer，应对已迁移 Agent fail closed，而不是退回 legacy key。其他尚未迁移的 Agent 可以在明确的逐 Agent rollout gate 下短期保留兼容路径，但已由 Agent Auth 管理的 Agent 不得回退。
+
 所有 Harness 共用以下控制协议和语义：注册与心跳、能力发现与申请、审批、领取任务、短期 lease/续租、幂等 checkpoint、提交结果、取消确认、Grant 撤销和审计。Harness 类型只影响执行能力与调度标签，不改变 `project.read`、`task.write`、`document.edit` 等 Capability 的业务语义。任务分派必须按 Agent/Host 已审批 capability、约束、在线状态和 Harness 能力匹配，不能仅按客户端自报名称决定权限。
 
 领取和推进工作项使用独立的 `task.execute` Capability，不把“可以运行任务”混入 `task.write`。Grant 至少绑定 Organization、Project、Task、`operationMode=execute`、允许的 action 与短有效期；Agent Auth Session 中的 Agent/Host 是可信租约所有者，客户端提交的 actor 字段一律忽略。PostgreSQL 对同一 Task 的 active lease、单调版本、checkpoint 序列、幂等 request ID 和事件记录负责，AgentDO 只镜像有界运行摘要。Harness 若要实际修改 Task 或 Document，仍需另行取得对应 `task.write`、`document.edit` Grant，`task.execute` 本身不授予业务字段写权限。

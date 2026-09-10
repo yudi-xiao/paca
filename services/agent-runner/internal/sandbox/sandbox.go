@@ -158,6 +158,10 @@ type Backend interface {
 // ContainerID on every call instead of caching it here.
 type Handle struct {
 	ContainerID string
+	// CapabilityBrokerToken is the process-local opaque bearer issued for
+	// this sandbox. It is never sent to a backend API or logged; Executor uses
+	// it only to revoke the broker session during teardown.
+	CapabilityBrokerToken string
 	// BaseURL is the sandbox's goose serve endpoint, already health-checked
 	// and ready — e.g. "http://172.18.0.5:3284" (docker, same-network
 	// mode), "http://localhost:32941" (docker, local-dev host-port mode),

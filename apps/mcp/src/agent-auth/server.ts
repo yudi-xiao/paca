@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { markdownToBlocknote } from "../utils/index.js";
 import {
-	type AgentAuthConfig,
+	type AgentCapabilityConfig,
 	type AgentGrantRequest,
 	type AgentHeartbeatReport,
 	exactConstraint,
@@ -146,7 +146,7 @@ const environmentInput = scopeInput
 	.strict();
 
 function matchingGrant(
-	config: AgentAuthConfig,
+	config: AgentCapabilityConfig,
 	capability: string,
 	predicate: (constraints: JsonRecord) => boolean,
 ): AgentGrantRequest {
@@ -159,7 +159,7 @@ function matchingGrant(
 }
 
 function scopedGrant(
-	config: AgentAuthConfig,
+	config: AgentCapabilityConfig,
 	capability: string,
 	projectId: string,
 	taskId?: string,
@@ -174,7 +174,7 @@ function scopedGrant(
 }
 
 function documentGrant(
-	config: AgentAuthConfig,
+	config: AgentCapabilityConfig,
 	capability: "document.read" | "document.edit",
 	projectId: string,
 	documentId: string,
@@ -197,7 +197,7 @@ function documentGrant(
 }
 
 function workflowGrant(
-	config: AgentAuthConfig,
+	config: AgentCapabilityConfig,
 	projectId: string,
 ): AgentGrantRequest {
 	return matchingGrant(config, "workflow.execute", (constraints) =>
@@ -210,7 +210,7 @@ function workflowGrant(
 }
 
 function environmentGrant(
-	config: AgentAuthConfig,
+	config: AgentCapabilityConfig,
 	projectId: string,
 	environmentId: string,
 	operationMode: "read" | "execute",
@@ -242,7 +242,7 @@ function executionScope(grant: AgentGrantRequest): JsonRecord {
 }
 
 export interface AgentCapabilityTransport {
-	readonly config: AgentAuthConfig;
+	readonly config: AgentCapabilityConfig;
 	execute(capability: string, arguments_: JsonRecord): Promise<unknown>;
 	discoverTasks(): Promise<unknown>;
 	heartbeat(report: AgentHeartbeatReport): Promise<unknown>;
@@ -504,7 +504,7 @@ tools.start_document_workflow = {
 	inputSchema: tools.edit_document.inputSchema,
 };
 
-export function getAgentCapabilityTools(config: AgentAuthConfig): Tool[] {
+export function getAgentCapabilityTools(config: AgentCapabilityConfig): Tool[] {
 	const requested = new Set(
 		config.grantRequests.map((request) => request.capability),
 	);

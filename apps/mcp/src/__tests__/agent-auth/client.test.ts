@@ -6,8 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AgentAuthClient,
 	AgentAuthClientError,
+	CapabilityBrokerClient,
 	createAgentHeartbeatReport,
 	loadAgentAuthConfig,
+	loadCapabilityBrokerConfig,
 } from "../../agent-auth/client.js";
 
 const tempDirectories: string[] = [];
@@ -83,6 +85,108 @@ afterEach(async () => {
 });
 
 describe("Agent Auth MCP client", () => {
+	it("loads a public Project-scoped Capability Broker envelope", () => {
+		const encoded = Buffer.from(
+			JSON.stringify({
+				version: 1,
+				agentId: "agent-1",
+				projectId: "11111111-1111-4111-8111-111111111111",
+				capabilities: ["project.read"],
+				grantRequests: [
+					{
+						capability: "project.read",
+						constraints: {
+							organizationId: "org-1",
+							projectId: "11111111-1111-4111-8111-111111111111",
+							validUntil: "2099-01-01T00:00:00.000Z",
+						},
+					},
+				],
+			}),
+		).toString("base64url");
+		expect(loadCapabilityBrokerConfig(encoded)).toMatchObject({
+			agentId: "agent-1",
+			projectId: "11111111-1111-4111-8111-111111111111",
+			capabilities: ["project.read"],
+		});
+		expect(() => loadCapabilityBrokerConfig("not+base64url")).toThrow(
+			"PACA_CAPABILITY_BROKER_CONFIG_INVALID",
+		);
+	});
+
+	it("uses only the opaque broker bearer and enforces its Project boundary", async () => {
+		const config = loadCapabilityBrokerConfig(
+			Buffer.from(
+				JSON.stringify({
+					version: 1,
+					agentId: "agent-1",
+					projectId: "11111111-1111-4111-8111-111111111111",
+					capabilities: ["project.read", "workflow.execute"],
+					grantRequests: [
+						{
+							capability: "project.read",
+							constraints: {
+								organizationId: "org-1",
+								projectId: "11111111-1111-4111-8111-111111111111",
+								validUntil: "2099-01-01T00:00:00.000Z",
+							},
+						},
+						{
+							capability: "workflow.execute",
+							constraints: {
+								organizationId: "org-1",
+								projectId: "11111111-1111-4111-8111-111111111111",
+								validUntil: "2099-01-01T00:00:00.000Z",
+							},
+						},
+					],
+				}),
+			).toString("base64url"),
+		);
+		const token = "x".repeat(43);
+		const request = vi.fn(
+			async (_url: string | URL | Request, init?: RequestInit) => {
+				expect(new Headers(init?.headers).get("authorization")).toBe(
+					`Bearer ${token}`,
+				);
+				return Response.json({ data: { ok: true } });
+			},
+		);
+		const client = new CapabilityBrokerClient(
+			config,
+			"http://agent-runner:8080/agent-capabilities",
+			token,
+			request as typeof fetch,
+		);
+
+		await expect(
+			client.execute("project.read", {
+				projectId: "11111111-1111-4111-8111-111111111111",
+			}),
+		).resolves.toEqual({ ok: true });
+		expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({
+			operation: "execute",
+			capability: "project.read",
+			arguments: { projectId: "11111111-1111-4111-8111-111111111111" },
+		});
+		await expect(
+			client.requestAgent(
+				"/api/v1/agent/projects/22222222-2222-4222-8222-222222222222/runs",
+				["workflow.execute"],
+				{ method: "POST" },
+			),
+		).rejects.toMatchObject({ code: "AGENT_REQUEST_PATH_INVALID" });
+		for (const path of [
+			"/api/v1/agent/projects/11111111-1111-4111-8111-111111111111/../tasks",
+			"/api/v1/agent/projects/11111111-1111-4111-8111-111111111111/%2e%2e/tasks",
+		]) {
+			await expect(
+				client.requestAgent(path, ["workflow.execute"], { method: "GET" }),
+			).rejects.toMatchObject({ code: "AGENT_REQUEST_PATH_INVALID" });
+		}
+		expect(request).toHaveBeenCalledOnce();
+	});
+
 	it("loads only a private regular 0600 identity file", async () => {
 		const fixture = await writeConfig();
 		await expect(loadAgentAuthConfig(fixture.path)).resolves.toMatchObject({
