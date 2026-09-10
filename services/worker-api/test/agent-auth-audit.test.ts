@@ -22,6 +22,69 @@ function databaseThatFails(error: unknown): PacaDatabase {
 }
 
 describe("Agent Auth audit failures", () => {
+  it("records capability execution as the verified Agent actor", async () => {
+    const values = vi.fn(async (_value: Record<string, unknown>) => undefined);
+    const database = {
+      insert: vi.fn(() => ({ values })),
+    } as unknown as PacaDatabase;
+    const execution = {
+      type: "capability.executed",
+      capability: "project.read",
+      agentId: "agent-1",
+      hostId: "host-1",
+      userId: "delegating-user-1",
+      status: "success",
+      arguments: {
+        organizationId: "paca-default",
+        projectId: "11111111-1111-4111-8111-111111111111",
+      },
+      output: { projectId: "11111111-1111-4111-8111-111111111111" },
+    } satisfies AgentAuthEvent;
+
+    await recordAgentAuthEvent(database, execution);
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "capability.executed",
+        actorType: "agent",
+        actorId: "agent-1",
+        agentId: "agent-1",
+        hostId: "host-1",
+        metadata: expect.objectContaining({ delegatedUserId: "delegating-user-1" }),
+      }),
+    );
+  });
+
+  it("does not invent delegated-user context for autonomous execution", async () => {
+    const values = vi.fn(async (_value: Record<string, unknown>) => undefined);
+    const database = {
+      insert: vi.fn(() => ({ values })),
+    } as unknown as PacaDatabase;
+    const execution = {
+      type: "capability.executed",
+      capability: "project.read",
+      agentId: "autonomous-agent-1",
+      hostId: "autonomous-host-1",
+      status: "success",
+      arguments: {
+        organizationId: "paca-default",
+        projectId: "11111111-1111-4111-8111-111111111111",
+      },
+      output: { projectId: "11111111-1111-4111-8111-111111111111" },
+    } satisfies AgentAuthEvent;
+
+    await recordAgentAuthEvent(database, execution);
+    const recorded = values.mock.calls[0]?.[0];
+
+    expect(recorded).toMatchObject({
+      actorType: "agent",
+      actorId: "autonomous-agent-1",
+      agentId: "autonomous-agent-1",
+      hostId: "autonomous-host-1",
+    });
+    expect(recorded?.metadata).not.toHaveProperty("delegatedUserId");
+  });
+
   it("records document execution scope without copying document content", async () => {
     const values = vi.fn(async (_value: Record<string, unknown>) => undefined);
     const database = {

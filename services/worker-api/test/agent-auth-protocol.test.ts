@@ -1,3 +1,4 @@
+import type { AgentAuthEvent } from "@better-auth/agent-auth";
 import type { MemoryDB } from "@better-auth/memory-adapter";
 import { memoryAdapter } from "@better-auth/memory-adapter";
 import type { BetterAuthOptions } from "better-auth";
@@ -460,6 +461,7 @@ describe("Better Auth Agent Auth protocol", () => {
     const store = permissionStore();
     const permissionService = new PacaPermissionService(store);
     const onExecute = vi.fn(async ({ capability, arguments: args }) => ({ capability, args }));
+    const events: AgentAuthEvent[] = [];
     const auth = betterAuth(
       createAuthOptions(
         memoryAdapter(db),
@@ -467,6 +469,9 @@ describe("Better Auth Agent Auth protocol", () => {
         pacaPermission({ service: permissionService }),
         pacaAgentAuth({
           autonomousHostEnrollmentSecret: AUTONOMOUS_ENROLLMENT_SECRET,
+          onEvent: (event) => {
+            events.push(event);
+          },
           onExecute,
         }),
         pacaAgentApprovalGuard({
@@ -547,6 +552,13 @@ describe("Better Auth Agent Auth protocol", () => {
     expect(db.agentHost).toEqual([
       expect.objectContaining({ id: hostId, userId: null, status: "active" }),
     ]);
+    expect(db.agent).toEqual([
+      expect.objectContaining({ id: agentId, hostId, userId: null, mode: "autonomous" }),
+    ]);
+    expect(db.user).toHaveLength(1);
+    expect(db.user).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: `agent:${agentId}` })]),
+    );
 
     const constraints = {
       organizationId: ORGANIZATION_ID,
@@ -591,6 +603,21 @@ describe("Better Auth Agent Auth protocol", () => {
     );
     expect(executed.status).toBe(200);
     expect(onExecute).toHaveBeenCalledOnce();
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "capability.executed",
+          agentId,
+          hostId,
+          capability: "project.read",
+          status: "success",
+        }),
+      ]),
+    );
+    const executionEvent = events.find((event) => event.type === "capability.executed");
+    expect(executionEvent && "userId" in executionEvent ? executionEvent.userId : undefined).toBe(
+      undefined,
+    );
 
     const revoked = await auth.handler(
       post(

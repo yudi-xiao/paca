@@ -103,12 +103,18 @@ export async function recordAgentAuthEvent(
   logFailure: AuditFailureLogger = (failure) => console.error(JSON.stringify(failure)),
 ) {
   const execution = event.type === "capability.executed" ? event : null;
+  // Agent Auth 0.6.2 emits capability.executed with the verified Agent/Host
+  // identity but without actorType/actorId. The Agent is the business actor;
+  // a delegated user remains approval context and must not replace it.
+  const actorType = execution?.agentId ? "agent" : (event.actorType ?? "system");
+  const actorId = execution?.agentId ?? event.actorId ?? null;
   const metadata = {
     ...(event.metadata ? (sanitize(event.metadata) as Record<string, unknown>) : {}),
     ...(execution
       ? {
           provider: execution.provider,
           agentName: execution.agentName,
+          ...(execution.userId ? { delegatedUserId: execution.userId } : {}),
           argumentKeys: Object.keys(execution.arguments ?? {}).sort(),
           executionScope: safeExecutionScope(execution.arguments),
           outputType: execution.output === null ? "null" : typeof execution.output,
@@ -121,8 +127,8 @@ export async function recordAgentAuthEvent(
     await database.insert(pacaAgentAuthAudit).values({
       id: crypto.randomUUID(),
       eventType: event.type,
-      actorType: event.actorType ?? "system",
-      actorId: event.actorId ?? execution?.userId ?? null,
+      actorType,
+      actorId,
       agentId: event.agentId ?? null,
       hostId: event.hostId ?? null,
       targetType: event.targetType ?? null,
