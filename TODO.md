@@ -142,7 +142,7 @@
 - [x] 新数据库可从零应用全部 Worker migrations；已在隔离的空 `paca/internal` branch 验证。
 - [x] 已有测试数据库可安全升级且保留数据；0001 已用 2 用户/2 Session 合成数据验证首位 `SUPER_ADMIN/OWNER`、后续 `USER/MEMBER`、默认 Organization 与 Session 回填。
 - [x] Worker 通过 Hyperdrive 对迁移后 schema 完成 Better Auth 用户与 Session 基本读写。
-- [ ] migration 回滚或前滚修复方案经过演练。
+- [x] migration 回滚或前滚修复方案经过演练：隔离 PostgreSQL 17 测试库先在单一事务中创建 probe 后触发唯一约束失败，确认 rollback 后无残留关系；随后以 additive column → 数据回填 → `NOT NULL` 的受审查前滚方式保留并修复既有行，最终清理 probe。GitHub Actions `34433751841` 同时验证 27 个真实 migration、6 项数据库/守卫契约与 Worker dry-run bundle 全部通过；已提交的 schema 仍采用 Worker 版本回滚加前滚 migration，不尝试破坏性 down migration。
 
 ## M3：Better Auth Core
 
