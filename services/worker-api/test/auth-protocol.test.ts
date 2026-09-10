@@ -135,6 +135,53 @@ describe("Better Auth protocol", () => {
     expect(database.session).toHaveLength(0);
   });
 
+  it("does not resolve missing, expired, or forged Session cookies", async () => {
+    const bindings = testBindings();
+    const database = createMemoryDatabase();
+    const auth = betterAuth(createAuthOptions(memoryAdapter(database), bindings));
+    const app = createApp({ authHandler: (request) => auth.handler(request), log: vi.fn() });
+
+    const missing = await app.request(
+      `${BASE_URL}/api/auth/get-session`,
+      { headers: { origin: BASE_URL } },
+      bindings,
+    );
+    expect(missing.status).toBe(200);
+    await expect(missing.json()).resolves.toBeNull();
+
+    const signUp = await app.request(
+      `${BASE_URL}/api/auth/sign-up/email`,
+      jsonRequest({
+        email: "session-boundary@paca.test",
+        name: "Session Boundary",
+        password: "correct-horse-battery-staple",
+      }),
+      bindings,
+    );
+    expect(signUp.status).toBe(200);
+    const cookie = sessionCookie(signUp);
+    const storedSession = database.session?.[0];
+    if (!storedSession) throw new Error("Expected a persisted Session");
+    storedSession.expiresAt = new Date(Date.now() - 60_000);
+
+    const expired = await app.request(
+      `${BASE_URL}/api/auth/get-session`,
+      { headers: { cookie, origin: BASE_URL } },
+      bindings,
+    );
+    expect(expired.status).toBe(200);
+    await expect(expired.json()).resolves.toBeNull();
+
+    const cookieName = cookie.slice(0, cookie.indexOf("="));
+    const forged = await app.request(
+      `${BASE_URL}/api/auth/get-session`,
+      { headers: { cookie: `${cookieName}=forged-session-token`, origin: BASE_URL } },
+      bindings,
+    );
+    expect(forged.status).toBe(200);
+    await expect(forged.json()).resolves.toBeNull();
+  });
+
   it("enforces the configured minimum password length", async () => {
     const bindings = testBindings();
     const database = createMemoryDatabase();

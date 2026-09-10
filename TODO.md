@@ -160,7 +160,7 @@
 ### M3 验收
 
 - [x] 用户可在预览环境完成注册/登录、跨请求保持数据库 Session 并退出。
-- [ ] 未登录、过期、撤销和伪造 Session 均被拒绝。
+- [x] 未登录、过期、撤销和伪造 Session 均被拒绝；真实 Better Auth memory adapter 协议测试验证无 Cookie、服务端过期记录和伪造 token 均解析为空 Session，sign-out 删除服务端记录后旧 Cookie 也无法恢复会话，Project 权限端点另有无 Session 的 401 覆盖。
 - [x] 现有结构化日志、API 响应和 Worker bundle 不包含 Better Auth Secret 或数据库凭据。
 
 ## M4：Paca Permission Better Auth 插件
