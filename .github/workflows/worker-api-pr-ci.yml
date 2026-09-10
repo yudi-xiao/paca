@@ -85,7 +85,7 @@ jobs:
       - name: Test
         run: bun run test
 
-      - name: Apply migrations and run PostgreSQL repository contracts
+      - name: Apply migrations, run repository contracts, and exercise recovery
         env:
           PACA_TEST_DATABASE_URL: postgresql://paca_test:paca_test@127.0.0.1:5432/paca_worker_test
         run: bun run test:postgres

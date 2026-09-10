@@ -2,23 +2,9 @@ import { readdir, readFile } from "node:fs/promises";
 
 import { Client } from "pg";
 
-const databaseURL = process.env.PACA_TEST_DATABASE_URL?.trim();
-if (!databaseURL) throw new Error("PACA_TEST_DATABASE_URL_REQUIRED");
+import { requireLocalTestDatabase } from "./lib/postgres-test-database";
 
-const parsedURL = new URL(databaseURL);
-if (!/^postgres(?:ql)?:$/u.test(parsedURL.protocol)) {
-  throw new Error("PACA_TEST_DATABASE_URL_INVALID");
-}
-
-const databaseName = decodeURIComponent(parsedURL.pathname.slice(1));
-if (!/^[a-z0-9_]+_test$/u.test(databaseName)) {
-  throw new Error("PACA_TEST_DATABASE_NAME_MUST_END_IN_TEST");
-}
-
-const localHosts = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
-if (!localHosts.has(parsedURL.hostname)) {
-  throw new Error("PACA_TEST_DATABASE_MUST_BE_LOCAL");
-}
+const { connectionString: databaseURL, databaseName } = requireLocalTestDatabase();
 
 const migrationsDirectory = new URL("../drizzle/", import.meta.url);
 const migrationFiles = (await readdir(migrationsDirectory))

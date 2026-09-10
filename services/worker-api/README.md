@@ -73,8 +73,9 @@ their domains move to the Worker.
 
 Pull-request CI also provisions a disposable PostgreSQL database named `paca_worker_test`, resets
 only that database's `public` schema, applies every checked-in migration in order, verifies the
-complete `paca_schema_migration` ledger, and runs the shared repository contracts. The preparation
-script refuses non-local hosts and database names that do not end in `_test`; it never falls back
+complete `paca_schema_migration` ledger, runs the shared repository contracts, and exercises both
+a transactionally failed migration and a data-preserving forward fix. The preparation and recovery
+scripts refuse non-local hosts and database names that do not end in `_test`; they never fall back
 to the root `DATABASE_URL`. To run the same flow against an explicitly disposable local database:
 
 ```bash
@@ -87,6 +88,14 @@ case-insensitive uniqueness, and transaction rollback when a child insert fails.
 repositories should add contracts under `test/contracts` and their adapter binding under
 `test/postgres`; a future D1 adapter should consume the same domain-level contracts where its
 declared feature set matches.
+
+The recovery drill first causes a duplicate-key failure after creating a probe table inside one
+transaction and verifies that PostgreSQL leaves no partial table behind. It then creates a legacy
+row, applies an additive column/backfill/`NOT NULL` forward fix in another transaction, and verifies
+that the original row and normalized value survive. The probe table is always removed afterward.
+This validates the project procedure without pretending that destructive production rollbacks are
+safe: after a committed migration, the default remains Worker version rollback plus a reviewed
+forward migration.
 
 The first data-preserving switch from `main` to `internal` is automated by
 `scripts/provision-internal-database.ts`. The command is intentionally gated because it copies
