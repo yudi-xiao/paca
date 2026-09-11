@@ -32,7 +32,11 @@ const (
 )
 
 var (
-	ErrConfigInvalid    = errors.New("capabilitybroker: config invalid")
+	// ErrConfigInvalid indicates an invalid broker identity, request scope or
+	// session configuration.
+	ErrConfigInvalid = errors.New("capabilitybroker: config invalid")
+	// ErrScopeUnavailable indicates that no active, Project-scoped capability
+	// may be delegated into the sandbox.
 	ErrScopeUnavailable = errors.New("capabilitybroker: no Project-scoped capability available")
 )
 
@@ -75,6 +79,8 @@ type Broker struct {
 	sessions map[[sha256.Size]byte]sessionRecord
 }
 
+// New constructs an in-process broker bound to exactly one enrolled Agent
+// identity.
 func New(client agentClient, identity *agentauth.Config) (*Broker, error) {
 	if client == nil || identity == nil || strings.TrimSpace(identity.AgentID) == "" {
 		return nil, ErrConfigInvalid

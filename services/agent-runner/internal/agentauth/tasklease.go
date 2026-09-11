@@ -19,11 +19,19 @@ const (
 )
 
 var (
-	ErrTaskLeaseInvalid        = errors.New("agentauth: task lease protocol invalid")
-	ErrTaskNotAuthorized       = errors.New("agentauth: task not authorized for execution")
+	// ErrTaskLeaseInvalid indicates a malformed task discovery or lease
+	// response from the control plane.
+	ErrTaskLeaseInvalid = errors.New("agentauth: task lease protocol invalid")
+	// ErrTaskNotAuthorized indicates that the enrolled Agent has no active,
+	// exact task.execute Grant for the requested task.
+	ErrTaskNotAuthorized = errors.New("agentauth: task not authorized for execution")
+	// ErrTaskLeaseOwnedElsewhere indicates an active task lease held by a
+	// different Harness instance.
 	ErrTaskLeaseOwnedElsewhere = errors.New("agentauth: task lease belongs to another harness")
 )
 
+// DiscoveredTaskLease is the bounded active-lease summary attached to an
+// owned task returned by task discovery.
 type DiscoveredTaskLease struct {
 	ID                     string    `json:"id"`
 	HarnessKind            string    `json:"harness_kind"`
@@ -35,6 +43,8 @@ type DiscoveredTaskLease struct {
 	LeaseExpiresAt         time.Time `json:"lease_expires_at"`
 }
 
+// DiscoveredTask is one task derived by the server from the Agent's active,
+// constraint-exact task.execute Grants.
 type DiscoveredTask struct {
 	OrganizationID string    `json:"organization_id"`
 	ProjectID      string    `json:"project_id"`
@@ -51,6 +61,8 @@ type DiscoveredTask struct {
 	Lease        *DiscoveredTaskLease `json:"lease"`
 }
 
+// TaskLease is the authoritative lease representation returned after a task
+// execution mutation.
 type TaskLease struct {
 	ID                     string     `json:"id"`
 	OrganizationID         string     `json:"organizationId"`
@@ -71,6 +83,8 @@ type TaskLease struct {
 	UpdatedAt              time.Time  `json:"updatedAt"`
 }
 
+// TaskLeaseResult reports whether a lease mutation was an idempotent replay
+// and includes the resulting authoritative lease.
 type TaskLeaseResult struct {
 	Duplicate bool      `json:"duplicate"`
 	Lease     TaskLease `json:"lease"`
@@ -131,11 +145,15 @@ func validateDiscoveredTask(task DiscoveredTask) error {
 	return nil
 }
 
+// TaskLeaseCoordinator validates task ownership and begins lease-controlled
+// execution for the single Agent identity managed by this Runner.
 type TaskLeaseCoordinator interface {
 	Manages(agentID string) bool
 	Begin(ctx context.Context, agentID, projectID, taskID string) (TaskLeaseExecution, error)
 }
 
+// TaskLeaseExecution exposes the only allowed lifecycle mutations for an
+// already authorized task lease.
 type TaskLeaseExecution interface {
 	StartRenewal(ctx context.Context, onError func(error)) func()
 	Checkpoint(ctx context.Context, sequence int64, summary string) error
@@ -152,6 +170,8 @@ type taskLeaseController struct {
 	leaseDuration time.Duration
 }
 
+// NewTaskLeaseCoordinator constructs a coordinator bound to one Agent, Host
+// and Harness identity.
 func NewTaskLeaseCoordinator(
 	client *Client,
 	agentID string,

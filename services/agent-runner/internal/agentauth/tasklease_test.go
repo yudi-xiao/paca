@@ -53,13 +53,13 @@ func (server *taskLeaseServer) RoundTrip(request *http.Request) (*http.Response,
 		status := "active"
 		var finishedAt any
 		checkpointSequence := int64(0)
-		if input.Arguments["action"] == "checkpoint" {
+		switch input.Arguments["action"] {
+		case "checkpoint":
 			checkpointSequence = int64(input.Arguments["sequence"].(float64))
-		}
-		if input.Arguments["action"] == "complete" {
+		case "complete":
 			status = "completed"
 			finishedAt = "2026-09-07T01:02:20Z"
-		} else if input.Arguments["action"] == "fail" {
+		case "fail":
 			status = "failed"
 			finishedAt = "2026-09-07T01:02:20Z"
 		}

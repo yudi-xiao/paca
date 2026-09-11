@@ -1,6 +1,7 @@
 package acpbridge
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,14 +14,14 @@ func TestRoutesMountCapabilityBrokerOnlyAtPrivateProtocolPath(t *testing.T) {
 		response.WriteHeader(http.StatusNoContent)
 	})}
 
-	request := httptest.NewRequest(http.MethodPost, "/agent-capabilities", nil)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/agent-capabilities", nil)
 	response := httptest.NewRecorder()
 	server.Routes().ServeHTTP(response, request)
 	if response.Code != http.StatusNoContent || calls != 1 {
 		t.Fatalf("broker response = %d, calls = %d", response.Code, calls)
 	}
 
-	request = httptest.NewRequest(http.MethodGet, "/agent-capabilities", nil)
+	request = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/agent-capabilities", nil)
 	response = httptest.NewRecorder()
 	server.Routes().ServeHTTP(response, request)
 	if response.Code != http.StatusMethodNotAllowed || calls != 1 {

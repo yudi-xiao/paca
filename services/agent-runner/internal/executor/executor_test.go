@@ -182,7 +182,8 @@ func TestStopSandboxRevokesCapabilityBrokerBearer(t *testing.T) {
 		t.Fatalf("stop state = stopped:%v token:%q", backend.stopped, handle.CapabilityBrokerToken)
 	}
 
-	request := httptest.NewRequest(
+	request := httptest.NewRequestWithContext(
+		context.Background(),
 		http.MethodPost,
 		"/agent-capabilities",
 		bytes.NewBufferString(`{"operation":"execute","capability":"project.read","arguments":{"projectId":"`+projectID+`"}}`),

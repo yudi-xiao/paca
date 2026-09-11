@@ -78,7 +78,12 @@ func newTestBroker(t *testing.T) (*Broker, *fakeAgentClient, Session) {
 
 func performBrokerRequest(t *testing.T, broker *Broker, session Session, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, "/agent-capabilities", bytes.NewBufferString(body))
+	request := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/agent-capabilities",
+		bytes.NewBufferString(body),
+	)
 	request.Header.Set("Authorization", "Bearer "+session.Token)
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()

@@ -755,8 +755,14 @@ func (e *Executor) coldStartEnvironment(ctx, turnCtx context.Context, cfg agent.
 		}
 		for _, env := range *pacaServer.Env {
 			if err := client.UpsertSecret(turnCtx, env.Name, env.Value); err != nil {
-				e.removeACPSecrets(client, installedSecretKeys)
+				cleanupErr := e.removeACPSecrets(client, installedSecretKeys)
 				client.Close()
+				if cleanupErr != nil {
+					return nil, "", errors.Join(
+						fmt.Errorf("executor: install static Environment broker secret: %w", err),
+						fmt.Errorf("executor: remove static Environment broker secrets after install failure: %w", cleanupErr),
+					)
+				}
 				return nil, "", fmt.Errorf("executor: install static Environment broker secret: %w", err)
 			}
 			installedSecretKeys = append(installedSecretKeys, env.Name)

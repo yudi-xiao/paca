@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// TaskExecutionCapability is the capability required to discover, claim and
+// advance a task lease.
 const TaskExecutionCapability = "task.execute"
 
 var (
@@ -28,6 +30,7 @@ type Harness struct {
 	InstanceID string `json:"instanceId,omitempty"`
 }
 
+// HeartbeatReport contains bounded, public Host scheduling metadata.
 type HeartbeatReport struct {
 	Harnesses []Harness `json:"harnesses"`
 	Labels    []string  `json:"labels"`

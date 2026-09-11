@@ -18,6 +18,8 @@ const maxResponseBytes = 1024 * 1024
 
 var remoteCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,127}$`)
 
+// ProtocolError reports a stable Paca Agent API error code without exposing
+// response bodies or provider-specific error details.
 type ProtocolError struct {
 	Code   string
 	Status int
@@ -35,6 +37,8 @@ type Client struct {
 	now    func() time.Time
 }
 
+// NewClient constructs an Agent Auth client for one validated enrolled
+// identity. A nil transport uses the process default transport.
 func NewClient(config *Config, transport http.RoundTripper) (*Client, error) {
 	if config == nil {
 		return nil, ErrConfigInvalid
@@ -58,6 +62,8 @@ func NewClient(config *Config, transport http.RoundTripper) (*Client, error) {
 	}, nil
 }
 
+// ExecuteCapability invokes the identity's configured Better Auth capability
+// endpoint after checking that the capability was requested at enrollment.
 func (client *Client) ExecuteCapability(
 	ctx context.Context,
 	capability string,
@@ -92,6 +98,7 @@ func (client *Client) discoverTasks(ctx context.Context) (json.RawMessage, error
 	)
 }
 
+// Heartbeat reports bounded Host state to the versioned Paca Agent API.
 func (client *Client) Heartbeat(ctx context.Context, report any) (json.RawMessage, error) {
 	payload, err := json.Marshal(report)
 	if err != nil {
@@ -182,9 +189,9 @@ func (client *Client) request(
 	if err != nil {
 		return nil, fmt.Errorf("agentauth: request failed: %w", err)
 	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-	if err != nil || len(body) > maxResponseBytes {
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	closeErr := response.Body.Close()
+	if readErr != nil || closeErr != nil || len(body) > maxResponseBytes {
 		return nil, &ProtocolError{Code: "AGENT_RESPONSE_INVALID", Status: response.StatusCode}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {

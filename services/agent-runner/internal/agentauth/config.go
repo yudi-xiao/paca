@@ -19,6 +19,8 @@ import (
 
 const maxConfigBytes = 64 * 1024
 
+// JWK is the minimal Ed25519 JSON Web Key representation stored in a private
+// Agent identity file.
 type JWK struct {
 	KTY    string   `json:"kty"`
 	CRV    string   `json:"crv"`
@@ -31,6 +33,8 @@ type JWK struct {
 	KeyOps []string `json:"key_ops,omitempty"`
 }
 
+// GrantRequest records one capability and its server-approved constraints as
+// returned during Agent enrollment.
 type GrantRequest struct {
 	Capability  string         `json:"capability"`
 	Constraints map[string]any `json:"constraints"`
@@ -57,9 +61,15 @@ type Config struct {
 }
 
 var (
-	ErrConfigInvalid     = errors.New("agentauth: config invalid")
+	// ErrConfigInvalid indicates malformed or internally inconsistent Agent
+	// identity configuration.
+	ErrConfigInvalid = errors.New("agentauth: config invalid")
+	// ErrConfigPermissions indicates that the private identity file is not
+	// protected by the required owner-only filesystem permissions.
 	ErrConfigPermissions = errors.New("agentauth: config permissions invalid")
-	ErrCapabilityDenied  = errors.New("agentauth: capability not requested")
+	// ErrCapabilityDenied indicates an attempt to request a capability absent
+	// from the enrolled identity.
+	ErrCapabilityDenied = errors.New("agentauth: capability not requested")
 )
 
 // LoadConfig rejects symlinks, non-regular files and group/world-readable
@@ -77,9 +87,9 @@ func LoadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: open identity", ErrConfigInvalid)
 	}
-	defer file.Close()
-	contents, err := io.ReadAll(io.LimitReader(file, maxConfigBytes+1))
-	if err != nil || len(contents) > maxConfigBytes {
+	contents, readErr := io.ReadAll(io.LimitReader(file, maxConfigBytes+1))
+	closeErr := file.Close()
+	if readErr != nil || closeErr != nil || len(contents) > maxConfigBytes {
 		return nil, fmt.Errorf("%w: identity size", ErrConfigInvalid)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(contents))
