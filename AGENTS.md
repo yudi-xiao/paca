@@ -2,6 +2,8 @@
 
 本文档描述将 Paca 从当前的 React Web、Go API、Socket.IO、PostgreSQL、Valkey、对象存储和 Agent Runner 架构，逐步迁移为以 Cloudflare 为主要运行平台、以 Hono + Better Auth 为 API 与认证授权边界、以可通过 Hyperdrive 接入的 PostgreSQL 为默认核心业务数据库的目标方案。数据库供应商不是架构约束，同时允许提供经过完整适配和验证的 D1 部署模式。
 
+当前项目尚未正式对外上线，数据库与对象存储采用 clean-slate 策略：允许清空并从版本化 schema/migration 重新初始化，不兼容、不复制、不回填任何 legacy 用户、Session、JWT、密码、附件或业务数据。旧实现只可作为产品行为和领域契约的参考，不得为了数据迁移保留双写、principal bridge、兼容表或回退认证路径。
+
 后续修改本项目时，应把本文档视为架构约束。涉及 Cloudflare 产品能力、限制、价格或 API 时，必须先核对当时的 Cloudflare 官方文档，不要依赖旧版本记忆。工程阶段、任务状态、当前代码落点和验收记录统一维护在根目录 `TODO.md`；不要在本文档中维护实施进度或完成勾选。
 
 ## 一、目标与基本原则
@@ -192,7 +194,7 @@ await auth.api.hasProjectPermission({
 
 Hono 路由应通过统一的 `requireProjectPermission()` 等中间件调用该入口，不得各自查询角色表或复制通配符判断。任务是否属于 URL 中的项目、状态是否允许转换、文档是否已删除等检查仍由领域服务负责；这些是数据与业务不变量，不是第二套权限系统。
 
-迁移期间允许旧 Go Authorizer 与 Better Auth 进行短期 shadow read/decision comparison，但不能长期双写或把两者都当权威来源。切换后由 Better Auth 与 `pacaPermission` 独占角色、成员关系和权限判定；旧 Go 权限合并代码与重复 schema 必须删除或由插件正式接管。
+共享 decision corpus 可以用于比较旧 Go 与 Worker 的产品权限语义，但不得读取、复制或双写旧权限数据。Worker 从端由 Better Auth 与 `pacaPermission` 独占角色、成员关系和权限判定；旧 Go 权限合并代码与重复 schema 在对应路由退出后直接删除。
 
 ### Better Auth Agent Auth
 
@@ -432,7 +434,7 @@ DocumentParty 应当：
 - 本文档只维护目标架构、技术选型和不可违反的约束。实现发现架构假设错误时，先更新本文档并记录原因，再调整 `TODO.md`。
 - 每个阶段开始前必须在 `TODO.md` 写明最小交付物、验证命令和回滚路径；完成后只有在验收条件全部通过时才能勾选。
 - 禁止为了让进度看起来完成而降低权限、数据一致性、审计、并发或恢复要求。实验性 D1 路线不得阻塞默认 PostgreSQL 路线。
-- 迁移期间允许短期双读、shadow decision 和可回滚流量切换；禁止没有退出条件的长期双写和双权威来源。
+- 允许使用固定测试语料做实现间 contract/decision comparison，但不得为 legacy 数据建立双读、双写或兼容同步链路。运行时回滚以已验证的 Worker 版本和可重建的空数据库基线为单位。
 
 ## 十二、官方参考
 

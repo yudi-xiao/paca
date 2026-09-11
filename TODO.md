@@ -6,7 +6,7 @@
 
 - `[ ]` 表示未完成；`[x]` 表示代码、测试、迁移和必要文档已达到当前阶段验收条件。
 - 已完成内容按能力合并记录，不保留逐次部署版本号、临时测试数据、测试数量或重复烟测流水。
-- 数据库迁移、远端部署、Secret 修改和删除旧服务属于外部状态变更，必须确认目标环境并保留回滚路径。
+- 数据库重建、远端部署、Secret 修改和删除旧服务属于外部状态变更，必须确认目标环境并保留可重放的 schema 与部署版本；当前不保留 legacy 数据回滚路径。
 - 不在日志、提交或本文档中记录数据库连接串、Better Auth Secret、Agent 私钥等凭据。
 - PostgreSQL 是默认主线；D1 是独立实验路线，不阻塞默认主线。
 
@@ -26,7 +26,7 @@
 
 1. 完成 Worker 领域路由权限审计并推进 Better Auth 单权威切换。
 2. 部署 Runner Agent Auth 身份配置，完成后删除对应 legacy `PACA_API_KEY` 回退路径。
-3. 迁移 Agent Conversation、Automation 和剩余 Environment/API 能力。
+3. 在 Worker 中重建 Agent Conversation、Automation 和剩余 Environment/API 能力；不迁移旧数据。
 4. 完成真实浏览器 BlockNote 与 Sprint/View E2E。
 
 ### 已知阻塞或待人工验收
@@ -67,7 +67,7 @@
 - [x] 已实现静态 resource/action statement、动态系统/组织/项目角色、角色分配、grant ceiling、内置角色和最后管理员保护。
 - [x] 已实现类型化权限 API、Hono 统一中间件和前端能力展示；服务端始终是最终授权边界。
 - [x] 项目成员可在不同项目拥有不同角色；角色/成员/项目变更会使 HTTP、PartyServer 和 Environment 连接失效。
-- [ ] 系统审计一遍所有 Worker 领域路由，确认对象归属、状态转换和数据完整性只属于领域服务，没有形成第二套 RBAC。
+- [x] Worker 权限边界审计已固化为 CI：自动枚举全部 Hono 业务路由并验证匿名请求在领域 runtime 前返回 401；权限成员表仅允许指定 permission/access adapter 访问，普通领域服务不能形成第二套 RBAC。
 - [x] 旧 Go Authorizer 与 Better Auth evaluator 已共用版本化 shadow decision corpus，覆盖全局/项目权限、多角色、wildcard、无成员和 legacy Agent 样本。
 - [x] 已删除 Go 对 JWT legacy `role` claim 的授权 fallback，修复 `ADMIN` 在旧入口被错误扩成全局 `*` 的差异；共享 corpus 与 Go/Worker 回归均通过。
 - [ ] 将 Better Auth/`pacaPermission` 切换为唯一用户权限权威来源。
@@ -80,7 +80,7 @@
 - [x] Agent 可按真实 Agent actor 执行 Project/Task、Document/Yjs、Environment 和 Document Workflow 能力；撤销会关闭相应 lease/连接。
 - [x] Device authorization、Host enrollment CLI、Agent 管理/审批 UI 和 Agent Auth 审计已通过真实协议测试。
 - [x] 本机 Harness 与 managed Sandbox 使用分离凭据：本机读取 `0600` Ed25519 身份，Sandbox 只获得 Project-scoped opaque broker bearer。
-- [ ] 补充通用业务 Workflow 领域执行器，以及浏览器文件/SSH/Port Forward 契约和旧 Environment 数据迁移。
+- [ ] 补充通用业务 Workflow 领域执行器，以及浏览器文件/SSH/Port Forward 契约；旧 Environment 数据直接舍弃。
 - [ ] 将 `services/agent-runner` 正式部署为 Agent Auth 身份：完成 Host 配置、delegated Agent 审批、JWT 轮换和 Project-scoped Capability 执行。
 - [ ] 为 managed Sandbox 的 repository/plugin 能力接入 Agent Auth，并在 rollout 完成后全局删除 legacy `PACA_API_KEY` 回退路径。
 
@@ -155,7 +155,7 @@
 - [ ] 审计所有日志均含 request ID，Agent/Workflow/文档操作均含 run ID 和可信 actor。
 - [ ] 建立 Worker、Hyperdrive、DO、Queues、Workflows、R2 和 PostgreSQL 的统一可观测性与告警。
 - [ ] 完成数据库恢复、权限误配、Agent Grant 泄露、DO 状态损坏和队列积压运行手册。
-- [ ] 每次切流前记录回滚负责人、命令、数据兼容窗口和停止条件。
+- [ ] 每次切流前记录回滚负责人、Worker 版本回滚命令、clean-slate 重建命令和停止条件。
 
 ## 当前代码落点
 
