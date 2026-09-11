@@ -80,6 +80,7 @@
 - [x] Agent 可按真实 Agent actor 执行 Project/Task、Document/Yjs、Environment 和 Document Workflow 能力；撤销会关闭相应 lease/连接。
 - [x] Device authorization、Host enrollment CLI、Agent 管理/审批 UI 和 Agent Auth 审计已通过真实协议测试。
 - [x] 本机 Harness 与 managed Sandbox 使用分离凭据：本机读取 `0600` Ed25519 身份，Sandbox 只获得 Project-scoped opaque broker bearer。
+- [x] Agent Auth Runner 启动边界已 fail-closed：一个实例只接受 enrollment 文件中的单一 Agent，禁止 `*` gate 和同进程 `PACA_API_KEY` 回退。
 - [ ] 补充通用业务 Workflow 领域执行器，以及浏览器文件/SSH/Port Forward 契约；旧 Environment 数据直接舍弃。
 - [ ] 将 `services/agent-runner` 正式部署为 Agent Auth 身份：完成 Host 配置、delegated Agent 审批、JWT 轮换和 Project-scoped Capability 执行。
 - [ ] 为 managed Sandbox 的 repository/plugin 能力接入 Agent Auth，并在 rollout 完成后全局删除 legacy `PACA_API_KEY` 回退路径。

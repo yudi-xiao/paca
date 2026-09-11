@@ -223,7 +223,7 @@ Paca 的 Agent 控制面不得绑定某一种模型或执行器。每个 Better 
 
 本地受控 Host 与托管 Sandbox 必须使用不同的凭据交付方式。本地 Codex、Claude Code、DeepSeek 等 Harness 可以从宿主机私有 `0600` 配置读取 Agent Auth Ed25519 身份，并为每个请求签发短期 Agent JWT；不可信或托管 Sandbox 不得挂载该私钥，也不得注入 legacy `PACA_API_KEY`。Runner 应为每个 Project-scoped conversation 签发高熵、进程内保存、空闲短时失效且 teardown 立即撤销的 opaque Capability Broker bearer；Sandbox 只接收 bearer 与不含端点、JWT、Host/Agent 私钥的公开 Grant 摘要。Broker 必须校验固定 Project 路由、Capability allowlist、请求大小与方法，只代表 Host 为获准请求签发新鲜 Agent JWT，不能成为可转发任意 URL、Header 或 Capability 的认证代理。
 
-`task.execute` 继续由 Runner/Workflow 的 lease 协调器掌握，不下放给通用 Sandbox MCP；`environment.connect` 会返回另一张短期 bearer，必须经专用 Environment Gateway 契约处理，不能在未完成嵌套凭据威胁建模时通过通用 Broker 转发。静态 Environment 的容器级环境变量不得承载逐会话凭据；应把 Paca MCP 配置临时写入 Goose Secret Store 的 conversation 唯一命名空间，只把非敏感命名空间传入 `session/new`/`session/load`，待 MCP 子进程取得环境副本后立即清理，并在该 turn 结束时撤销 bearer。任一步骤失败都必须 fail closed，不得退回 legacy key。其他尚未迁移的 Agent 可以在明确的逐 Agent rollout gate 下短期保留兼容路径，但已由 Agent Auth 管理的 Agent 不得回退。
+`task.execute` 继续由 Runner/Workflow 的 lease 协调器掌握，不下放给通用 Sandbox MCP；`environment.connect` 会返回另一张短期 bearer，必须经专用 Environment Gateway 契约处理，不能在未完成嵌套凭据威胁建模时通过通用 Broker 转发。静态 Environment 的容器级环境变量不得承载逐会话凭据；应把 Paca MCP 配置临时写入 Goose Secret Store 的 conversation 唯一命名空间，只把非敏感命名空间传入 `session/new`/`session/load`，待 MCP 子进程取得环境副本后立即清理，并在该 turn 结束时撤销 bearer。任一步骤失败都必须 fail closed，不得退回 legacy key。加载 `PACA_AGENT_CONFIG` 的 Runner 实例只能接收该文件所标识的一个 Agent，且进程环境不得同时存在 `PACA_API_KEY`；尚未迁移的 legacy Agent 若短期保留，必须运行在物理分离的旧实例中。
 
 所有 Harness 共用以下控制协议和语义：注册与心跳、能力发现与申请、审批、领取任务、短期 lease/续租、幂等 checkpoint、提交结果、取消确认、Grant 撤销和审计。Harness 类型只影响执行能力与调度标签，不改变 `project.read`、`task.write`、`document.edit` 等 Capability 的业务语义。任务分派必须按 Agent/Host 已审批 capability、约束、在线状态和 Harness 能力匹配，不能仅按客户端自报名称决定权限。
 

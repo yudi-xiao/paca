@@ -33,6 +33,7 @@ func TestValidatePortRange(t *testing.T) {
 
 func TestLoadAgentAuthPresenceSettings(t *testing.T) {
 	setRequiredEnvironment(t)
+	t.Setenv("AGENT_RUNNER_ALLOWED_AGENT_IDS", "agent-1")
 	t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
 	t.Setenv("PACA_AGENT_CAPABILITY_BROKER_URL", "http://agent-runner:8080/agent-capabilities")
 	t.Setenv("PACA_AGENT_HARNESS_KIND", "deepseek")
@@ -67,6 +68,7 @@ func TestLoadRejectsInvalidAgentAuthPresenceSettings(t *testing.T) {
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			setRequiredEnvironment(t)
+			t.Setenv("AGENT_RUNNER_ALLOWED_AGENT_IDS", "agent-1")
 			t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
 			t.Setenv("PACA_AGENT_CAPABILITY_BROKER_URL", "http://agent-runner:8080/agent-capabilities")
 			t.Setenv("PACA_AGENT_HARNESS_KIND", fixture.kind)
@@ -78,6 +80,7 @@ func TestLoadRejectsInvalidAgentAuthPresenceSettings(t *testing.T) {
 	}
 	t.Run("lease duration invalid", func(t *testing.T) {
 		setRequiredEnvironment(t)
+		t.Setenv("AGENT_RUNNER_ALLOWED_AGENT_IDS", "agent-1")
 		t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
 		t.Setenv("PACA_AGENT_CAPABILITY_BROKER_URL", "http://agent-runner:8080/agent-capabilities")
 		t.Setenv("PACA_AGENT_HARNESS_KIND", "codex")
@@ -88,6 +91,7 @@ func TestLoadRejectsInvalidAgentAuthPresenceSettings(t *testing.T) {
 	})
 	t.Run("broker URL missing", func(t *testing.T) {
 		setRequiredEnvironment(t)
+		t.Setenv("AGENT_RUNNER_ALLOWED_AGENT_IDS", "agent-1")
 		t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
 		if _, err := Load(); err == nil {
 			t.Fatal("Load() error = nil")
@@ -95,6 +99,7 @@ func TestLoadRejectsInvalidAgentAuthPresenceSettings(t *testing.T) {
 	})
 	t.Run("broker URL invalid", func(t *testing.T) {
 		setRequiredEnvironment(t)
+		t.Setenv("AGENT_RUNNER_ALLOWED_AGENT_IDS", "agent-1")
 		t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
 		t.Setenv("PACA_AGENT_CAPABILITY_BROKER_URL", "https://example.com/agent-capabilities?token=leak")
 		if _, err := Load(); err == nil {
@@ -108,6 +113,40 @@ func TestLoadRejectsInvalidAgentAuthPresenceSettings(t *testing.T) {
 			t.Fatal("Load() error = nil")
 		}
 	})
+	t.Run("legacy API key alongside Agent Auth", func(t *testing.T) {
+		setRequiredEnvironment(t)
+		t.Setenv("AGENT_RUNNER_ALLOWED_AGENT_IDS", "agent-1")
+		t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
+		t.Setenv("PACA_AGENT_CAPABILITY_BROKER_URL", "http://agent-runner:8080/agent-capabilities")
+		t.Setenv("PACA_API_KEY", "legacy-key")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() error = nil")
+		}
+	})
+	t.Run("wildcard rollout gate alongside Agent Auth", func(t *testing.T) {
+		setRequiredEnvironment(t)
+		t.Setenv("PACA_AGENT_CONFIG", "/private/agent.json")
+		t.Setenv("PACA_AGENT_CAPABILITY_BROKER_URL", "http://agent-runner:8080/agent-capabilities")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() error = nil")
+		}
+	})
+}
+
+func TestValidateAgentAuthIdentity(t *testing.T) {
+	settings := Settings{
+		AgentAuthConfigPath: "/private/agent.json",
+		AllowedAgentIDs:     []string{"agent-1"},
+	}
+	if err := settings.ValidateAgentAuthIdentity("agent-1"); err != nil {
+		t.Fatalf("ValidateAgentAuthIdentity() = %v", err)
+	}
+	if err := settings.ValidateAgentAuthIdentity("agent-2"); err == nil {
+		t.Fatal("ValidateAgentAuthIdentity() mismatch error = nil")
+	}
+	if err := (Settings{}).ValidateAgentAuthIdentity("agent-2"); err != nil {
+		t.Fatalf("legacy ValidateAgentAuthIdentity() = %v", err)
+	}
 }
 
 func setRequiredEnvironment(t *testing.T) {

@@ -81,6 +81,9 @@ func run(log *slog.Logger) error {
 		if !identity.HasCapability(agentauth.TaskExecutionCapability) {
 			return fmt.Errorf("main: Agent Auth identity did not request task.execute")
 		}
+		if err := settings.ValidateAgentAuthIdentity(identity.AgentID); err != nil {
+			return fmt.Errorf("main: validate Agent Auth identity binding: %w", err)
+		}
 		agentAuthClient, err = agentauth.NewClient(identity, nil)
 		if err != nil {
 			return fmt.Errorf("main: create Agent Auth client: %w", err)

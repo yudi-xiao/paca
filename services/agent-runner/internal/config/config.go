@@ -246,6 +246,13 @@ func Load() (Settings, error) {
 		return Settings{}, fmt.Errorf("config: PACA_AGENT_CAPABILITY_BROKER_URL requires PACA_AGENT_CONFIG")
 	}
 	if s.AgentAuthConfigPath != "" {
+		if s.PacaAPIKey != "" {
+			return Settings{}, fmt.Errorf("config: PACA_API_KEY must be unset when PACA_AGENT_CONFIG is set")
+		}
+		if len(s.AllowedAgentIDs) != 1 || s.AllowedAgentIDs[0] == "*" {
+			return Settings{}, fmt.Errorf(
+				"config: Agent Auth mode requires exactly one explicit AGENT_RUNNER_ALLOWED_AGENT_IDS value")
+		}
 		if err := validateCapabilityBrokerURL(s.AgentCapabilityBrokerURL); err != nil {
 			return Settings{}, err
 		}
@@ -291,6 +298,21 @@ func Load() (Settings, error) {
 	}
 
 	return s, nil
+}
+
+// ValidateAgentAuthIdentity binds an Agent Auth-enabled Runner instance to
+// the exact Agent named by its private enrollment file. Without this check a
+// broad rollout gate could accept another Agent's trigger without that
+// Agent's task lease or Capability Broker identity.
+func (s Settings) ValidateAgentAuthIdentity(agentID string) error {
+	if s.AgentAuthConfigPath == "" {
+		return nil
+	}
+	if len(s.AllowedAgentIDs) != 1 || s.AllowedAgentIDs[0] != agentID {
+		return fmt.Errorf(
+			"config: AGENT_RUNNER_ALLOWED_AGENT_IDS must equal the enrolled Agent ID in PACA_AGENT_CONFIG")
+	}
+	return nil
 }
 
 func validateCapabilityBrokerURL(value string) error {

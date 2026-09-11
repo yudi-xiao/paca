@@ -22,8 +22,8 @@ export type ApiMigrationEntry = {
  * This intentionally does not proxy Better Auth sessions to the Go API. The two
  * runtimes do not share an authenticated principal contract yet, so an implicit
  * proxy would either fail open or create a second authorization authority. A
- * deployment rollback remains the only supported traffic rollback until that
- * identity bridge exists and has contract tests.
+ * deployment rollback remains the only supported traffic rollback. The
+ * clean-slate migration deliberately will not add an identity or data bridge.
  */
 export const apiMigrationManifest = [
   {
@@ -53,7 +53,7 @@ export const apiMigrationManifest = [
     status: "container-retained",
     authority: "go-api",
     dependsOn: [
-      "legacy folders, SSH and port-forward lifecycle migration",
+      "folders, SSH and port-forward lifecycle implementation",
       "browser-to-environment connection authorization contract",
     ],
     owner: "go-api",
