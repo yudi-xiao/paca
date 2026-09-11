@@ -8,7 +8,7 @@ export type CloudflareEnvironment = {
 	project_id: string;
 	name: string;
 	status: "ready_on_demand";
-	backend: "cloudflare-sandbox" | "cloudflare-computer" | "legacy-agent-runner";
+	backend: "cloudflare-sandbox" | "cloudflare-computer";
 	created_by: string | null;
 	created_at: string;
 	updated_at: string;

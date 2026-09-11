@@ -223,10 +223,7 @@ export const pacaProjects = pgTable(
   ],
 );
 
-export type PacaEnvironmentBackend =
-  | "cloudflare-sandbox"
-  | "cloudflare-computer"
-  | "legacy-agent-runner";
+export type PacaEnvironmentBackend = "cloudflare-sandbox" | "cloudflare-computer";
 
 /**
  * Stable Worker-side scope mapping for execution environments.
@@ -265,7 +262,7 @@ export const pacaEnvironmentScopes = pgTable(
     ),
     check(
       "paca_environment_scope_backend_check",
-      sql`${table.backend} in ('cloudflare-sandbox', 'cloudflare-computer', 'legacy-agent-runner')`,
+      sql`${table.backend} in ('cloudflare-sandbox', 'cloudflare-computer')`,
     ),
     check(
       "paca_environment_scope_gateway_reference_check",

@@ -40,8 +40,6 @@ function backendLabel(backend: CloudflareEnvironment["backend"]): string {
 			return "Cloudflare Sandbox";
 		case "cloudflare-computer":
 			return "Cloudflare Computer";
-		case "legacy-agent-runner":
-			return "Legacy Agent Runner";
 	}
 }
 

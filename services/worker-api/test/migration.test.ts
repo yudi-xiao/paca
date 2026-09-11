@@ -69,6 +69,14 @@ const removeAttachmentMigrationLedgerSnapshotURL = new URL(
   "../drizzle/meta/0027_snapshot.json",
   import.meta.url,
 );
+const removeLegacyEnvironmentBackendMigrationURL = new URL(
+  "../drizzle/0028_unknown_thunderbolts.sql",
+  import.meta.url,
+);
+const removeLegacyEnvironmentBackendSnapshotURL = new URL(
+  "../drizzle/meta/0028_snapshot.json",
+  import.meta.url,
+);
 
 const applicationTables = [
   "user",
@@ -408,6 +416,20 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain(`VALUES ('0027_goofy_warstar', '${checksum}')`);
     expect(migration).toContain('DROP TABLE "paca_attachment_migration_item";');
     expect(migration).not.toContain("CASCADE");
+  });
+
+  it("removes the legacy Agent Runner environment backend from the clean-slate schema", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(removeLegacyEnvironmentBackendMigrationURL, "utf8"),
+      readFile(removeLegacyEnvironmentBackendSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0028_unknown_thunderbolts', '${checksum}')`);
+    expect(migration).toContain("'cloudflare-sandbox', 'cloudflare-computer'");
+    expect(migration).not.toContain("legacy-agent-runner");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

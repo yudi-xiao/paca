@@ -197,6 +197,13 @@
       "when": 1789026125869,
       "tag": "0027_goofy_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1789107930315,
+      "tag": "0028_unknown_thunderbolts",
+      "breakpoints": true
     }
   ]
 }

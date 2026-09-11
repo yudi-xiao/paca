@@ -5,10 +5,7 @@ export type EnvironmentOperationMode = "read" | "execute";
 export type EnvironmentConnectionActor =
   | { type: "agent"; agentId: string; hostId: string }
   | { type: "user"; userId: string };
-export type EnvironmentBackend =
-  | "cloudflare-sandbox"
-  | "cloudflare-computer"
-  | "legacy-agent-runner";
+export type EnvironmentBackend = "cloudflare-sandbox" | "cloudflare-computer";
 
 export type EnvironmentScope = {
   environmentId: string;

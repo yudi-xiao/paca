@@ -12,12 +12,12 @@
 
 ## 当前状态
 
-更新时间：2026-09-10
+更新时间：2026-09-11
 
 当前可用基线：**M1～M9 的核心路径已形成 internal 纵向切片；当前优先收尾 M4 权限单权威切换、M5 Runner 身份迁移和剩余 API。**
 
 - internal 入口为 `https://paca.howlearnwood.com`，React Static Assets、Hono API、Better Auth、Hyperdrive、R2、PartyServer/DO、Queues、Workflows、Agents SDK 与 Cloudflare Sandbox 已连通。
-- `paca/internal` 已通过 clean-slate 工具从空 schema 重放，并继续应用至 `0027_goofy_warstar.sql`；28 项 ledger 完全匹配、Better Auth 用户数为 0，legacy attachment migration 账本已删除。`paca/main` 仍停在 `0014`。internal Worker runtime role 仅拥有 47 张业务表 CRUD，不可访问迁移账本。
+- `paca/internal` 已通过 clean-slate 工具从空 schema 重放，并继续应用至 `0028_unknown_thunderbolts.sql`；29 项 ledger 完全匹配、Better Auth 用户数为 0，legacy attachment migration 账本和 `legacy-agent-runner` Environment backend 已删除。`paca/main` 仍停在 `0014`。internal Worker runtime role 仅拥有 47 张业务表 CRUD，不可访问迁移账本。
 - Agent Auth 的用户审批、Agent/Host、受约束 Grant、任务/文档/环境执行、审计和撤销边界已可用；`capability.executed` 以真实 Agent 为 actor，delegated 用户仅保留为委托上下文。
 - PostgreSQL 测试流程已能从空库应用 28 个 migration，并覆盖 migration ledger、clean-slate schema、前滚恢复演练和 repository contract。
 - 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。
@@ -114,7 +114,7 @@
 - [x] Workflows 负责持久步骤、重试、取消和恢复；AgentDO/Workflow 在敏感操作前重查 Grant、constraints 和 delegated 权限。
 - [x] `task.execute` lease 支持 claim/renew/checkpoint/complete/fail/cancel，具有单 active lease、单调版本和 request ID 幂等约束。
 - [x] Cloudflare Agent、Codex、Claude Code、DeepSeek/custom Harness 共用任务协议、能力标签和调度契约。
-- [x] 私有 Environment Gateway 已接入稳定 Cloudflare Sandbox，提供 Project-scoped 资源、按需启动、浏览器/Agent 双主体 PTY、一次性票据和精确撤销。
+- [x] 私有 Environment Gateway 已接入稳定 Cloudflare Sandbox，提供 Project-scoped 资源、按需启动、浏览器/Agent 双主体 PTY、一次性票据和精确撤销；clean-slate schema 已禁止新建 `legacy-agent-runner` backend。
 - [x] Provider 错误已归一为脱敏稳定码；仅明确可重试的 prepare/read 使用固定 request ID 和有限预算，结果不确定的终端操作不自动重放。
 - [x] Cloudflare Agent Tracing 已开启且不记录 prompt/JWT/Grant/正文；PostgreSQL 审计继续作为业务权威。
 
