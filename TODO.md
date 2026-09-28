@@ -14,7 +14,7 @@
 
 更新时间：2026-09-28
 
-当前可用基线：**M1～M9 的核心路径已形成 internal 纵向切片；用户与 Agent 授权边界已经固化，下一阶段集中完成权限单权威切换、Automation/Agent Conversation 重建和 Runner 正式部署。**
+当前可用基线：**M1～M9 的核心路径已形成 internal 纵向切片；Automation 的六类任务事件触发器已完成代码和数据库阶段，但新增四类尚未部署到 Worker。下一阶段集中完成权限单权威切换、Automation/Agent Conversation 剩余能力和 Runner 正式部署。**
 
 - internal 入口为 `https://paca.howlearnwood.com`，React Static Assets、Hono API、Better Auth、Hyperdrive、R2、PartyServer/DO、Queues、Workflows、Agents SDK 与 Cloudflare Sandbox 已连通。
 - `paca/internal` 已通过 clean-slate 工具从空 schema 重放，并继续应用至 `0034_cute_payback.sql`；35 项 ledger 已记录，legacy attachment migration 账本和 `legacy-agent-runner` Environment backend 已删除。`paca/main` 仍停在 `0014`。internal Worker runtime role 仅拥有 54 张业务表 CRUD，不可访问迁移账本。
@@ -22,6 +22,12 @@
 - PostgreSQL 测试流程已能从空库应用 35 个 migration，并覆盖 migration ledger、clean-slate schema、前滚恢复演练和 repository contract。
 - Worker 业务路由权限边界、Go legacy JWT role 移除、Agent Runner 单 Agent 身份隔离及 legacy Environment backend 删除均已通过 CI；已落地提交已同步至远端 `master`。
 - 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。已部署的 Automation 支持 `task_created`/`status_changed`；新增 `assignee_changed`/`priority_changed`/`tag_added`/`predecessor_done` 的代码和 `0033`/`0034` 数据库迁移已通过本地契约验证并应用至 internal 数据库，仍待 Worker 部署与真实事件烟测。完整动作、Webhook 和调度仍未完成。
+
+### 本阶段收尾与交接
+
+- [x] Automation 任务字段和前置任务触发器代码、迁移、契约测试及文档已提交并同步至远端 `master`；internal 数据库已应用对应 migration。此次收尾没有新增业务代码或重新部署 Worker。
+- [ ] 恢复目标 Cloudflare 账号的 Worker 部署权限后，部署当前 `master`，再以真实任务事件验收四类新增触发器和受限图前端入口；部署成功前不得把它们记为线上可用。
+- [ ] Automation 的下一个编码节点是 `due_date_reached` 的可靠调度：明确日期/偏移语义，复用现有定时入口，把到期事件持久化并防重复投递，覆盖延期、重试、图停用和多触发节点场景。
 
 ### 当前优先顺序
 
@@ -32,6 +38,7 @@
 
 ### 已知阻塞或待人工验收
 
+- [ ] 当前 Wrangler 登录身份缺少目标 Worker 所属账号的部署权限；取得对应权限后才能完成新增 Automation 代码的 internal 部署和远端烟测。
 - [ ] 在 Hyperdrive dashboard 确认查询和连接指标。
 - [ ] 用真实登录浏览器完成 Sprint 生命周期、自定义字段和 View CRUD E2E。
 - [ ] 用真实浏览器完成 BlockNote 协作编辑、刷新恢复及 Agent 独占时只读提示验收。
@@ -131,7 +138,7 @@
 - [x] Run/Step 只读查询已按现有前端契约迁移，限制单次查询量并经 Project 权限和数据库作用域双重约束。
 - [x] `task_created`/`status_changed` 已在任务写入事务中写入独立 Automation outbox；专用 Queue/DLQ、租约恢复与重复消息处理已部署到 internal，并通过空库、PostgreSQL 和真实 Session 烟测。
 - [x] Queue 消费已按事件匹配 active 图、持久化幂等 Run 与图快照，并用固定 Run ID 启动 Workflow；已实现 wait 步骤和失败记录。internal 真实任务事件至 Run/Step 完成烟测通过；重投与图编辑后恢复由 PostgreSQL 契约覆盖。
-- [x] 受限图激活/停用已开放且要求 `workflows.execute`：仅允许 `task_created`/`status_changed` 触发器、条件分支、`wait` 和已实现字段的 `update_task`；不支持的配置、模板或未实现动作在激活时拒绝，active 图必须先停用才可编辑或归档。
+- [x] 受限图激活/停用已开放且要求 `workflows.execute`：仅允许六类已实现的任务事件触发器、条件分支、`wait` 和已实现字段的 `update_task`；不支持的配置、模板或未实现动作在激活时拒绝，active 图必须先停用才可编辑或归档。新增四类触发器的 Worker 部署与远端验收仍未完成。
 - [x] `0031` 的任务写入幂等 marker 与业务更新、系统 actor 审计同事务提交；PostgreSQL 契约覆盖重复调用，internal 真实烟测覆盖激活、任务事件→Workflow→`update_task`、活动记录、停用以及独立 wait 路径。
 - [x] 条件节点的有序分支与 else 已接入持久 Workflow 步骤；支持任务/Sprint 字段、父子与关联任务目标及 any/all，并对配置、项目隔离和目标数量实施校验。PostgreSQL 契约与 internal 真实事件烟测覆盖命中/else 路径。
 - [x] `update_task` 已扩展类型、状态、Sprint、父任务、描述、日期和指派；日期配置严格转为任务日期。`0032` 允许真实 `system` actor 的指派通知，PostgreSQL 契约覆盖重试时通知与审计不重复。
@@ -147,7 +154,7 @@
 - [ ] 持续按“认证与只读 → 边界清晰写入 → 复杂事务”的顺序迁移剩余 API。
 - [ ] 为仍需保持产品行为的模块补充新旧 API contract；不要求历史数据迁移或双写一致性。
 - [ ] 完成真实浏览器 Sprint 生命周期、自定义字段和 View CRUD E2E。
-- [ ] 重建 Automation schema/repository/Hono API，并以 Queue/Workflow 实现触发、执行、幂等和审计；完成后关闭 Automation/Webhook 501 domain 与 legacy worker。
+- [ ] 补完 Automation 剩余触发器、动作、Webhook token、可靠调度和审计验收；完成完整领域契约后关闭 Automation/Webhook 501 domain 与 legacy worker。图 schema/repository/Hono API 和受限 Queue/Workflow 执行已完成，不再重复列为待重建。
 - [ ] 重建 Agent Conversation 协议及 MCP Agent Auth 调用路径；完成后关闭对应 501 domain 与 Valkey conversation stream。
 - [ ] 完成 Environment 浏览器文件/SSH/Port Forward 契约后，关闭剩余 legacy Environment 501 domain；不恢复已删除的 legacy backend。
 
