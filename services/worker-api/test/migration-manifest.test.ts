@@ -47,6 +47,15 @@ describe("API migration manifest", () => {
     expect(matchUnmigratedApi("/api/v1/projects/project-1/automations", "GET")).toBeNull();
     expect(matchUnmigratedApi("/api/v1/projects/project-1/automations", "POST")).toBeNull();
     expect(
+      matchUnmigratedApi("/api/v1/projects/project-1/automations/automation-1/runs", "GET"),
+    ).toBeNull();
+    expect(
+      matchUnmigratedApi(
+        "/api/v1/projects/project-1/automations/automation-1/runs/run-1/steps",
+        "GET",
+      ),
+    ).toBeNull();
+    expect(
       matchUnmigratedApi(
         "/api/v1/projects/project-1/automations/automation-1/nodes/node-1",
         "PATCH",

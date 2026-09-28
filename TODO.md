@@ -128,7 +128,9 @@
 - 回滚路径：未开放路由前只需撤回 Worker 代码，已应用的 additive migration 保留；internal 可用受确认串保护的 clean-slate 工具重建。开放后先回滚至已验证的 Worker 版本，并停止相关 Queue/Workflow 消费者；不对已提交的业务运行结果执行破坏性 down migration。
 - [x] 草稿图 schema、版本化 `0029` migration、项目隔离 repository、结构校验和 `workflows.read/write` Hono CRUD 已实现；本地空库重放、数据库契约与 HTTP 权限测试通过，激活路由仍为 501。
 - [x] `0029` 已应用于 internal，新增 5 张表的 runtime role 权限已核对，Worker 已部署；线上 health=200、匿名图读取=401、激活=501。
-- [ ] 完成带真实 Session 的 internal 图 CRUD 烟测；随后实现执行器、run/step 查询、Webhook token、调度与前端开放。
+- [x] 带真实 Better Auth Session 的 internal 草稿图 CRUD 烟测通过，覆盖节点、边、非法边拒绝、归档和激活隔离。
+- [x] Run/Step 只读查询已按现有前端契约迁移，限制单次查询量并经 Project 权限和数据库作用域双重约束。
+- [ ] 实现 Queue/Workflow 执行器、Webhook token、调度与前端开放，并完成真实事件与故障恢复验收。
 
 - [x] 已建立 Go API → Hono Worker 迁移清单、机器可检查 manifest、稳定 501 未迁移边界和 Worker 版本回滚策略。
 - [x] React 保留 TanStack Router/Query/Form；Static Assets 与 `/api/*` 同源，SPA 深链与懒加载版本错位可恢复。

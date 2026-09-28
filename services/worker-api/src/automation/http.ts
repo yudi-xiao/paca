@@ -9,6 +9,8 @@ import {
   type AutomationNodeRow,
   AutomationRepositoryError,
   type AutomationRow,
+  type AutomationRunRow,
+  type AutomationRunStepRow,
   automationRepositoryErrorCodes,
 } from "./postgres-repository";
 import type { AutomationRuntime } from "./runtime";
@@ -139,6 +141,31 @@ function edgeResponse(row: AutomationEdgeRow) {
   };
 }
 
+function runResponse(row: AutomationRunRow) {
+  return {
+    id: row.id,
+    automation_id: row.automationId,
+    trigger_node_id: row.triggerNodeId,
+    task_id: row.taskId,
+    status: row.status,
+    started_at: row.startedAt.toISOString(),
+    finished_at: row.finishedAt?.toISOString() ?? null,
+  };
+}
+
+function runStepResponse(row: AutomationRunStepRow) {
+  return {
+    id: row.id,
+    run_id: row.runId,
+    node_id: row.nodeId,
+    status: row.status,
+    input_snapshot: row.inputSnapshot,
+    output_snapshot: row.outputSnapshot,
+    error: row.errorCode ?? undefined,
+    executed_at: row.executedAt.toISOString(),
+  };
+}
+
 function validIds(context: AutomationContext, ...names: string[]): boolean {
   return names.every((name) => z.uuid().safeParse(context.req.param(name)).success);
 }
@@ -213,6 +240,44 @@ export function createAutomationRoutes(
         nodes: graph.nodes.map(nodeResponse),
         edges: graph.edges.map(edgeResponse),
       });
+    } catch (error) {
+      return automationFailure(context, error);
+    }
+  });
+
+  app.get("/:automationId/runs", read, async (context) => {
+    if (!validIds(context, "projectId", "automationId")) {
+      return failure(context, 400, "BAD_REQUEST");
+    }
+    const limitValue = context.req.query("limit") ?? "50";
+    if (!/^[1-9]\d{0,2}$/.test(limitValue)) return failure(context, 400, "BAD_REQUEST");
+    const limit = Number(limitValue);
+    if (limit > 100) return failure(context, 400, "BAD_REQUEST");
+    try {
+      const rows = await runtime.listRuns(
+        context.env,
+        projectId(context),
+        context.req.param("automationId"),
+        limit,
+      );
+      return success(context, { items: rows.map(runResponse) });
+    } catch (error) {
+      return automationFailure(context, error);
+    }
+  });
+
+  app.get("/:automationId/runs/:runId/steps", read, async (context) => {
+    if (!validIds(context, "projectId", "automationId", "runId")) {
+      return failure(context, 400, "BAD_REQUEST");
+    }
+    try {
+      const rows = await runtime.listRunSteps(
+        context.env,
+        projectId(context),
+        context.req.param("automationId"),
+        context.req.param("runId"),
+      );
+      return success(context, { items: rows.map(runStepResponse) });
     } catch (error) {
       return automationFailure(context, error);
     }

@@ -5,6 +5,8 @@ import {
   type AutomationGraphRows,
   type AutomationNodeRow,
   type AutomationRow,
+  type AutomationRunRow,
+  type AutomationRunStepRow,
   PostgresAutomationRepository,
 } from "./postgres-repository";
 
@@ -19,6 +21,18 @@ export type AutomationRuntime = {
     input: { projectId: string; actorUserId: string; name: string; description?: string },
   ): Promise<AutomationRow>;
   getGraph(env: AppBindings, projectId: string, automationId: string): Promise<AutomationGraphRows>;
+  listRuns(
+    env: AppBindings,
+    projectId: string,
+    automationId: string,
+    limit: number,
+  ): Promise<AutomationRunRow[]>;
+  listRunSteps(
+    env: AppBindings,
+    projectId: string,
+    automationId: string,
+    runId: string,
+  ): Promise<AutomationRunStepRow[]>;
   update(
     env: AppBindings,
     projectId: string,
@@ -72,6 +86,10 @@ export const automationRuntime: AutomationRuntime = {
   create: (env, input) => withRepository(env, (repository) => repository.create(input)),
   getGraph: (env, projectId, automationId) =>
     withRepository(env, (repository) => repository.getGraph(projectId, automationId)),
+  listRuns: (env, projectId, automationId, limit) =>
+    withRepository(env, (repository) => repository.listRuns(projectId, automationId, limit)),
+  listRunSteps: (env, projectId, automationId, runId) =>
+    withRepository(env, (repository) => repository.listRunSteps(projectId, automationId, runId)),
   update: (env, projectId, automationId, input) =>
     withRepository(env, (repository) => repository.update(projectId, automationId, input)),
   archive: (env, projectId, automationId) =>

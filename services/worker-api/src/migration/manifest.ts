@@ -88,6 +88,11 @@ export const apiMigrationManifest = [
       { method: "GET", path: "/api/v1/projects/:projectId/automations" },
       { method: "POST", path: "/api/v1/projects/:projectId/automations" },
       { method: "GET", path: "/api/v1/projects/:projectId/automations/:automationId" },
+      { method: "GET", path: "/api/v1/projects/:projectId/automations/:automationId/runs" },
+      {
+        method: "GET",
+        path: "/api/v1/projects/:projectId/automations/:automationId/runs/:runId/steps",
+      },
       { method: "PATCH", path: "/api/v1/projects/:projectId/automations/:automationId" },
       { method: "DELETE", path: "/api/v1/projects/:projectId/automations/:automationId" },
       { method: "POST", path: "/api/v1/projects/:projectId/automations/:automationId/nodes" },

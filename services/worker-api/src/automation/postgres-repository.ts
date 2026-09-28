@@ -1,7 +1,13 @@
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 
 import type { PacaDatabase } from "../database";
-import { pacaAutomationEdges, pacaAutomationNodes, pacaAutomations } from "../db/schema";
+import {
+  pacaAutomationEdges,
+  pacaAutomationNodes,
+  pacaAutomationRunSteps,
+  pacaAutomationRuns,
+  pacaAutomations,
+} from "../db/schema";
 import {
   type GraphNode,
   normalizeAutomationName,
@@ -14,6 +20,8 @@ import {
 export type AutomationRow = typeof pacaAutomations.$inferSelect;
 export type AutomationNodeRow = typeof pacaAutomationNodes.$inferSelect;
 export type AutomationEdgeRow = typeof pacaAutomationEdges.$inferSelect;
+export type AutomationRunRow = typeof pacaAutomationRuns.$inferSelect;
+export type AutomationRunStepRow = typeof pacaAutomationRunSteps.$inferSelect;
 export type AutomationGraphRows = {
   automation: AutomationRow;
   nodes: AutomationNodeRow[];
@@ -135,6 +143,55 @@ export class PostgresAutomationRepository {
       },
       { isolationLevel: "repeatable read" },
     );
+  }
+
+  async listRuns(
+    projectId: string,
+    automationId: string,
+    limit: number,
+  ): Promise<AutomationRunRow[]> {
+    const [automation] = await this.database
+      .select({ id: pacaAutomations.id })
+      .from(pacaAutomations)
+      .where(
+        and(
+          eq(pacaAutomations.id, automationId),
+          eq(pacaAutomations.projectId, projectId),
+          isNull(pacaAutomations.deletedAt),
+        ),
+      );
+    if (!automation) throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
+    return this.database
+      .select()
+      .from(pacaAutomationRuns)
+      .where(eq(pacaAutomationRuns.automationId, automationId))
+      .orderBy(desc(pacaAutomationRuns.startedAt), desc(pacaAutomationRuns.id))
+      .limit(limit);
+  }
+
+  async listRunSteps(
+    projectId: string,
+    automationId: string,
+    runId: string,
+  ): Promise<AutomationRunStepRow[]> {
+    const [run] = await this.database
+      .select({ id: pacaAutomationRuns.id })
+      .from(pacaAutomationRuns)
+      .innerJoin(pacaAutomations, eq(pacaAutomationRuns.automationId, pacaAutomations.id))
+      .where(
+        and(
+          eq(pacaAutomationRuns.id, runId),
+          eq(pacaAutomations.id, automationId),
+          eq(pacaAutomations.projectId, projectId),
+          isNull(pacaAutomations.deletedAt),
+        ),
+      );
+    if (!run) throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
+    return this.database
+      .select()
+      .from(pacaAutomationRunSteps)
+      .where(eq(pacaAutomationRunSteps.runId, runId))
+      .orderBy(asc(pacaAutomationRunSteps.executedAt), asc(pacaAutomationRunSteps.id));
   }
 
   async update(

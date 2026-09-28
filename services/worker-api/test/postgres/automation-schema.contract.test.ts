@@ -166,6 +166,20 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL) {
         stepKey: "action-1",
         status: "completed",
       });
+      expect(
+        (await repository.listRuns(projectA.id, automationA.id, 10)).map((item) => item.id),
+      ).toEqual([run.id]);
+      expect(await repository.listRuns(projectA.id, automationA.id, 1)).toHaveLength(1);
+      expect(await repository.listRunSteps(projectA.id, automationA.id, run.id)).toHaveLength(1);
+      await expect(repository.listRuns(projectB.id, automationA.id, 10)).rejects.toMatchObject({
+        code: automationRepositoryErrorCodes.notFound,
+      });
+      await expect(
+        repository.listRunSteps(projectB.id, automationA.id, run.id),
+      ).rejects.toMatchObject({ code: automationRepositoryErrorCodes.notFound });
+      await expect(
+        repository.listRunSteps(projectA.id, automationA.id, crypto.randomUUID()),
+      ).rejects.toMatchObject({ code: automationRepositoryErrorCodes.notFound });
       await expect(
         client.query(
           "insert into paca_automation_run (automation_id, trigger_node_id, event_key, graph_version, graph_snapshot) values ($1, $2, $3, 1, '{}')",
