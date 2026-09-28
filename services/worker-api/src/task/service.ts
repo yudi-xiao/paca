@@ -177,9 +177,13 @@ export type TaskUpdateInput = Partial<Omit<TaskCreateInput, "title">> & { title?
 
 /**
  * Trusted task mutation actor. Callers must construct this only from a
- * verified Better Auth Session or Agent Auth session, never from request JSON.
+ * verified Better Auth Session, Agent Auth session, or an internal Workflow
+ * run identity, never from request JSON.
  */
-export type TaskActor = { type: "user"; id: string } | { type: "agent"; id: string };
+export type TaskActor =
+  | { type: "user"; id: string }
+  | { type: "agent"; id: string }
+  | { type: "system"; id: "system"; runId: string };
 
 export function userTaskActor(id: string): TaskActor {
   return { type: "user", id };
@@ -187,6 +191,10 @@ export function userTaskActor(id: string): TaskActor {
 
 export function agentTaskActor(id: string): TaskActor {
   return { type: "agent", id };
+}
+
+export function automationTaskActor(runId: string): TaskActor {
+  return { type: "system", id: "system", runId };
 }
 
 export type PersistedTaskCreate = {
@@ -238,6 +246,7 @@ export interface TaskRepository {
     taskId: string,
     actor: TaskActor,
     input: PersistedTaskUpdate,
+    operationKey?: string,
   ): Promise<Task>;
   archive(projectId: string, taskId: string, actor: TaskActor): Promise<void>;
 }
@@ -449,6 +458,7 @@ export class TaskService {
     taskId: string,
     actor: TaskActor,
     input: TaskUpdateInput,
+    operationKey?: string,
   ): Promise<Task> {
     const normalized: PersistedTaskUpdate = {};
     if (input.title !== undefined) normalized.title = normalizeTitle(input.title);
@@ -475,7 +485,10 @@ export class TaskService {
     if (input.dueDate !== undefined) normalized.dueDate = normalizeDate(input.dueDate);
     if (input.tags !== undefined) normalized.tags = normalizeTags(input.tags);
     if (Object.keys(normalized).length === 0) return this.repository.findById(projectId, taskId);
-    return this.repository.update(projectId, taskId, actor, normalized);
+    if (operationKey === undefined) {
+      return this.repository.update(projectId, taskId, actor, normalized);
+    }
+    return this.repository.update(projectId, taskId, actor, normalized, operationKey);
   }
 
   archive(projectId: string, taskId: string, actorUserId: string): Promise<void> {

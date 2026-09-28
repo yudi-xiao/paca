@@ -111,6 +111,48 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL) {
         },
       });
 
+      const activated = await request(`${base}/${created.data.id}/activate`, "POST");
+      expect(activated.status).toBe(200);
+      await expect(activated.json()).resolves.toMatchObject({
+        data: { id: created.data.id, status: "active" },
+      });
+      const editWhileActive = await request(
+        `${base}/${created.data.id}/nodes/${action.data.id}`,
+        "PATCH",
+        { config: { update: { importance: 2 } } },
+      );
+      expect(editWhileActive.status).toBe(409);
+      await expect(editWhileActive.json()).resolves.toMatchObject({
+        error_code: "AUTOMATION_ACTIVE_GRAPH_IMMUTABLE",
+      });
+      const archiveWhileActive = await request(`${base}/${created.data.id}`, "DELETE");
+      expect(archiveWhileActive.status).toBe(409);
+      await expect(archiveWhileActive.json()).resolves.toMatchObject({
+        error_code: "AUTOMATION_ACTIVE_GRAPH_IMMUTABLE",
+      });
+      const crossProjectActivation = await request(
+        `/api/v1/projects/${projectB.id}/automations/${created.data.id}/activate`,
+        "POST",
+      );
+      expect(crossProjectActivation.status).toBe(404);
+
+      const deactivated = await request(`${base}/${created.data.id}/deactivate`, "POST");
+      expect(deactivated.status).toBe(200);
+      await expect(deactivated.json()).resolves.toMatchObject({
+        data: { id: created.data.id, status: "inactive" },
+      });
+      const unsupportedUpdate = await request(
+        `${base}/${created.data.id}/nodes/${action.data.id}`,
+        "PATCH",
+        { config: { update: { assignee_ids: [] } } },
+      );
+      expect(unsupportedUpdate.status).toBe(200);
+      const rejectedActivation = await request(`${base}/${created.data.id}/activate`, "POST");
+      expect(rejectedActivation.status).toBe(400);
+      await expect(rejectedActivation.json()).resolves.toMatchObject({
+        error_code: "AUTOMATION_UPDATE_TASK_CONFIG_INVALID",
+      });
+
       const otherProject = await request(
         `/api/v1/projects/${projectB.id}/automations/${created.data.id}`,
         "GET",

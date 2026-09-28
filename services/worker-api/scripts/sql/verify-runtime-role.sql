@@ -43,6 +43,7 @@ WITH application_tables(table_name) AS (
     ('paca_task'),
     ('paca_task_assignee'),
     ('paca_task_activity'),
+    ('paca_task_mutation_idempotency'),
     ('paca_notification'),
     ('paca_branding_upload'),
     ('paca_workspace_settings'),

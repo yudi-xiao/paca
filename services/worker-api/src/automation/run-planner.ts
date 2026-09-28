@@ -8,35 +8,12 @@ import {
   pacaAutomationRuns,
   pacaAutomations,
 } from "../db/schema";
-import { validateAutomationActivation } from "./graph";
+import { matchesTaskTrigger, validateRunnableAutomationGraph } from "./execution-plan";
 import type { AutomationRunSnapshot } from "./run-protocol";
 
 export type AutomationRunPlanner = {
   plan(outboxId: string): Promise<string[]>;
 };
-
-function matchesTrigger(
-  eventType: string,
-  payload: Record<string, unknown>,
-  config: Record<string, unknown>,
-): boolean {
-  if (eventType === "task_created") {
-    if (Object.keys(config).length !== 0) throw new Error("AUTOMATION_TRIGGER_CONFIG_INVALID");
-    return true;
-  }
-  if (eventType === "status_changed") {
-    const keys = Object.keys(config);
-    if (keys.some((key) => key !== "status_id")) {
-      throw new Error("AUTOMATION_TRIGGER_CONFIG_INVALID");
-    }
-    if (config.status_id === undefined || config.status_id === null) return true;
-    if (typeof config.status_id !== "string") {
-      throw new Error("AUTOMATION_TRIGGER_CONFIG_INVALID");
-    }
-    return payload.status_id === config.status_id;
-  }
-  throw new Error("AUTOMATION_EVENT_TYPE_UNSUPPORTED");
-}
 
 export class PostgresAutomationRunPlanner implements AutomationRunPlanner {
   constructor(private readonly database: PacaDatabase) {}
@@ -86,7 +63,7 @@ export class PostgresAutomationRunPlanner implements AutomationRunPlanner {
           .orderBy(asc(pacaAutomations.id), asc(pacaAutomationNodes.id));
 
         for (const { automation, trigger } of candidates) {
-          if (!matchesTrigger(event.eventType, event.payload, trigger.config)) continue;
+          if (!matchesTaskTrigger(event.eventType, event.payload, trigger)) continue;
           const [nodes, edges] = await Promise.all([
             tx
               .select()
@@ -99,7 +76,7 @@ export class PostgresAutomationRunPlanner implements AutomationRunPlanner {
               .where(eq(pacaAutomationEdges.automationId, automation.id))
               .orderBy(asc(pacaAutomationEdges.id)),
           ]);
-          validateAutomationActivation(nodes, edges);
+          validateRunnableAutomationGraph(nodes, edges);
           const snapshot: AutomationRunSnapshot = {
             version: 1,
             projectId: event.projectId,

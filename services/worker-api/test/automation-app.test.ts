@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app";
 import type { AutomationRuntime } from "../src/automation/runtime";
 import type { AppBindings } from "../src/bindings";
+import type { AuthorizeProjectPermission } from "../src/permission/http";
 
 const projectId = "6bdb7f3a-e59d-4826-8383-0104192157a8";
 const automationId = "c9d8cdf1-b208-4c87-b71f-cf4cdf2d373a";
@@ -59,6 +60,10 @@ function runtime(): AutomationRuntime {
       },
     ]),
     update: vi.fn(async () => automation),
+    setActive: vi.fn(async (_env, _projectId, _automationId, active) => ({
+      ...automation,
+      status: active ? ("active" as const) : ("inactive" as const),
+    })),
     archive: vi.fn(async () => undefined),
     addNode: vi.fn(),
     updateNode: vi.fn(),
@@ -196,21 +201,90 @@ describe("Automation draft graph HTTP boundary", () => {
     expect(invalid.status).toBe(400);
   });
 
-  it("keeps activation unavailable while the reliable executor is absent", async () => {
+  it("authorizes graph activation and deactivation through workflows.execute", async () => {
+    const automations = runtime();
+    const authorizeProjectPermission = authorize();
     const app = createApp({
-      automations: runtime(),
-      authorizeProjectPermission: authorize(),
+      automations,
+      authorizeProjectPermission,
       log: vi.fn(),
     });
-    const response = await app.request(
+    const activated = await app.request(
       `/api/v1/projects/${projectId}/automations/${automationId}/activate`,
       { method: "POST" },
       bindings(),
     );
-    expect(response.status).toBe(501);
-    await expect(response.json()).resolves.toMatchObject({
-      code: "API_DOMAIN_NOT_MIGRATED",
-      domain: "automations",
+    expect(activated.status).toBe(200);
+    await expect(activated.json()).resolves.toMatchObject({
+      data: { id: automationId, status: "active" },
     });
+    expect(automations.setActive).toHaveBeenCalledWith(
+      expect.anything(),
+      projectId,
+      automationId,
+      true,
+    );
+    const deactivated = await app.request(
+      `/api/v1/projects/${projectId}/automations/${automationId}/deactivate`,
+      { method: "POST" },
+      bindings(),
+    );
+    expect(deactivated.status).toBe(200);
+    await expect(deactivated.json()).resolves.toMatchObject({
+      data: { id: automationId, status: "inactive" },
+    });
+    expect(authorizeProjectPermission).toHaveBeenCalledWith(
+      expect.any(Request),
+      expect.anything(),
+      projectId,
+      { workflows: ["execute"] },
+    );
+
+    const denied = runtime();
+    const deniedApp = createApp({
+      automations: denied,
+      authorizeProjectPermission: authorize(false),
+      log: vi.fn(),
+    });
+    const deniedResponse = await deniedApp.request(
+      `/api/v1/projects/${projectId}/automations/${automationId}/activate`,
+      { method: "POST" },
+      bindings(),
+    );
+    expect(deniedResponse.status).toBe(403);
+    expect(denied.setActive).not.toHaveBeenCalled();
+  });
+
+  it("does not let a graph editor activate execution without workflows.execute", async () => {
+    const automations = runtime();
+    const authorizeProjectPermission: AuthorizeProjectPermission = vi.fn(
+      async (_request, _env, _projectId, permissions) => ({
+        authenticated: true as const,
+        userId: "user-1",
+        decision: {
+          scopeExists: true,
+          allowed: permissions.workflows?.[0] === "write",
+          grants: [{ resource: "workflows" as const, action: "write" }],
+        },
+      }),
+    );
+    const app = createApp({ automations, authorizeProjectPermission, log: vi.fn() });
+    const edited = await app.request(
+      `/api/v1/projects/${projectId}/automations/${automationId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Edited" }),
+      },
+      bindings(),
+    );
+    expect(edited.status).toBe(200);
+    const activation = await app.request(
+      `/api/v1/projects/${projectId}/automations/${automationId}/activate`,
+      { method: "POST" },
+      bindings(),
+    );
+    expect(activation.status).toBe(403);
+    expect(automations.setActive).not.toHaveBeenCalled();
   });
 });

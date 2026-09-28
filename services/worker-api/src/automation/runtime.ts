@@ -39,6 +39,12 @@ export type AutomationRuntime = {
     automationId: string,
     input: { name?: string; description?: string },
   ): Promise<AutomationRow>;
+  setActive(
+    env: AppBindings,
+    projectId: string,
+    automationId: string,
+    active: boolean,
+  ): Promise<AutomationRow>;
   archive(env: AppBindings, projectId: string, automationId: string): Promise<void>;
   addNode(
     env: AppBindings,
@@ -92,6 +98,8 @@ export const automationRuntime: AutomationRuntime = {
     withRepository(env, (repository) => repository.listRunSteps(projectId, automationId, runId)),
   update: (env, projectId, automationId, input) =>
     withRepository(env, (repository) => repository.update(projectId, automationId, input)),
+  setActive: (env, projectId, automationId, active) =>
+    withRepository(env, (repository) => repository.setActive(projectId, automationId, active)),
   archive: (env, projectId, automationId) =>
     withRepository(env, (repository) => repository.archive(projectId, automationId)),
   addNode: (env, projectId, automationId, input) =>

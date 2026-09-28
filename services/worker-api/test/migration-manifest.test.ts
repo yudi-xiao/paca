@@ -22,9 +22,7 @@ describe("API migration manifest", () => {
     });
     expect(
       matchUnmigratedApi("/api/v1/projects/project-1/automations/automation-1/activate", "POST"),
-    ).toMatchObject({
-      domain: "automations",
-    });
+    ).toBeNull();
     expect(
       matchUnmigratedApi("/api/v1/projects/project-1/automation-dependency-map"),
     ).toMatchObject({

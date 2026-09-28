@@ -17,11 +17,11 @@
 当前可用基线：**M1～M9 的核心路径已形成 internal 纵向切片；用户与 Agent 授权边界已经固化，下一阶段集中完成权限单权威切换、Automation/Agent Conversation 重建和 Runner 正式部署。**
 
 - internal 入口为 `https://paca.howlearnwood.com`，React Static Assets、Hono API、Better Auth、Hyperdrive、R2、PartyServer/DO、Queues、Workflows、Agents SDK 与 Cloudflare Sandbox 已连通。
-- `paca/internal` 已通过 clean-slate 工具从空 schema 重放，并继续应用至 `0030_lively_mephisto.sql`；31 项 ledger 完全匹配，legacy attachment migration 账本和 `legacy-agent-runner` Environment backend 已删除。`paca/main` 仍停在 `0014`。internal Worker runtime role 仅拥有 53 张业务表 CRUD，不可访问迁移账本。
+- `paca/internal` 已通过 clean-slate 工具从空 schema 重放，并继续应用至 `0031_perpetual_iron_man.sql`；32 项 ledger 已记录，legacy attachment migration 账本和 `legacy-agent-runner` Environment backend 已删除。`paca/main` 仍停在 `0014`。internal Worker runtime role 仅拥有 54 张业务表 CRUD，不可访问迁移账本。
 - Agent Auth 的用户审批、Agent/Host、受约束 Grant、任务/文档/环境执行、审计和撤销边界已可用；`capability.executed` 以真实 Agent 为 actor，delegated 用户仅保留为委托上下文。
-- PostgreSQL 测试流程已能从空库应用 30 个 migration，并覆盖 migration ledger、clean-slate schema、前滚恢复演练和 repository contract。
+- PostgreSQL 测试流程已能从空库应用 32 个 migration，并覆盖 migration ledger、clean-slate schema、前滚恢复演练和 repository contract。
 - Worker 业务路由权限边界、Go legacy JWT role 移除、Agent Runner 单 Agent 身份隔离及 legacy Environment backend 删除均已通过 CI；已落地提交已同步至远端 `master`。
-- 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。Automation 已有事件到 Run/Workflow 的 wait-only 内部验证，尚未开放激活或业务动作。
+- 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。Automation 已开放受限图激活，`task_created`/`status_changed` 可触发 `wait` 与限定字段的 `update_task`；完整动作、Webhook 和调度仍未完成。
 
 ### 当前优先顺序
 
@@ -126,13 +126,14 @@
 - 最小交付物：版本化 PostgreSQL 图模型、项目隔离的 graph repository 与领域校验；随后接入 Better Auth `workflows.read/write` 的 Hono 路由、Queue/Workflow 执行与幂等 run 记录，最后开放前端入口。未实现执行器前不得让图进入可触发的 active 状态。
 - 验证命令：在本地 `_test` PostgreSQL 上运行 `bun run db:check`、`bun run typecheck`、`bun run lint`、`bun run test` 和 `bun run test:postgres`；路由与执行器就绪后增加真实 internal API/浏览器烟测与故障恢复验证。
 - 回滚路径：未开放路由前只需撤回 Worker 代码，已应用的 additive migration 保留；internal 可用受确认串保护的 clean-slate 工具重建。开放后先回滚至已验证的 Worker 版本，并停止相关 Queue/Workflow 消费者；不对已提交的业务运行结果执行破坏性 down migration。
-- [x] 草稿图 schema、版本化 `0029` migration、项目隔离 repository、结构校验和 `workflows.read/write` Hono CRUD 已实现；本地空库重放、数据库契约与 HTTP 权限测试通过，激活路由仍为 501。
-- [x] `0029` 已应用于 internal，新增 5 张表的 runtime role 权限已核对，Worker 已部署；线上 health=200、匿名图读取=401、激活=501。
-- [x] 带真实 Better Auth Session 的 internal 草稿图 CRUD 烟测通过，覆盖节点、边、非法边拒绝、归档和激活隔离。
+- [x] 图 schema、版本化 `0029` migration、项目隔离 repository、结构校验和 `workflows.read/write` Hono CRUD 已实现；本地空库重放、数据库契约与 HTTP 权限测试通过。
+- [x] `0029` 已应用于 internal，图表 runtime role 权限已核对；带真实 Better Auth Session 的图 CRUD 烟测覆盖节点、边、非法边拒绝和归档。
 - [x] Run/Step 只读查询已按现有前端契约迁移，限制单次查询量并经 Project 权限和数据库作用域双重约束。
 - [x] `task_created`/`status_changed` 已在任务写入事务中写入独立 Automation outbox；专用 Queue/DLQ、租约恢复与重复消息处理已部署到 internal，并通过空库、PostgreSQL 和真实 Session 烟测。
 - [x] Queue 消费已按事件匹配 active 图、持久化幂等 Run 与图快照，并用固定 Run ID 启动 Workflow；已实现 wait 步骤和失败记录。internal 真实任务事件至 Run/Step 完成烟测通过；重投与图编辑后恢复由 PostgreSQL 契约覆盖。
-- [ ] 实现 Queue/Workflow 执行器、Webhook token、调度与前端开放，并完成真实事件与故障恢复验收。
+- [x] 受限图激活/停用已开放且要求 `workflows.execute`：仅允许 `task_created`/`status_changed` 触发器、`wait` 和 `update_task` 的 title/importance/story_points/tags 字段；不支持的配置、模板或未实现动作在激活时拒绝，active 图必须先停用才可编辑或归档。
+- [x] `0031` 的任务写入幂等 marker 与业务更新、系统 actor 审计同事务提交；PostgreSQL 契约覆盖重复调用，internal 真实烟测覆盖激活、任务事件→Workflow→`update_task`、活动记录、停用以及独立 wait 路径。
+- [ ] 扩展 Automation 完整动作与条件节点、Webhook token、调度和前端入口；补齐事件/动作矩阵、故障恢复与真实浏览器验收。
 
 - [x] 已建立 Go API → Hono Worker 迁移清单、机器可检查 manifest、稳定 501 未迁移边界和 Worker 版本回滚策略。
 - [x] React 保留 TanStack Router/Query/Form；Static Assets 与 `/api/*` 同源，SPA 深链与懒加载版本错位可恢复。

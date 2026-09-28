@@ -94,6 +94,8 @@ export const apiMigrationManifest = [
         path: "/api/v1/projects/:projectId/automations/:automationId/runs/:runId/steps",
       },
       { method: "PATCH", path: "/api/v1/projects/:projectId/automations/:automationId" },
+      { method: "POST", path: "/api/v1/projects/:projectId/automations/:automationId/activate" },
+      { method: "POST", path: "/api/v1/projects/:projectId/automations/:automationId/deactivate" },
       { method: "DELETE", path: "/api/v1/projects/:projectId/automations/:automationId" },
       { method: "POST", path: "/api/v1/projects/:projectId/automations/:automationId/nodes" },
       {

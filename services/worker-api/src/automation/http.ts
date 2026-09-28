@@ -3,6 +3,7 @@ import * as z from "zod";
 
 import type { AppBindings, AppVariables } from "../bindings";
 import { type AuthorizeProjectPermission, requireProjectPermission } from "../permission/http";
+import { AutomationExecutionError } from "./execution-plan";
 import { AutomationGraphError, automationGraphErrorCodes } from "./graph";
 import {
   type AutomationEdgeRow,
@@ -65,12 +66,19 @@ function failure(context: AutomationContext, status: 400 | 404 | 409 | 413, code
 
 function automationFailure(context: AutomationContext, error: unknown) {
   if (error instanceof AutomationRepositoryError) {
-    const status = error.code === automationRepositoryErrorCodes.nameTaken ? 409 : 404;
+    const status =
+      error.code === automationRepositoryErrorCodes.nameTaken ||
+      error.code === automationRepositoryErrorCodes.activeImmutable
+        ? 409
+        : 404;
     return failure(context, status, error.code);
   }
   if (error instanceof AutomationGraphError) {
     const status = error.code === automationGraphErrorCodes.edgeDuplicate ? 409 : 400;
     return failure(context, status, error.code);
+  }
+  if (error instanceof AutomationExecutionError) {
+    return failure(context, 400, error.code);
   }
   throw error;
 }
@@ -176,7 +184,7 @@ function projectId(context: AutomationContext): string {
   return value;
 }
 
-/** Draft graph API. Activation is deliberately absent until the reliable executor exists. */
+/** Project-scoped graph API; activation rejects every node the executor cannot run. */
 export function createAutomationRoutes(
   runtime: AutomationRuntime,
   authorizeProject: AuthorizeProjectPermission,
@@ -184,6 +192,7 @@ export function createAutomationRoutes(
   const app = new Hono<{ Bindings: AppBindings; Variables: AppVariables }>();
   const read = requireProjectPermission(authorizeProject, { workflows: ["read"] });
   const write = requireProjectPermission(authorizeProject, { workflows: ["write"] });
+  const execute = requireProjectPermission(authorizeProject, { workflows: ["execute"] });
 
   app.use("*", async (context, next) => {
     if (!validIds(context, "projectId")) return failure(context, 400, "BAD_REQUEST");
@@ -303,6 +312,28 @@ export function createAutomationRoutes(
       return automationFailure(context, error);
     }
   });
+
+  for (const [suffix, active] of [
+    ["activate", true],
+    ["deactivate", false],
+  ] as const) {
+    app.post(`/:automationId/${suffix}`, execute, async (context) => {
+      if (!validIds(context, "projectId", "automationId")) {
+        return failure(context, 400, "BAD_REQUEST");
+      }
+      try {
+        const updated = await runtime.setActive(
+          context.env,
+          projectId(context),
+          context.req.param("automationId"),
+          active,
+        );
+        return success(context, automationResponse(updated));
+      } catch (error) {
+        return automationFailure(context, error);
+      }
+    });
+  }
 
   app.delete("/:automationId", write, async (context) => {
     if (!validIds(context, "projectId", "automationId")) {

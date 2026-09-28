@@ -961,6 +961,29 @@ export const pacaTaskActivities = pgTable(
   ],
 );
 
+/** Commits a trusted task mutation's idempotency key in the same transaction as the task write. */
+export const pacaTaskMutationIdempotency = pgTable(
+  "paca_task_mutation_idempotency",
+  {
+    taskId: uuid("task_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    operationKey: text("operation_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.taskId, table.operationKey] }),
+    foreignKey({
+      columns: [table.taskId, table.projectId],
+      foreignColumns: [pacaTasks.id, pacaTasks.projectId],
+      name: "paca_task_mutation_idempotency_task_project_fk",
+    }).onDelete("cascade"),
+    check(
+      "paca_task_mutation_idempotency_key_check",
+      sql`length(${table.operationKey}) between 1 and 255`,
+    ),
+  ],
+);
+
 export const pacaNotifications = pgTable(
   "paca_notification",
   {

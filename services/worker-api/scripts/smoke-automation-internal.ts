@@ -87,6 +87,24 @@ async function expectJson(response: Response, status: number, step: string): Pro
   return value;
 }
 
+async function waitForCompletedRun(path: string, cookie: string, taskId: string): Promise<string> {
+  const deadline = Date.now() + 180_000;
+  while (Date.now() < deadline) {
+    const history = await expectJson(
+      await request(`${path}/runs?limit=10`, "GET", cookie),
+      200,
+      "WORKFLOW_RUN_HISTORY",
+    );
+    const items = record(history.data)?.items;
+    if (!Array.isArray(items)) throw new Error("AUTOMATION_SMOKE_RUN_HISTORY_INVALID");
+    const matching = items.map(record).find((row) => row?.task_id === taskId);
+    if (matching?.status === "failed") throw new Error("AUTOMATION_SMOKE_WORKFLOW_FAILED");
+    if (matching?.status === "completed") return stringField(matching, "id");
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+  }
+  throw new Error("AUTOMATION_SMOKE_WORKFLOW_TIMEOUT");
+}
+
 async function main(): Promise<void> {
   if (process.env.PACA_AUTOMATION_SMOKE_CONFIRM !== "RUN_INTERNAL_AUTOMATION_SMOKE") {
     throw new Error("PACA_AUTOMATION_SMOKE_CONFIRM_REQUIRED");
@@ -255,10 +273,56 @@ async function main(): Promise<void> {
     if (invalidEdge.error_code !== "AUTOMATION_EDGE_INTO_TRIGGER") {
       throw new Error("AUTOMATION_SMOKE_INVALID_EDGE_CODE");
     }
-    await expectJson(
+    const activation = await expectJson(
       await request(`${graphPath}/activate`, "POST", cookie),
-      501,
-      "ACTIVATION_UNAVAILABLE",
+      200,
+      "GRAPH_ACTIVATE",
+    );
+    if (record(activation.data)?.status !== "active") {
+      throw new Error("AUTOMATION_SMOKE_GRAPH_NOT_ACTIVE");
+    }
+    const activeEdit = await expectJson(
+      await request(`${graphPath}/nodes/${actionId}`, "PATCH", cookie, {
+        config: { update: { importance: 2 } },
+      }),
+      409,
+      "ACTIVE_GRAPH_EDIT_REJECTED",
+    );
+    if (activeEdit.error_code !== "AUTOMATION_ACTIVE_GRAPH_IMMUTABLE") {
+      throw new Error("AUTOMATION_SMOKE_ACTIVE_EDIT_CODE_INVALID");
+    }
+    const actionTask = await expectJson(
+      await request(`/api/v1/projects/${projectId}/tasks`, "POST", cookie, {
+        title: `Action task ${suffix}`,
+      }),
+      201,
+      "ACTION_TASK_CREATE",
+    );
+    const actionTaskId = stringField(actionTask.data, "id");
+    const actionRunId = await waitForCompletedRun(graphPath, cookie, actionTaskId);
+    const updatedTask = await expectJson(
+      await request(`/api/v1/projects/${projectId}/tasks/${actionTaskId}`, "GET", cookie),
+      200,
+      "ACTION_TASK_READ",
+    );
+    if (record(updatedTask.data)?.importance !== 1) {
+      throw new Error("AUTOMATION_SMOKE_TASK_NOT_UPDATED");
+    }
+    const activity = await client.query<{ actor_type: string; content: JsonRecord }>(
+      "SELECT actor_type, content FROM paca_task_activity WHERE task_id = $1 AND activity_type = 'task.updated'",
+      [actionTaskId],
+    );
+    if (
+      activity.rows.length !== 1 ||
+      activity.rows[0]?.actor_type !== "system" ||
+      activity.rows[0]?.content.automation_run_id !== actionRunId
+    ) {
+      throw new Error("AUTOMATION_SMOKE_TASK_AUDIT_INVALID");
+    }
+    await expectJson(
+      await request(`${graphPath}/deactivate`, "POST", cookie),
+      200,
+      "GRAPH_DEACTIVATE",
     );
 
     await expectJson(
@@ -275,8 +339,7 @@ async function main(): Promise<void> {
     automationId = undefined;
     await expectJson(await request(graphPath, "GET", cookie), 404, "ARCHIVED_GRAPH_HIDDEN");
 
-    // Activation is not public yet. Exercise the deployed Queue -> Run -> Workflow
-    // path with one explicitly scoped, wait-only fixture activated by this smoke.
+    // Exercise the durable sleep path separately after the immediate task action.
     const workflowGraph = await expectJson(
       await request(base, "POST", cookie, { name: `Workflow smoke ${suffix}` }),
       201,
@@ -315,11 +378,11 @@ async function main(): Promise<void> {
       201,
       "WORKFLOW_EDGE_CREATE",
     );
-    const activated = await client.query(
-      "UPDATE paca_automation SET status = 'active', updated_at = clock_timestamp() WHERE id = $1 AND project_id = $2 AND status = 'inactive' RETURNING id",
-      [automationId, projectId],
+    await expectJson(
+      await request(`${workflowPath}/activate`, "POST", cookie),
+      200,
+      "WORKFLOW_GRAPH_ACTIVATE",
     );
-    if (activated.rowCount !== 1) throw new Error("AUTOMATION_SMOKE_ACTIVATION_FAILED");
     const task = await expectJson(
       await request(`/api/v1/projects/${projectId}/tasks`, "POST", cookie, {
         title: `Workflow task ${suffix}`,
@@ -328,25 +391,7 @@ async function main(): Promise<void> {
       "WORKFLOW_TASK_CREATE",
     );
     const taskId = stringField(task.data, "id");
-    const deadline = Date.now() + 180_000;
-    let completedRunId: string | null = null;
-    while (Date.now() < deadline) {
-      const history = await expectJson(
-        await request(`${workflowPath}/runs?limit=10`, "GET", cookie),
-        200,
-        "WORKFLOW_RUN_HISTORY",
-      );
-      const items = record(history.data)?.items;
-      if (!Array.isArray(items)) throw new Error("AUTOMATION_SMOKE_RUN_HISTORY_INVALID");
-      const matching = items.map(record).find((row) => row?.task_id === taskId);
-      if (matching?.status === "failed") throw new Error("AUTOMATION_SMOKE_WORKFLOW_FAILED");
-      if (matching?.status === "completed") {
-        completedRunId = stringField(matching, "id");
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
-    }
-    if (!completedRunId) throw new Error("AUTOMATION_SMOKE_WORKFLOW_TIMEOUT");
+    const completedRunId = await waitForCompletedRun(workflowPath, cookie, taskId);
     const steps = await expectJson(
       await request(`${workflowPath}/runs/${completedRunId}/steps`, "GET", cookie),
       200,
@@ -361,6 +406,11 @@ async function main(): Promise<void> {
     ) {
       throw new Error("AUTOMATION_SMOKE_WORKFLOW_STEP_INVALID");
     }
+    await expectJson(
+      await request(`${workflowPath}/deactivate`, "POST", cookie),
+      200,
+      "WORKFLOW_GRAPH_DEACTIVATE",
+    );
     await expectJson(await request(workflowPath, "DELETE", cookie), 200, "WORKFLOW_GRAPH_ARCHIVE");
     automationId = undefined;
 

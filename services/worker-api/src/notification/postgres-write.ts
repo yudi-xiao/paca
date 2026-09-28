@@ -15,6 +15,7 @@ type TaskNotificationInput = {
 };
 
 function actorColumns(actor: TaskActor) {
+  if (actor.type === "system") throw new Error("NOTIFICATION_SYSTEM_ACTOR_UNSUPPORTED");
   return actor.type === "user"
     ? { actorType: "user", actorUserId: actor.id, actorAgentId: null }
     : { actorType: "agent", actorUserId: null, actorAgentId: actor.id };

@@ -81,6 +81,11 @@ const automationGraphMigrationURL = new URL("../drizzle/0029_fair_fat_cobra.sql"
 const automationGraphSnapshotURL = new URL("../drizzle/meta/0029_snapshot.json", import.meta.url);
 const automationEventMigrationURL = new URL("../drizzle/0030_lively_mephisto.sql", import.meta.url);
 const automationEventSnapshotURL = new URL("../drizzle/meta/0030_snapshot.json", import.meta.url);
+const taskIdempotencyMigrationURL = new URL(
+  "../drizzle/0031_perpetual_iron_man.sql",
+  import.meta.url,
+);
+const taskIdempotencySnapshotURL = new URL("../drizzle/meta/0031_snapshot.json", import.meta.url);
 
 const applicationTables = [
   "user",
@@ -118,6 +123,7 @@ const applicationTables = [
   "paca_automation_event_outbox",
   "paca_task_assignee",
   "paca_task_activity",
+  "paca_task_mutation_idempotency",
   "paca_notification",
   "paca_branding_upload",
   "paca_workspace_settings",
@@ -468,6 +474,18 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain("paca_automation_task_event_insert");
     expect(migration).toContain("paca_automation_task_event_status");
     expect(migration).toContain("n.type = event_type");
+  });
+
+  it("records the task mutation idempotency schema in a transactional migration", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(taskIdempotencyMigrationURL, "utf8"),
+      readFile(taskIdempotencySnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0031_perpetual_iron_man', '${checksum}')`);
+    expect(migration).toContain("paca_task_mutation_idempotency_task_project_fk");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

@@ -8,6 +8,7 @@ import {
   pacaAutomationRuns,
   pacaAutomations,
 } from "../db/schema";
+import { validateRunnableAutomationGraph } from "./execution-plan";
 import {
   type GraphNode,
   normalizeAutomationName,
@@ -33,6 +34,7 @@ export const automationRepositoryErrorCodes = {
   nodeNotFound: "AUTOMATION_NODE_NOT_FOUND",
   edgeNotFound: "AUTOMATION_EDGE_NOT_FOUND",
   nameTaken: "AUTOMATION_NAME_TAKEN",
+  activeImmutable: "AUTOMATION_ACTIVE_GRAPH_IMMUTABLE",
 } as const;
 
 export class AutomationRepositoryError extends Error {
@@ -205,19 +207,31 @@ export class PostgresAutomationRepository {
         ? undefined
         : validateAutomationDescription(input.description);
     try {
-      const [updated] = await this.database
-        .update(pacaAutomations)
-        .set({ name, description, updatedAt: new Date() })
-        .where(
-          and(
-            eq(pacaAutomations.id, automationId),
-            eq(pacaAutomations.projectId, projectId),
-            isNull(pacaAutomations.deletedAt),
-          ),
-        )
-        .returning();
-      if (!updated) throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
-      return updated;
+      return await this.database.transaction(async (tx) => {
+        const [automation] = await tx
+          .select()
+          .from(pacaAutomations)
+          .where(
+            and(
+              eq(pacaAutomations.id, automationId),
+              eq(pacaAutomations.projectId, projectId),
+              isNull(pacaAutomations.deletedAt),
+            ),
+          )
+          .for("update");
+        if (!automation)
+          throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
+        if (automation.status === "active") {
+          throw new AutomationRepositoryError(automationRepositoryErrorCodes.activeImmutable);
+        }
+        const [updated] = await tx
+          .update(pacaAutomations)
+          .set({ name, description, updatedAt: new Date() })
+          .where(eq(pacaAutomations.id, automationId))
+          .returning();
+        if (!updated) throw new Error("AUTOMATION_UPDATE_MISSING");
+        return updated;
+      });
     } catch (error) {
       if (postgresCode(error) === "23505") {
         throw new AutomationRepositoryError(automationRepositoryErrorCodes.nameTaken);
@@ -226,30 +240,14 @@ export class PostgresAutomationRepository {
     }
   }
 
-  async archive(projectId: string, automationId: string): Promise<void> {
-    const [archived] = await this.database
-      .update(pacaAutomations)
-      .set({ status: "inactive", deletedAt: new Date(), updatedAt: new Date() })
-      .where(
-        and(
-          eq(pacaAutomations.id, automationId),
-          eq(pacaAutomations.projectId, projectId),
-          isNull(pacaAutomations.deletedAt),
-        ),
-      )
-      .returning({ id: pacaAutomations.id });
-    if (!archived) throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
-  }
-
-  async addNode(
+  async setActive(
     projectId: string,
     automationId: string,
-    input: { kind: string; type: string; config: unknown; posX: number; posY: number },
-  ): Promise<AutomationNodeRow> {
-    validateAutomationNode(input);
+    active: boolean,
+  ): Promise<AutomationRow> {
     return this.database.transaction(async (tx) => {
       const [automation] = await tx
-        .select({ id: pacaAutomations.id })
+        .select()
         .from(pacaAutomations)
         .where(
           and(
@@ -260,6 +258,77 @@ export class PostgresAutomationRepository {
         )
         .for("update");
       if (!automation) throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
+      const nextStatus = active ? "active" : "inactive";
+      if (automation.status === nextStatus) return automation;
+      if (active) {
+        const [nodes, edges] = await Promise.all([
+          tx
+            .select()
+            .from(pacaAutomationNodes)
+            .where(eq(pacaAutomationNodes.automationId, automationId)),
+          tx
+            .select()
+            .from(pacaAutomationEdges)
+            .where(eq(pacaAutomationEdges.automationId, automationId)),
+        ]);
+        validateRunnableAutomationGraph(nodes, edges);
+      }
+      const [updated] = await tx
+        .update(pacaAutomations)
+        .set({ status: nextStatus, updatedAt: new Date() })
+        .where(eq(pacaAutomations.id, automationId))
+        .returning();
+      if (!updated) throw new Error("AUTOMATION_STATUS_UPDATE_MISSING");
+      return updated;
+    });
+  }
+
+  async archive(projectId: string, automationId: string): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const [automation] = await tx
+        .select({ status: pacaAutomations.status })
+        .from(pacaAutomations)
+        .where(
+          and(
+            eq(pacaAutomations.id, automationId),
+            eq(pacaAutomations.projectId, projectId),
+            isNull(pacaAutomations.deletedAt),
+          ),
+        )
+        .for("update");
+      if (!automation) throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
+      if (automation.status === "active") {
+        throw new AutomationRepositoryError(automationRepositoryErrorCodes.activeImmutable);
+      }
+      await tx
+        .update(pacaAutomations)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(pacaAutomations.id, automationId));
+    });
+  }
+
+  async addNode(
+    projectId: string,
+    automationId: string,
+    input: { kind: string; type: string; config: unknown; posX: number; posY: number },
+  ): Promise<AutomationNodeRow> {
+    validateAutomationNode(input);
+    return this.database.transaction(async (tx) => {
+      const [automation] = await tx
+        .select({ id: pacaAutomations.id, status: pacaAutomations.status })
+        .from(pacaAutomations)
+        .where(
+          and(
+            eq(pacaAutomations.id, automationId),
+            eq(pacaAutomations.projectId, projectId),
+            isNull(pacaAutomations.deletedAt),
+          ),
+        )
+        .for("update");
+      if (!automation) throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
+      if (automation.status === "active") {
+        throw new AutomationRepositoryError(automationRepositoryErrorCodes.activeImmutable);
+      }
       const [node] = await tx
         .insert(pacaAutomationNodes)
         .values({ automationId, ...input })
@@ -276,7 +345,7 @@ export class PostgresAutomationRepository {
   async removeNode(projectId: string, automationId: string, nodeId: string): Promise<void> {
     await this.database.transaction(async (tx) => {
       const [automation] = await tx
-        .select({ id: pacaAutomations.id })
+        .select({ id: pacaAutomations.id, status: pacaAutomations.status })
         .from(pacaAutomations)
         .where(
           and(
@@ -287,6 +356,9 @@ export class PostgresAutomationRepository {
         )
         .for("update");
       if (!automation) throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
+      if (automation.status === "active") {
+        throw new AutomationRepositoryError(automationRepositoryErrorCodes.activeImmutable);
+      }
       const [removed] = await tx
         .delete(pacaAutomationNodes)
         .where(
@@ -313,7 +385,7 @@ export class PostgresAutomationRepository {
   ): Promise<AutomationNodeRow> {
     return this.database.transaction(async (tx) => {
       const [automation] = await tx
-        .select({ id: pacaAutomations.id })
+        .select({ id: pacaAutomations.id, status: pacaAutomations.status })
         .from(pacaAutomations)
         .where(
           and(
@@ -324,6 +396,9 @@ export class PostgresAutomationRepository {
         )
         .for("update");
       if (!automation) throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
+      if (automation.status === "active") {
+        throw new AutomationRepositoryError(automationRepositoryErrorCodes.activeImmutable);
+      }
       const [existing] = await tx
         .select()
         .from(pacaAutomationNodes)
@@ -381,7 +456,7 @@ export class PostgresAutomationRepository {
       // The parent row lock serializes graph edits across requests. Without it,
       // two concurrent edge inserts could each observe an acyclic graph.
       const [automation] = await tx
-        .select({ id: pacaAutomations.id })
+        .select({ id: pacaAutomations.id, status: pacaAutomations.status })
         .from(pacaAutomations)
         .where(
           and(
@@ -392,6 +467,9 @@ export class PostgresAutomationRepository {
         )
         .for("update");
       if (!automation) throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
+      if (automation.status === "active") {
+        throw new AutomationRepositoryError(automationRepositoryErrorCodes.activeImmutable);
+      }
       const [nodes, edges] = await Promise.all([
         tx
           .select()
@@ -424,7 +502,7 @@ export class PostgresAutomationRepository {
   async removeEdge(projectId: string, automationId: string, edgeId: string): Promise<void> {
     await this.database.transaction(async (tx) => {
       const [automation] = await tx
-        .select({ id: pacaAutomations.id })
+        .select({ id: pacaAutomations.id, status: pacaAutomations.status })
         .from(pacaAutomations)
         .where(
           and(
@@ -435,6 +513,9 @@ export class PostgresAutomationRepository {
         )
         .for("update");
       if (!automation) throw new AutomationRepositoryError(automationRepositoryErrorCodes.notFound);
+      if (automation.status === "active") {
+        throw new AutomationRepositoryError(automationRepositoryErrorCodes.activeImmutable);
+      }
       const [removed] = await tx
         .delete(pacaAutomationEdges)
         .where(

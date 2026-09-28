@@ -27,6 +27,7 @@ import {
   pacaTaskActivities,
   pacaTaskAssignees,
   pacaTaskCounters,
+  pacaTaskMutationIdempotency,
   pacaTaskStatuses,
   pacaTasks,
   pacaTaskTypes,
@@ -611,7 +612,11 @@ export class PostgresTaskRepository implements TaskRepository {
     taskId: string,
     actor: TaskActor,
     input: PersistedTaskUpdate,
+    operationKey?: string,
   ): Promise<Task> {
+    if (operationKey !== undefined && (operationKey.length < 1 || operationKey.length > 255)) {
+      throw new Error("TASK_OPERATION_KEY_INVALID");
+    }
     const row = await this.database.transaction(async (transaction) => {
       const [current] = await transaction
         .select()
@@ -626,6 +631,19 @@ export class PostgresTaskRepository implements TaskRepository {
         .for("update")
         .limit(1);
       if (!current) throw new TaskError(taskErrorCodes.notFound);
+
+      if (operationKey) {
+        const [completed] = await transaction
+          .select({ taskId: pacaTaskMutationIdempotency.taskId })
+          .from(pacaTaskMutationIdempotency)
+          .where(
+            and(
+              eq(pacaTaskMutationIdempotency.taskId, taskId),
+              eq(pacaTaskMutationIdempotency.operationKey, operationKey),
+            ),
+          );
+        if (completed) return current;
+      }
 
       const currentAssigneeIds =
         input.assigneeIds === undefined
@@ -693,6 +711,13 @@ export class PostgresTaskRepository implements TaskRepository {
             ),
           });
         }
+      }
+      if (operationKey) {
+        await transaction.insert(pacaTaskMutationIdempotency).values({
+          projectId,
+          taskId,
+          operationKey,
+        });
       }
       return updated;
     });
@@ -824,7 +849,10 @@ export class PostgresTaskRepository implements TaskRepository {
       projectId: input.projectId,
       ...actor,
       activityType: input.activityType,
-      content: input.content,
+      content:
+        input.actor.type === "system"
+          ? { ...input.content, automation_run_id: input.actor.runId }
+          : input.content,
     });
     return activityId;
   }
@@ -846,6 +874,16 @@ export class PostgresTaskRepository implements TaskRepository {
         actorId: actor.id,
         actorUserId: null,
         actorAgentId: actor.id,
+        actorMemberId: null,
+      };
+    }
+
+    if (actor.type === "system") {
+      return {
+        actorType: "system",
+        actorId: "system",
+        actorUserId: null,
+        actorAgentId: null,
         actorMemberId: null,
       };
     }

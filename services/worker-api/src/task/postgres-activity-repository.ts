@@ -30,9 +30,18 @@ function fromRow(row: HydratedActivityRow): TaskActivity {
     actorUserId: row.actorUserId,
     actorAgentId: row.actorAgentId,
     actorMemberId: row.actorMemberId,
-    actorName: row.actorType === "agent" ? (row.agentName ?? "Agent") : (row.actorName ?? ""),
+    actorName:
+      row.actorType === "system"
+        ? "Automation"
+        : row.actorType === "agent"
+          ? (row.agentName ?? "Agent")
+          : (row.actorName ?? ""),
     actorUsername:
-      row.actorType === "agent" ? (row.agentName ?? row.actorId) : (row.actorEmail ?? ""),
+      row.actorType === "system"
+        ? "automation"
+        : row.actorType === "agent"
+          ? (row.agentName ?? row.actorId)
+          : (row.actorEmail ?? ""),
     actorAvatarUrl: row.actorType === "user" ? row.actorImage : null,
     activityType: row.activityType,
     content: row.content,

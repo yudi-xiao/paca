@@ -5,7 +5,9 @@ import * as z from "zod";
 
 import { withDatabase } from "../database";
 import { pacaAutomationRunSteps, pacaAutomationRuns } from "../db/schema";
-import { orderedReachableNodes, waitMinutes } from "./execution-plan";
+import { PostgresTaskRepository } from "../task/postgres-repository";
+import { automationTaskActor, TaskService } from "../task/service";
+import { orderedReachableNodes, taskUpdateFromNode, waitMinutes } from "./execution-plan";
 import {
   type AutomationWorkflowParams,
   automationRunSnapshotSchema,
@@ -61,9 +63,43 @@ export class AutomationWorkflow extends WorkflowEntrypoint<Env, AutomationWorkfl
       for (const node of orderedReachableNodes(run.snapshot, run.triggerNodeId)) {
         if (node.id === run.triggerNodeId) continue;
         failedNodeId = node.id;
-        const minutes = waitMinutes(node);
-        await step.sleep(`wait-${node.id}`, `${minutes} minutes`);
-        await step.do(`record-wait-${node.id}`, RETRY, () =>
+        if (node.type === "wait") {
+          const minutes = waitMinutes(node);
+          await step.sleep(`wait-${node.id}`, `${minutes} minutes`);
+          await step.do(`record-wait-${node.id}`, RETRY, () =>
+            withDatabase(this.env, async (database) => {
+              await database
+                .insert(pacaAutomationRunSteps)
+                .values({
+                  runId: params.runId,
+                  nodeId: node.id,
+                  stepKey: node.id,
+                  status: "completed",
+                  inputSnapshot: { wait_minutes: minutes },
+                  outputSnapshot: { waited: true },
+                })
+                .onConflictDoNothing({
+                  target: [pacaAutomationRunSteps.runId, pacaAutomationRunSteps.stepKey],
+                });
+            }),
+          );
+          continue;
+        }
+        const update = taskUpdateFromNode(node);
+        await step.do(`update-task-${node.id}`, RETRY, () =>
+          withDatabase(this.env, async (database) => {
+            const service = new TaskService(new PostgresTaskRepository(database));
+            const task = await service.updateAs(
+              run.snapshot.projectId,
+              run.snapshot.event.taskId,
+              automationTaskActor(params.runId),
+              update,
+              `${params.runId}:${node.id}`,
+            );
+            return task.id;
+          }),
+        );
+        await step.do(`record-update-task-${node.id}`, RETRY, () =>
           withDatabase(this.env, async (database) => {
             await database
               .insert(pacaAutomationRunSteps)
@@ -72,8 +108,12 @@ export class AutomationWorkflow extends WorkflowEntrypoint<Env, AutomationWorkfl
                 nodeId: node.id,
                 stepKey: node.id,
                 status: "completed",
-                inputSnapshot: { wait_minutes: minutes },
-                outputSnapshot: { waited: true },
+                inputSnapshot: {
+                  fields: Object.entries(update)
+                    .filter(([, value]) => value !== undefined)
+                    .map(([key]) => key),
+                },
+                outputSnapshot: { task_id: run.snapshot.event.taskId },
               })
               .onConflictDoNothing({
                 target: [pacaAutomationRunSteps.runId, pacaAutomationRunSteps.stepKey],

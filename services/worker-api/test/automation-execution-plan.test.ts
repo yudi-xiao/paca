@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { orderedReachableNodes, waitMinutes } from "../src/automation/execution-plan";
+import {
+  matchesTaskTrigger,
+  orderedReachableNodes,
+  taskUpdateFromNode,
+  validateRunnableAutomationGraph,
+  waitMinutes,
+} from "../src/automation/execution-plan";
 import type { AutomationRunSnapshot } from "../src/automation/run-protocol";
 
 const triggerId = "11111111-1111-4111-8111-111111111111";
@@ -74,5 +80,40 @@ describe("automation execution plan", () => {
     expect(() => waitMinutes({ ...wait, type: "update_task" })).toThrow(
       "AUTOMATION_ACTION_UNSUPPORTED",
     );
+  });
+
+  it("accepts executable task updates but rejects unimplemented fields at activation", () => {
+    const graph = snapshot();
+    graph.nodes = graph.nodes.filter((node) => node.id !== unrelatedId);
+    const action = graph.nodes.find((node) => node.id === firstActionId);
+    if (!action) throw new Error("AUTOMATION_TEST_NODE_MISSING");
+    action.type = "update_task";
+    action.config = { update: { title: "  Review task  ", importance: 9, tags: ["review"] } };
+    const nodes = graph.nodes.map((node) => ({ ...node, automationId: graph.projectId }));
+    expect(() => validateRunnableAutomationGraph(nodes, graph.edges)).not.toThrow();
+    expect(taskUpdateFromNode(action)).toEqual({
+      title: "Review task",
+      importance: 9,
+      storyPoints: undefined,
+      tags: ["review"],
+    });
+    action.config = { update: { assignee_ids: [graph.projectId] } };
+    expect(() =>
+      validateRunnableAutomationGraph(
+        graph.nodes.map((node) => ({ ...node, automationId: graph.projectId })),
+        graph.edges,
+      ),
+    ).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
+    action.config = { update: { title: "Review {{task.title}}" } };
+    expect(() => taskUpdateFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
+  });
+
+  it("matches scoped status triggers and rejects unsupported trigger configuration", () => {
+    const status = { type: "status_changed", config: { status_id: firstActionId } };
+    expect(matchesTaskTrigger("status_changed", { status_id: firstActionId }, status)).toBe(true);
+    expect(matchesTaskTrigger("status_changed", { status_id: secondActionId }, status)).toBe(false);
+    expect(() =>
+      matchesTaskTrigger("status_changed", {}, { ...status, config: { status_id: "bad" } }),
+    ).toThrow("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
   });
 });
