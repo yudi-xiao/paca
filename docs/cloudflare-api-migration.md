@@ -29,7 +29,7 @@
 | Plugin 列表 | Worker 空投影 | Bridge | 插件运行时隔离、安装和权限模型 |
 | Legacy Paca Agent 写入、Conversation、Skill、Env Var、MCP Key | Go API | 容器保留 | 在 Worker 中重建 Agent Auth 身份扩展、Conversation 协议与 Runner 身份；不得恢复平行 Agent 身份或搬运旧数据 |
 | Static Environment、Terminal、SSH、Port Forward | Worker/PostgreSQL + Environment Gateway；旧连接能力仍在 Go API + agent-runner | 部分 Worker 原生 / 容器保留 | 环境列表、创建、详情、重命名、软归档已迁移，Sandbox 按需启动；精确环境/Project/Grant 撤销栅栏已部署。浏览器终端、文件、SSH、Port Forward 仍待重建，旧环境数据直接舍弃 |
-| Automation、Webhook | Worker 图管理与受限执行 + PostgreSQL；完整动作仍在 Go API + Valkey worker | 部分 Worker 原生 / 容器保留 | Worker 已开放受约束图激活、任务事件 outbox/Queue、幂等 Run、wait 与限定字段 `update_task`；internal 真实事件烟测通过。不支持的触发器/动作在激活时拒绝，完整动作、条件、Webhook、调度和前端入口仍待迁移 |
+| Automation、Webhook | Worker 图管理与受限执行 + PostgreSQL；完整动作仍在 Go API + Valkey worker | 部分 Worker 原生 / 容器保留 | Worker 已开放受约束图激活、任务事件 outbox/Queue、幂等 Run、条件分支、wait 与限定字段 `update_task`；internal 真实事件烟测通过。不支持的触发器/动作在激活时拒绝，完整动作、Webhook、调度和前端入口仍待迁移 |
 
 ```text
 Better Auth Session / Agent Auth

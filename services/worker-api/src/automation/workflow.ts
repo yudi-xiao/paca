@@ -7,7 +7,9 @@ import { withDatabase } from "../database";
 import { pacaAutomationRunSteps, pacaAutomationRuns } from "../db/schema";
 import { PostgresTaskRepository } from "../task/postgres-repository";
 import { automationTaskActor, TaskService } from "../task/service";
+import { conditionConfigFromNode } from "./condition";
 import { orderedReachableNodes, taskUpdateFromNode, waitMinutes } from "./execution-plan";
+import { PostgresAutomationConditionReader } from "./postgres-condition-reader";
 import {
   type AutomationWorkflowParams,
   automationRunSnapshotSchema,
@@ -60,9 +62,54 @@ export class AutomationWorkflow extends WorkflowEntrypoint<Env, AutomationWorkfl
       const run = loadedRunSchema.parse(JSON.parse(serializedRun));
       if (run.status !== "running") return { status: run.status };
 
+      // Rebuild reachability from persisted step results on every Workflow replay.
+      const enabled = new Set([run.triggerNodeId]);
+      const advance = (sourceNodeId: string, handle: string | null) => {
+        for (const edge of run.snapshot.edges) {
+          if (edge.sourceNodeId === sourceNodeId && edge.sourceHandle === handle) {
+            enabled.add(edge.targetNodeId);
+          }
+        }
+      };
       for (const node of orderedReachableNodes(run.snapshot, run.triggerNodeId)) {
-        if (node.id === run.triggerNodeId) continue;
+        if (!enabled.has(node.id)) continue;
+        if (node.id === run.triggerNodeId) {
+          advance(node.id, null);
+          continue;
+        }
         failedNodeId = node.id;
+        if (node.kind === "condition") {
+          const config = conditionConfigFromNode(node);
+          const selectedHandle = await step.do(`evaluate-condition-${node.id}`, RETRY, () =>
+            withDatabase(this.env, (database) =>
+              new PostgresAutomationConditionReader(database).selectHandle(
+                run.snapshot.projectId,
+                run.snapshot.event.taskId,
+                node,
+              ),
+            ),
+          );
+          await step.do(`record-condition-${node.id}`, RETRY, () =>
+            withDatabase(this.env, async (database) => {
+              await database
+                .insert(pacaAutomationRunSteps)
+                .values({
+                  runId: params.runId,
+                  nodeId: node.id,
+                  stepKey: node.id,
+                  status: "completed",
+                  inputSnapshot: { branch_count: config.branches.length },
+                  outputSnapshot: { matched_handle: selectedHandle },
+                })
+                .onConflictDoNothing({
+                  target: [pacaAutomationRunSteps.runId, pacaAutomationRunSteps.stepKey],
+                });
+            }),
+          );
+          advance(node.id, selectedHandle);
+          continue;
+        }
+        if (node.kind !== "action") throw new Error("AUTOMATION_NODE_NOT_EXECUTABLE");
         if (node.type === "wait") {
           const minutes = waitMinutes(node);
           await step.sleep(`wait-${node.id}`, `${minutes} minutes`);
@@ -83,6 +130,7 @@ export class AutomationWorkflow extends WorkflowEntrypoint<Env, AutomationWorkfl
                 });
             }),
           );
+          advance(node.id, null);
           continue;
         }
         const update = taskUpdateFromNode(node);
@@ -120,6 +168,7 @@ export class AutomationWorkflow extends WorkflowEntrypoint<Env, AutomationWorkfl
               });
           }),
         );
+        advance(node.id, null);
       }
       await step.do("mark-run-completed", RETRY, () =>
         withDatabase(this.env, async (database) => {

@@ -108,6 +108,42 @@ describe("automation execution plan", () => {
     expect(() => taskUpdateFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
   });
 
+  it("accepts a condition switch with valid handles and rejects unsupported leaves", () => {
+    const graph = snapshot();
+    graph.nodes = graph.nodes.filter((node) => node.id !== unrelatedId);
+    const branch = graph.nodes.find((node) => node.id === firstActionId);
+    if (!branch) throw new Error("AUTOMATION_TEST_NODE_MISSING");
+    branch.kind = "condition";
+    branch.type = "condition";
+    branch.config = {
+      branches: [
+        {
+          handle: "priority",
+          tree: { field: "importance", operator: "greater_than", value: "4" },
+        },
+      ],
+    };
+    graph.edges = [
+      { sourceNodeId: triggerId, sourceHandle: null, targetNodeId: firstActionId },
+      { sourceNodeId: firstActionId, sourceHandle: "priority", targetNodeId: secondActionId },
+    ];
+    const runnable = () =>
+      validateRunnableAutomationGraph(
+        graph.nodes.map((node) => ({ ...node, automationId: graph.projectId })),
+        graph.edges,
+      );
+    expect(runnable).not.toThrow();
+    const conditionEdge = graph.edges[1];
+    if (!conditionEdge) throw new Error("AUTOMATION_TEST_EDGE_MISSING");
+    conditionEdge.sourceHandle = "missing";
+    expect(runnable).toThrow("AUTOMATION_EDGE_HANDLE_NOT_ALLOWED");
+    conditionEdge.sourceHandle = "priority";
+    branch.config = {
+      branches: [{ handle: "priority", tree: { field: "tags", operator: "equals", value: "x" } }],
+    };
+    expect(runnable).toThrow("AUTOMATION_CONDITION_CONFIG_INVALID");
+  });
+
   it("matches scoped status triggers and rejects unsupported trigger configuration", () => {
     const status = { type: "status_changed", config: { status_id: firstActionId } };
     expect(matchesTaskTrigger("status_changed", { status_id: firstActionId }, status)).toBe(true);

@@ -3,7 +3,7 @@ import * as z from "zod";
 
 import type { AppBindings, AppVariables } from "../bindings";
 import { type AuthorizeProjectPermission, requireProjectPermission } from "../permission/http";
-import { AutomationExecutionError } from "./execution-plan";
+import { AutomationExecutionError } from "./errors";
 import { AutomationGraphError, automationGraphErrorCodes } from "./graph";
 import {
   type AutomationEdgeRow,

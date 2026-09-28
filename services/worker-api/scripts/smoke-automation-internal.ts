@@ -238,26 +238,55 @@ async function main(): Promise<void> {
       201,
       "ACTION_CREATE",
     );
+    const condition = await expectJson(
+      await request(`${graphPath}/nodes`, "POST", cookie, {
+        kind: "condition",
+        type: "condition",
+        config: {
+          branches: [
+            {
+              handle: "zero",
+              tree: { field: "importance", operator: "equals", value: "0" },
+            },
+          ],
+        },
+        pos_x: 100,
+        pos_y: 0,
+      }),
+      201,
+      "CONDITION_CREATE",
+    );
     const triggerId = stringField(trigger.data, "id");
     const actionId = stringField(action.data, "id");
+    const conditionId = stringField(condition.data, "id");
     const edge = await expectJson(
       await request(`${graphPath}/edges`, "POST", cookie, {
         source_node_id: triggerId,
-        target_node_id: actionId,
+        target_node_id: conditionId,
       }),
       201,
       "EDGE_CREATE",
     );
     const edgeId = stringField(edge.data, "id");
+    const branchEdge = await expectJson(
+      await request(`${graphPath}/edges`, "POST", cookie, {
+        source_node_id: conditionId,
+        source_handle: "zero",
+        target_node_id: actionId,
+      }),
+      201,
+      "BRANCH_EDGE_CREATE",
+    );
+    const branchEdgeId = stringField(branchEdge.data, "id");
 
     const graph = await expectJson(await request(graphPath, "GET", cookie), 200, "GRAPH_READ");
     const graphData = record(graph.data);
     if (
       record(graphData?.automation)?.id !== automationId ||
       !Array.isArray(graphData?.nodes) ||
-      graphData.nodes.length !== 2 ||
+      graphData.nodes.length !== 3 ||
       !Array.isArray(graphData?.edges) ||
-      graphData.edges.length !== 1
+      graphData.edges.length !== 2
     ) {
       throw new Error("AUTOMATION_SMOKE_GRAPH_MISMATCH");
     }
@@ -300,6 +329,23 @@ async function main(): Promise<void> {
     );
     const actionTaskId = stringField(actionTask.data, "id");
     const actionRunId = await waitForCompletedRun(graphPath, cookie, actionTaskId);
+    const actionSteps = await expectJson(
+      await request(`${graphPath}/runs/${actionRunId}/steps`, "GET", cookie),
+      200,
+      "ACTION_RUN_STEPS",
+    );
+    const actionStepItems = record(actionSteps.data)?.items;
+    if (
+      !Array.isArray(actionStepItems) ||
+      !actionStepItems.some(
+        (step) =>
+          record(step)?.node_id === conditionId &&
+          record(record(step)?.output_snapshot)?.matched_handle === "zero",
+      ) ||
+      !actionStepItems.some((step) => record(step)?.node_id === actionId)
+    ) {
+      throw new Error("AUTOMATION_SMOKE_CONDITION_MATCH_INVALID");
+    }
     const updatedTask = await expectJson(
       await request(`/api/v1/projects/${projectId}/tasks/${actionTaskId}`, "GET", cookie),
       200,
@@ -319,6 +365,38 @@ async function main(): Promise<void> {
     ) {
       throw new Error("AUTOMATION_SMOKE_TASK_AUDIT_INVALID");
     }
+    const skippedTask = await expectJson(
+      await request(`/api/v1/projects/${projectId}/tasks`, "POST", cookie, {
+        title: `Skipped task ${suffix}`,
+        importance: 2,
+      }),
+      201,
+      "SKIPPED_TASK_CREATE",
+    );
+    const skippedTaskId = stringField(skippedTask.data, "id");
+    const skippedRunId = await waitForCompletedRun(graphPath, cookie, skippedTaskId);
+    const skippedSteps = await expectJson(
+      await request(`${graphPath}/runs/${skippedRunId}/steps`, "GET", cookie),
+      200,
+      "SKIPPED_RUN_STEPS",
+    );
+    const skippedItems = record(skippedSteps.data)?.items;
+    if (
+      !Array.isArray(skippedItems) ||
+      skippedItems.length !== 1 ||
+      record(skippedItems[0])?.node_id !== conditionId ||
+      record(record(skippedItems[0])?.output_snapshot)?.matched_handle !== "else"
+    ) {
+      throw new Error("AUTOMATION_SMOKE_CONDITION_ELSE_INVALID");
+    }
+    const untouchedTask = await expectJson(
+      await request(`/api/v1/projects/${projectId}/tasks/${skippedTaskId}`, "GET", cookie),
+      200,
+      "SKIPPED_TASK_READ",
+    );
+    if (record(untouchedTask.data)?.importance !== 2) {
+      throw new Error("AUTOMATION_SMOKE_ELSE_MUTATED_TASK");
+    }
     await expectJson(
       await request(`${graphPath}/deactivate`, "POST", cookie),
       200,
@@ -331,9 +409,19 @@ async function main(): Promise<void> {
       "EDGE_DELETE",
     );
     await expectJson(
+      await request(`${graphPath}/edges/${branchEdgeId}`, "DELETE", cookie),
+      200,
+      "BRANCH_EDGE_DELETE",
+    );
+    await expectJson(
       await request(`${graphPath}/nodes/${actionId}`, "DELETE", cookie),
       200,
       "ACTION_DELETE",
+    );
+    await expectJson(
+      await request(`${graphPath}/nodes/${conditionId}`, "DELETE", cookie),
+      200,
+      "CONDITION_DELETE",
     );
     await expectJson(await request(graphPath, "DELETE", cookie), 200, "GRAPH_ARCHIVE");
     automationId = undefined;

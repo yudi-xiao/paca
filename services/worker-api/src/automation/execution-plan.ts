@@ -1,17 +1,17 @@
 import * as z from "zod";
 
 import type { TaskUpdateInput } from "../task/service";
-import { type GraphEdge, type GraphNode, validateAutomationActivation } from "./graph";
+import { conditionConfigFromNode } from "./condition";
+import { AutomationExecutionError } from "./errors";
+import {
+  type GraphEdge,
+  type GraphNode,
+  validateAutomationActivation,
+  validateOutgoingConditionHandles,
+} from "./graph";
 import type { AutomationRunSnapshot } from "./run-protocol";
 
 export type SnapshotNode = AutomationRunSnapshot["nodes"][number];
-
-export class AutomationExecutionError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-    this.name = "AutomationExecutionError";
-  }
-}
 
 const statusTriggerConfigSchema = z.object({ status_id: z.uuid().nullable().optional() }).strict();
 const taskUpdateConfigSchema = z
@@ -50,9 +50,13 @@ export function validateRunnableAutomationGraph(
       }
       throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
     }
-    if (node.kind !== "action") {
-      throw new AutomationExecutionError("AUTOMATION_NODE_NOT_EXECUTABLE");
+    if (node.kind === "condition") {
+      conditionConfigFromNode(node);
+      validateOutgoingConditionHandles(node, edges);
+      continue;
     }
+    if (node.kind !== "action")
+      throw new AutomationExecutionError("AUTOMATION_NODE_NOT_EXECUTABLE");
     if (node.type === "wait") {
       waitMinutes(node);
     } else if (node.type === "update_task") {
