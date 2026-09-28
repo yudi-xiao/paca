@@ -6,12 +6,14 @@ import {
   type AutomationOutboxRepository,
   dispatchAutomationOutbox,
 } from "../src/automation/event-outbox";
+import type { AutomationRunPlanner } from "../src/automation/run-planner";
 import type { AppBindings } from "../src/bindings";
 
 const now = new Date("2026-09-28T00:00:00.000Z");
 const outboxId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
 const taskId = "33333333-3333-4333-8333-333333333333";
+const runId = "44444444-4444-4444-8444-444444444444";
 
 function event(): AutomationEventRow {
   return {
@@ -82,26 +84,44 @@ describe("automation event outbox", () => {
     expect(store.markEnqueued).not.toHaveBeenCalled();
   });
 
-  it("acknowledges events without active triggers and keeps unsupported active events recoverable", async () => {
+  it("acknowledges events without matching runs and starts matched runs before delivery", async () => {
     const store = repository();
+    const planner: AutomationRunPlanner = { plan: vi.fn().mockResolvedValue([]) };
+    const workflow = { createBatch: vi.fn().mockResolvedValue([]) };
     const inactiveMessage = batch({ version: 1, outboxId });
     await consumeAutomationEventQueue(inactiveMessage.value, {} as AppBindings, {
       repository: store,
-      hasActiveTrigger: async () => false,
+      planner,
+      workflow,
       now: () => now,
     });
     expect(store.markDelivered).toHaveBeenCalledWith(outboxId, now);
     expect(inactiveMessage.ack).toHaveBeenCalledOnce();
+    expect(workflow.createBatch).not.toHaveBeenCalled();
 
     const activeStore = repository();
     const activeMessage = batch({ version: 1, outboxId });
     await consumeAutomationEventQueue(activeMessage.value, {} as AppBindings, {
       repository: activeStore,
-      hasActiveTrigger: async () => true,
+      planner: { plan: vi.fn().mockResolvedValue([runId]) },
+      workflow,
       now: () => now,
     });
-    expect(activeStore.markDelivered).not.toHaveBeenCalled();
-    expect(activeMessage.retry).toHaveBeenCalledOnce();
+    expect(workflow.createBatch).toHaveBeenCalledWith([{ id: runId, params: { runId } }]);
+    expect(activeStore.markDelivered).toHaveBeenCalledWith(outboxId, now);
+    expect(activeMessage.ack).toHaveBeenCalledOnce();
+  });
+
+  it("does not acknowledge an event when Workflow creation fails", async () => {
+    const store = repository();
+    const message = batch({ version: 1, outboxId });
+    await consumeAutomationEventQueue(message.value, {} as AppBindings, {
+      repository: store,
+      planner: { plan: vi.fn().mockResolvedValue([runId]) },
+      workflow: { createBatch: vi.fn().mockRejectedValue(new Error("WORKFLOW_UNAVAILABLE")) },
+    });
+    expect(store.markDelivered).not.toHaveBeenCalled();
+    expect(message.retry).toHaveBeenCalledOnce();
   });
 
   it("acks invalid or duplicate messages without replaying the event", async () => {
@@ -109,13 +129,15 @@ describe("automation event outbox", () => {
     const invalid = batch({ version: 1, outboxId: "not-a-uuid" });
     await consumeAutomationEventQueue(invalid.value, {} as AppBindings, {
       repository: store,
-      hasActiveTrigger: async () => true,
+      planner: { plan: vi.fn().mockResolvedValue([runId]) },
+      workflow: { createBatch: vi.fn().mockResolvedValue([]) },
     });
     expect(invalid.ack).toHaveBeenCalledOnce();
     const duplicate = batch({ version: 1, outboxId });
     await consumeAutomationEventQueue(duplicate.value, {} as AppBindings, {
       repository: store,
-      hasActiveTrigger: async () => true,
+      planner: { plan: vi.fn().mockResolvedValue([runId]) },
+      workflow: { createBatch: vi.fn().mockResolvedValue([]) },
     });
     expect(duplicate.ack).toHaveBeenCalledOnce();
     expect(store.markDelivered).not.toHaveBeenCalled();

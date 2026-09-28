@@ -15,6 +15,8 @@ const expectedDevelopmentDocumentQueue = "paca-document-materialization-developm
 const expectedInternalDocumentQueue = "paca-document-materialization-internal";
 const expectedDevelopmentAutomationQueue = "paca-automation-events-development";
 const expectedInternalAutomationQueue = "paca-automation-events-internal";
+const expectedDevelopmentAutomationWorkflow = "paca-automation-development";
+const expectedInternalAutomationWorkflow = "paca-automation-internal";
 const expectedInternalEnvironmentGateway = "paca-environment-gateway-internal";
 const expectedPartyBindings = new Map([
   ["ProjectParty", "ProjectParty"],
@@ -152,6 +154,14 @@ function assertAutomationQueue(record: JsonRecord, label: string, expectedQueue:
   }
 }
 
+function assertAutomationWorkflow(record: JsonRecord, label: string, expectedName: string): void {
+  const workflows = asRecordArray(record.workflows, `${label}_WORKFLOWS`);
+  const binding = workflows.find((entry) => entry.binding === "AUTOMATION_WORKFLOW");
+  if (!binding || binding.name !== expectedName || binding.class_name !== "AutomationWorkflow") {
+    throw new Error(`${label}_AUTOMATION_WORKFLOW_INVALID`);
+  }
+}
+
 function assertEnvironmentGateway(record: JsonRecord): void {
   const services = asRecordArray(record.services, "INTERNAL_SERVICES");
   const binding = services.find((entry) => entry.binding === "ENVIRONMENT_GATEWAY");
@@ -185,6 +195,8 @@ async function main(): Promise<void> {
   assertDocumentQueue(internal, "INTERNAL", expectedInternalDocumentQueue);
   assertAutomationQueue(config, "ROOT", expectedDevelopmentAutomationQueue);
   assertAutomationQueue(internal, "INTERNAL", expectedInternalAutomationQueue);
+  assertAutomationWorkflow(config, "ROOT", expectedDevelopmentAutomationWorkflow);
+  assertAutomationWorkflow(internal, "INTERNAL", expectedInternalAutomationWorkflow);
   assertEnvironmentGateway(internal);
 
   if (usesRootDatabase) {

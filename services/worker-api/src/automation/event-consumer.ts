@@ -1,46 +1,37 @@
-import { and, eq, isNull } from "drizzle-orm";
-
 import type { AppBindings } from "../bindings";
-import { type PacaDatabase, withDatabase } from "../database";
-import { pacaAutomationNodes, pacaAutomations } from "../db/schema";
+import { withDatabase } from "../database";
 import {
-  type AutomationEventRow,
   type AutomationOutboxRepository,
   PostgresAutomationOutboxRepository,
   parseAutomationQueueMessage,
 } from "./event-outbox";
+import { type AutomationRunPlanner, PostgresAutomationRunPlanner } from "./run-planner";
+import type { AutomationWorkflowParams } from "./run-protocol";
 
-type AutomationEventConsumerDependencies = {
+type WorkflowStarter = Pick<Workflow<AutomationWorkflowParams>, "createBatch">;
+
+export type AutomationEventConsumerDependencies = {
   now?: () => Date;
   repository?: AutomationOutboxRepository;
-  hasActiveTrigger?: (event: AutomationEventRow) => Promise<boolean>;
+  planner?: AutomationRunPlanner;
+  workflow?: WorkflowStarter;
 };
 
-async function hasActiveTrigger(
-  database: PacaDatabase,
-  event: AutomationEventRow,
-): Promise<boolean> {
-  const [match] = await database
-    .select({ id: pacaAutomations.id })
-    .from(pacaAutomations)
-    .innerJoin(pacaAutomationNodes, eq(pacaAutomationNodes.automationId, pacaAutomations.id))
-    .where(
-      and(
-        eq(pacaAutomations.projectId, event.projectId),
-        eq(pacaAutomations.status, "active"),
-        isNull(pacaAutomations.deletedAt),
-        eq(pacaAutomationNodes.kind, "trigger"),
-        eq(pacaAutomationNodes.type, event.eventType),
-      ),
-    )
-    .limit(1);
-  return Boolean(match);
+async function startRuns(workflow: WorkflowStarter, runIds: string[]): Promise<void> {
+  // Cloudflare documents createBatch with caller-supplied IDs as idempotent.
+  // A Queue retry can safely re-submit a batch after an uncertain response.
+  for (let index = 0; index < runIds.length; index += 100) {
+    await workflow.createBatch(
+      runIds.slice(index, index + 100).map((runId) => ({ id: runId, params: { runId } })),
+    );
+  }
 }
 
 async function consume(
   batch: MessageBatch<unknown>,
   repository: AutomationOutboxRepository,
-  matches: (event: AutomationEventRow) => Promise<boolean>,
+  planner: AutomationRunPlanner,
+  workflow: WorkflowStarter,
   now: () => Date,
 ): Promise<void> {
   for (const message of batch.messages) {
@@ -61,15 +52,13 @@ async function consume(
         message.ack();
         continue;
       }
-      // Activation is still closed. If an active graph was installed out of
-      // band, fail closed and leave the durable outbox row recoverable rather
-      // than acknowledging an event whose actions were never executed.
-      if (await matches(event)) throw new Error("AUTOMATION_EXECUTOR_NOT_READY");
+      const runIds = await planner.plan(outboxId);
+      await startRuns(workflow, runIds);
       await repository.markDelivered(outboxId, now());
       message.ack();
     } catch (error) {
       const errorCode =
-        error instanceof Error && /^[A-Z0-9_]{1,100}$/u.test(error.message)
+        error instanceof Error && /^AUTOMATION_[A-Z0-9_]{1,90}$/u.test(error.message)
           ? error.message
           : "AUTOMATION_EVENT_CONSUME_FAILED";
       console.error(
@@ -91,14 +80,21 @@ export async function consumeAutomationEventQueue(
   dependencies: AutomationEventConsumerDependencies = {},
 ): Promise<void> {
   const now = dependencies.now ?? (() => new Date());
-  if (dependencies.repository && dependencies.hasActiveTrigger) {
-    return consume(batch, dependencies.repository, dependencies.hasActiveTrigger, now);
+  if (dependencies.repository && dependencies.planner) {
+    return consume(
+      batch,
+      dependencies.repository,
+      dependencies.planner,
+      dependencies.workflow ?? env.AUTOMATION_WORKFLOW,
+      now,
+    );
   }
   return withDatabase(env, (database) =>
     consume(
       batch,
       dependencies.repository ?? new PostgresAutomationOutboxRepository(database),
-      dependencies.hasActiveTrigger ?? ((event) => hasActiveTrigger(database, event)),
+      dependencies.planner ?? new PostgresAutomationRunPlanner(database),
+      dependencies.workflow ?? env.AUTOMATION_WORKFLOW,
       now,
     ),
   );

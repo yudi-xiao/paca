@@ -11,6 +11,7 @@ import { routeRealtimeRequest } from "./realtime/router";
 
 export { AgentCoordinator } from "./agent-run/coordinator";
 export { DocumentAgentWorkflow } from "./agent-run/document-workflow";
+export { AutomationWorkflow } from "./automation/workflow";
 export { DocumentParty } from "./document/party";
 export { ProjectParty, UserParty } from "./realtime/party";
 

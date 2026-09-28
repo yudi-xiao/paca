@@ -275,6 +275,95 @@ async function main(): Promise<void> {
     automationId = undefined;
     await expectJson(await request(graphPath, "GET", cookie), 404, "ARCHIVED_GRAPH_HIDDEN");
 
+    // Activation is not public yet. Exercise the deployed Queue -> Run -> Workflow
+    // path with one explicitly scoped, wait-only fixture activated by this smoke.
+    const workflowGraph = await expectJson(
+      await request(base, "POST", cookie, { name: `Workflow smoke ${suffix}` }),
+      201,
+      "WORKFLOW_GRAPH_CREATE",
+    );
+    automationId = stringField(workflowGraph.data, "id");
+    const workflowPath = `${base}/${automationId}`;
+    const workflowTrigger = await expectJson(
+      await request(`${workflowPath}/nodes`, "POST", cookie, {
+        kind: "trigger",
+        type: "task_created",
+        config: {},
+        pos_x: 0,
+        pos_y: 0,
+      }),
+      201,
+      "WORKFLOW_TRIGGER_CREATE",
+    );
+    const workflowWait = await expectJson(
+      await request(`${workflowPath}/nodes`, "POST", cookie, {
+        kind: "action",
+        type: "wait",
+        config: { wait_minutes: 1 },
+        pos_x: 200,
+        pos_y: 0,
+      }),
+      201,
+      "WORKFLOW_WAIT_CREATE",
+    );
+    const workflowWaitId = stringField(workflowWait.data, "id");
+    await expectJson(
+      await request(`${workflowPath}/edges`, "POST", cookie, {
+        source_node_id: stringField(workflowTrigger.data, "id"),
+        target_node_id: workflowWaitId,
+      }),
+      201,
+      "WORKFLOW_EDGE_CREATE",
+    );
+    const activated = await client.query(
+      "UPDATE paca_automation SET status = 'active', updated_at = clock_timestamp() WHERE id = $1 AND project_id = $2 AND status = 'inactive' RETURNING id",
+      [automationId, projectId],
+    );
+    if (activated.rowCount !== 1) throw new Error("AUTOMATION_SMOKE_ACTIVATION_FAILED");
+    const task = await expectJson(
+      await request(`/api/v1/projects/${projectId}/tasks`, "POST", cookie, {
+        title: `Workflow task ${suffix}`,
+      }),
+      201,
+      "WORKFLOW_TASK_CREATE",
+    );
+    const taskId = stringField(task.data, "id");
+    const deadline = Date.now() + 180_000;
+    let completedRunId: string | null = null;
+    while (Date.now() < deadline) {
+      const history = await expectJson(
+        await request(`${workflowPath}/runs?limit=10`, "GET", cookie),
+        200,
+        "WORKFLOW_RUN_HISTORY",
+      );
+      const items = record(history.data)?.items;
+      if (!Array.isArray(items)) throw new Error("AUTOMATION_SMOKE_RUN_HISTORY_INVALID");
+      const matching = items.map(record).find((row) => row?.task_id === taskId);
+      if (matching?.status === "failed") throw new Error("AUTOMATION_SMOKE_WORKFLOW_FAILED");
+      if (matching?.status === "completed") {
+        completedRunId = stringField(matching, "id");
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+    }
+    if (!completedRunId) throw new Error("AUTOMATION_SMOKE_WORKFLOW_TIMEOUT");
+    const steps = await expectJson(
+      await request(`${workflowPath}/runs/${completedRunId}/steps`, "GET", cookie),
+      200,
+      "WORKFLOW_RUN_STEPS",
+    );
+    const stepItems = record(steps.data)?.items;
+    if (
+      !Array.isArray(stepItems) ||
+      stepItems.length !== 1 ||
+      record(stepItems[0])?.node_id !== workflowWaitId ||
+      record(stepItems[0])?.status !== "completed"
+    ) {
+      throw new Error("AUTOMATION_SMOKE_WORKFLOW_STEP_INVALID");
+    }
+    await expectJson(await request(workflowPath, "DELETE", cookie), 200, "WORKFLOW_GRAPH_ARCHIVE");
+    automationId = undefined;
+
     smokeCompleted = true;
   } finally {
     const cleanupFailures: string[] = [];

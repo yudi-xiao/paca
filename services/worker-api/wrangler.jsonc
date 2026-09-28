@@ -109,6 +109,11 @@
       "binding": "DOCUMENT_AGENT_WORKFLOW",
       "name": "paca-document-agent-development",
       "class_name": "DocumentAgentWorkflow"
+    },
+    {
+      "binding": "AUTOMATION_WORKFLOW",
+      "name": "paca-automation-development",
+      "class_name": "AutomationWorkflow"
     }
   ],
   "migrations": [
@@ -233,6 +238,11 @@
           "binding": "DOCUMENT_AGENT_WORKFLOW",
           "name": "paca-document-agent-internal",
           "class_name": "DocumentAgentWorkflow"
+        },
+        {
+          "binding": "AUTOMATION_WORKFLOW",
+          "name": "paca-automation-internal",
+          "class_name": "AutomationWorkflow"
         }
       ]
     }

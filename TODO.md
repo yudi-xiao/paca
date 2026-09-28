@@ -21,7 +21,7 @@
 - Agent Auth 的用户审批、Agent/Host、受约束 Grant、任务/文档/环境执行、审计和撤销边界已可用；`capability.executed` 以真实 Agent 为 actor，delegated 用户仅保留为委托上下文。
 - PostgreSQL 测试流程已能从空库应用 30 个 migration，并覆盖 migration ledger、clean-slate schema、前滚恢复演练和 repository contract。
 - Worker 业务路由权限边界、Go legacy JWT role 移除、Agent Runner 单 Agent 身份隔离及 legacy Environment backend 删除均已通过 CI；已落地提交已同步至远端 `master`。
-- 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。
+- 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。Automation 已有事件到 Run/Workflow 的 wait-only 内部验证，尚未开放激活或业务动作。
 
 ### 当前优先顺序
 
@@ -130,7 +130,8 @@
 - [x] `0029` 已应用于 internal，新增 5 张表的 runtime role 权限已核对，Worker 已部署；线上 health=200、匿名图读取=401、激活=501。
 - [x] 带真实 Better Auth Session 的 internal 草稿图 CRUD 烟测通过，覆盖节点、边、非法边拒绝、归档和激活隔离。
 - [x] Run/Step 只读查询已按现有前端契约迁移，限制单次查询量并经 Project 权限和数据库作用域双重约束。
-- [x] `task_created`/`status_changed` 已在任务写入事务中写入独立 Automation outbox；专用 Queue/DLQ、租约恢复与重复消息处理已部署到 internal，并通过空库、PostgreSQL 和真实 Session 烟测。未实现执行器前，消费端对异常激活图保持失败重试，不确认未执行的动作。
+- [x] `task_created`/`status_changed` 已在任务写入事务中写入独立 Automation outbox；专用 Queue/DLQ、租约恢复与重复消息处理已部署到 internal，并通过空库、PostgreSQL 和真实 Session 烟测。
+- [x] Queue 消费已按事件匹配 active 图、持久化幂等 Run 与图快照，并用固定 Run ID 启动 Workflow；已实现 wait 步骤和失败记录。internal 真实任务事件至 Run/Step 完成烟测通过；重投与图编辑后恢复由 PostgreSQL 契约覆盖。
 - [ ] 实现 Queue/Workflow 执行器、Webhook token、调度与前端开放，并完成真实事件与故障恢复验收。
 
 - [x] 已建立 Go API → Hono Worker 迁移清单、机器可检查 manifest、稳定 501 未迁移边界和 Worker 版本回滚策略。
