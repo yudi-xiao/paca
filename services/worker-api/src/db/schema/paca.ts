@@ -1025,10 +1025,13 @@ export const pacaNotifications = pgTable(
     index("paca_notification_project_created_idx").on(table.projectId, table.createdAt),
     index("paca_notification_task_created_idx").on(table.taskId, table.createdAt),
     check("paca_notification_type_check", sql`${table.type} in ('assigned', 'mentioned')`),
-    check("paca_notification_actor_type_check", sql`${table.actorType} in ('user', 'agent')`),
+    check(
+      "paca_notification_actor_type_check",
+      sql`${table.actorType} in ('user', 'agent', 'system')`,
+    ),
     check(
       "paca_notification_actor_identity_check",
-      sql`(${table.actorType} = 'user' and ${table.actorAgentId} is null) or (${table.actorType} = 'agent' and ${table.actorUserId} is null)`,
+      sql`(${table.actorType} = 'user' and ${table.actorAgentId} is null) or (${table.actorType} = 'agent' and ${table.actorUserId} is null) or (${table.actorType} = 'system' and ${table.actorUserId} is null and ${table.actorAgentId} is null)`,
     ),
   ],
 );

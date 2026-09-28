@@ -29,7 +29,7 @@ export type Notification = {
   actorFullName: string;
   actorUsername: string;
   actorAvatarUrl: string | null;
-  actorMemberType: "human" | "agent";
+  actorMemberType: "human" | "agent" | "system";
   actorAgentType: string;
   actorAgentLlmProvider: string;
   actorAgentAcpProvider: string | null;

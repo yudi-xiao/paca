@@ -17,7 +17,7 @@ export interface Notification {
 	// Only meaningful when actor_member_type is "agent" — used to pick a
 	// default provider-logo avatar when the actor has no avatar uploaded.
 	// See lib/provider-logos.ts.
-	actor_member_type?: string; // "human" | "agent"
+	actor_member_type?: string; // "human" | "agent" | "system"
 	actor_agent_type?: string; // "llm" | "acp"
 	actor_agent_llm_provider?: string;
 	actor_agent_acp_provider?: string | null;

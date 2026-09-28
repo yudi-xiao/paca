@@ -27,6 +27,7 @@ const migrations = [
   "0029_fair_fat_cobra",
   "0030_lively_mephisto",
   "0031_perpetual_iron_man",
+  "0032_wandering_domino",
 ] as const;
 
 type RolePayload = {

@@ -36,18 +36,23 @@ type NotificationReadRow = {
 
 function fromRow(row: NotificationReadRow): Notification {
   const isAgent = row.actorType === "agent";
-  const actorFullName = isAgent
-    ? (row.actorAgentName ?? "Agent")
-    : (row.actorUserName ?? "Former member");
+  const isSystem = row.actorType === "system";
+  const actorFullName = isSystem
+    ? "Automation"
+    : isAgent
+      ? (row.actorAgentName ?? "Agent")
+      : (row.actorUserName ?? "Former member");
   return {
     id: row.id,
     type: row.type as NotificationType,
     actorFullName,
-    actorUsername: isAgent
-      ? (row.actorAgentName ?? "agent")
-      : (row.actorUserEmail?.split("@")[0] ?? actorFullName),
-    actorAvatarUrl: isAgent ? null : row.actorUserImage,
-    actorMemberType: isAgent ? "agent" : "human",
+    actorUsername: isSystem
+      ? "automation"
+      : isAgent
+        ? (row.actorAgentName ?? "agent")
+        : (row.actorUserEmail?.split("@")[0] ?? actorFullName),
+    actorAvatarUrl: isAgent || isSystem ? null : row.actorUserImage,
+    actorMemberType: isSystem ? "system" : isAgent ? "agent" : "human",
     actorAgentType: "",
     actorAgentLlmProvider: "",
     actorAgentAcpProvider: null,

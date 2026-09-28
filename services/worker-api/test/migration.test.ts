@@ -86,6 +86,14 @@ const taskIdempotencyMigrationURL = new URL(
   import.meta.url,
 );
 const taskIdempotencySnapshotURL = new URL("../drizzle/meta/0031_snapshot.json", import.meta.url);
+const systemNotificationMigrationURL = new URL(
+  "../drizzle/0032_wandering_domino.sql",
+  import.meta.url,
+);
+const systemNotificationSnapshotURL = new URL(
+  "../drizzle/meta/0032_snapshot.json",
+  import.meta.url,
+);
 
 const applicationTables = [
   "user",
@@ -486,6 +494,21 @@ describe("reviewed permission migration", () => {
     expect(migration.trimEnd()).toMatch(/COMMIT;$/);
     expect(migration).toContain(`VALUES ('0031_perpetual_iron_man', '${checksum}')`);
     expect(migration).toContain("paca_task_mutation_idempotency_task_project_fk");
+  });
+
+  it("allows truthful system-authored assignment notifications", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(systemNotificationMigrationURL, "utf8"),
+      readFile(systemNotificationSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0032_wandering_domino', '${checksum}')`);
+    expect(migration).toContain("'user', 'agent', 'system'");
+    expect(migration).toContain(
+      '"actor_user_id" is null and "paca_notification"."actor_agent_id" is null',
+    );
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

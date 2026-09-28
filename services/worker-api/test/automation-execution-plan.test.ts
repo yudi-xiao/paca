@@ -82,22 +82,52 @@ describe("automation execution plan", () => {
     );
   });
 
-  it("accepts executable task updates but rejects unimplemented fields at activation", () => {
+  it("accepts supported task fields and converts UI dates to task dates", () => {
     const graph = snapshot();
     graph.nodes = graph.nodes.filter((node) => node.id !== unrelatedId);
     const action = graph.nodes.find((node) => node.id === firstActionId);
     if (!action) throw new Error("AUTOMATION_TEST_NODE_MISSING");
     action.type = "update_task";
-    action.config = { update: { title: "  Review task  ", importance: 9, tags: ["review"] } };
+    action.config = {
+      update: {
+        task_type_id: graph.projectId,
+        status_id: graph.projectId,
+        sprint_id: graph.projectId,
+        parent_task_id: graph.event.taskId,
+        title: "  Review task  ",
+        description: [{ type: "paragraph", content: [] }],
+        importance: 9,
+        assignee_ids: [graph.projectId],
+        start_date: "2026-09-28T00:00:00Z",
+        due_date: "2026-10-01",
+        tags: ["review"],
+      },
+    };
     const nodes = graph.nodes.map((node) => ({ ...node, automationId: graph.projectId }));
     expect(() => validateRunnableAutomationGraph(nodes, graph.edges)).not.toThrow();
     expect(taskUpdateFromNode(action)).toEqual({
+      taskTypeId: graph.projectId,
+      statusId: graph.projectId,
+      sprintId: graph.projectId,
+      parentTaskId: graph.event.taskId,
       title: "Review task",
+      description: [{ type: "paragraph", content: [] }],
       importance: 9,
       storyPoints: undefined,
+      assigneeIds: [graph.projectId],
+      startDate: "2026-09-28",
+      dueDate: "2026-10-01",
       tags: ["review"],
     });
-    action.config = { update: { assignee_ids: [graph.projectId] } };
+    action.config = { update: { due_date: "2026-02-29T00:00:00Z" } };
+    expect(() => taskUpdateFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
+    action.config = { update: { due_date: "2026-10-01T01:00:00Z" } };
+    expect(() => taskUpdateFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
+    action.config = { update: { status_id: "not-a-uuid" } };
+    expect(() => taskUpdateFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
+    action.config = { update: { description: { type: "paragraph" } } };
+    expect(() => taskUpdateFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
+    action.config = { update: { reporter_id: graph.projectId } };
     expect(() =>
       validateRunnableAutomationGraph(
         graph.nodes.map((node) => ({ ...node, automationId: graph.projectId })),

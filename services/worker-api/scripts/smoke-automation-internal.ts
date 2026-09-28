@@ -194,6 +194,12 @@ async function main(): Promise<void> {
       "PROJECT_CREATE",
     );
     projectId = stringField(project.data, "id");
+    const projectMembership = await client.query<{ id: string }>(
+      "SELECT id FROM paca_project_member WHERE project_id = $1 AND user_id = $2",
+      [projectId, userId],
+    );
+    const projectMemberId = projectMembership.rows[0]?.id;
+    if (!projectMemberId) throw new Error("AUTOMATION_SMOKE_PROJECT_MEMBER_MISSING");
     const base = `/api/v1/projects/${projectId}/automations`;
 
     const created = await expectJson(
@@ -231,7 +237,14 @@ async function main(): Promise<void> {
       await request(`${graphPath}/nodes`, "POST", cookie, {
         kind: "action",
         type: "update_task",
-        config: { update: { importance: 1 } },
+        config: {
+          update: {
+            importance: 1,
+            assignee_ids: [projectMemberId],
+            start_date: "2026-09-28T00:00:00Z",
+            due_date: "2026-10-01T00:00:00Z",
+          },
+        },
         pos_x: 200,
         pos_y: 0,
       }),
@@ -351,8 +364,25 @@ async function main(): Promise<void> {
       200,
       "ACTION_TASK_READ",
     );
-    if (record(updatedTask.data)?.importance !== 1) {
+    if (
+      record(updatedTask.data)?.importance !== 1 ||
+      record(updatedTask.data)?.start_date !== "2026-09-28" ||
+      record(updatedTask.data)?.due_date !== "2026-10-01" ||
+      !Array.isArray(record(updatedTask.data)?.assignee_ids) ||
+      !(record(updatedTask.data)?.assignee_ids as unknown[]).includes(projectMemberId)
+    ) {
       throw new Error("AUTOMATION_SMOKE_TASK_NOT_UPDATED");
+    }
+    const notification = await client.query<{ actor_type: string; recipient_user_id: string }>(
+      "SELECT actor_type, recipient_user_id FROM paca_notification WHERE task_id = $1 AND type = 'assigned'",
+      [actionTaskId],
+    );
+    if (
+      notification.rows.length !== 1 ||
+      notification.rows[0]?.actor_type !== "system" ||
+      notification.rows[0]?.recipient_user_id !== userId
+    ) {
+      throw new Error("AUTOMATION_SMOKE_ASSIGNMENT_NOTIFICATION_INVALID");
     }
     const activity = await client.query<{ actor_type: string; content: JsonRecord }>(
       "SELECT actor_type, content FROM paca_task_activity WHERE task_id = $1 AND activity_type = 'task.updated'",

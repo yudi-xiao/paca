@@ -14,10 +14,28 @@ import type { AutomationRunSnapshot } from "./run-protocol";
 export type SnapshotNode = AutomationRunSnapshot["nodes"][number];
 
 const statusTriggerConfigSchema = z.object({ status_id: z.uuid().nullable().optional() }).strict();
+const taskDateSchema = z
+  .string()
+  .refine((value) => {
+    if (!/^\d{4}-\d{2}-\d{2}(?:T00:00:00(?:\.000)?Z)?$/u.test(value)) return false;
+    const date = value.slice(0, 10);
+    const [year, month, day] = date.split("-").map(Number);
+    const parsed = new Date(Date.UTC(year as number, (month as number) - 1, day));
+    return (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === (month as number) - 1 &&
+      parsed.getUTCDate() === day
+    );
+  })
+  .transform((value) => value.slice(0, 10));
 const taskUpdateConfigSchema = z
   .object({
     update: z
       .object({
+        task_type_id: z.uuid().optional(),
+        status_id: z.uuid().optional(),
+        sprint_id: z.uuid().optional(),
+        parent_task_id: z.uuid().optional(),
         title: z
           .string()
           .trim()
@@ -25,8 +43,15 @@ const taskUpdateConfigSchema = z
           .max(500)
           .refine((title) => !title.includes("{{") && !title.includes("}}"))
           .optional(),
+        description: z
+          .array(z.unknown())
+          .refine((value) => JSON.stringify(value).length <= 256_000)
+          .optional(),
         importance: z.number().int().min(0).max(1_000_000).optional(),
         story_points: z.number().int().min(0).max(1_000_000).nullable().optional(),
+        assignee_ids: z.array(z.uuid()).max(20).optional(),
+        start_date: taskDateSchema.optional(),
+        due_date: taskDateSchema.optional(),
         tags: z.array(z.string().max(100)).max(50).optional(),
       })
       .strict()
@@ -115,9 +140,17 @@ export function taskUpdateFromNode(
   }
   const update = parsed.data.update;
   return {
+    taskTypeId: update.task_type_id,
+    statusId: update.status_id,
+    sprintId: update.sprint_id,
+    parentTaskId: update.parent_task_id,
     title: update.title,
+    description: update.description,
     importance: update.importance,
     storyPoints: update.story_points,
+    assigneeIds: update.assignee_ids,
+    startDate: update.start_date,
+    dueDate: update.due_date,
     tags: update.tags,
   };
 }

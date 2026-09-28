@@ -144,7 +144,7 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL) {
       const unsupportedUpdate = await request(
         `${base}/${created.data.id}/nodes/${action.data.id}`,
         "PATCH",
-        { config: { update: { assignee_ids: [] } } },
+        { config: { update: { reporter_id: actorId } } },
       );
       expect(unsupportedUpdate.status).toBe(200);
       const rejectedActivation = await request(`${base}/${created.data.id}/activate`, "POST");
