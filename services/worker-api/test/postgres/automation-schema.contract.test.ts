@@ -12,11 +12,14 @@ import * as schema from "../../src/db/schema";
 import {
   organization,
   pacaAutomationEdges,
+  pacaAutomationEventOutbox,
   pacaAutomationNodes,
   pacaAutomationRunSteps,
   pacaAutomationRuns,
   pacaAutomations,
   pacaProjects,
+  pacaTaskStatuses,
+  pacaTasks,
   user,
 } from "../../src/db/schema";
 
@@ -26,6 +29,99 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL) {
 }
 
 (databaseURL ? describe : describe.skip)("PostgreSQL Automation graph schema", () => {
+  it("commits task-created and status-change events only for active matching graphs", async () => {
+    if (!databaseURL) throw new Error("PACA_TEST_DATABASE_URL_REQUIRED");
+    const client = new Client({ connectionString: databaseURL, connectionTimeoutMillis: 5_000 });
+    await client.connect();
+    const database = drizzle(client, { schema });
+    const suffix = crypto.randomUUID();
+    const actorId = `automation-event-${suffix}`;
+    const organizationId = `automation-event-org-${suffix}`;
+    try {
+      await database.insert(user).values({
+        id: actorId,
+        name: "Automation Event User",
+        email: `${actorId}@paca.test`,
+        emailVerified: true,
+      });
+      await database.insert(organization).values({
+        id: organizationId,
+        name: "Automation Event Org",
+        slug: organizationId,
+        createdAt: new Date(),
+      });
+      const [project] = await database
+        .insert(pacaProjects)
+        .values({ organizationId, name: "Events", slug: `events-${suffix}`, createdBy: actorId })
+        .returning();
+      if (!project) throw new Error("AUTOMATION_EVENT_PROJECT_INSERT_FAILED");
+      const [draft] = await database
+        .insert(pacaAutomations)
+        .values({ projectId: project.id, name: "Event Graph", createdBy: actorId })
+        .returning();
+      if (!draft) throw new Error("AUTOMATION_EVENT_GRAPH_INSERT_FAILED");
+      await database.insert(pacaAutomationNodes).values([
+        { automationId: draft.id, kind: "trigger", type: "task_created" },
+        { automationId: draft.id, kind: "trigger", type: "status_changed" },
+      ]);
+      const [first] = await database
+        .insert(pacaTasks)
+        .values({ projectId: project.id, taskNumber: 1, title: "Before activation" })
+        .returning();
+      if (!first) throw new Error("AUTOMATION_EVENT_TASK_INSERT_FAILED");
+      expect(
+        await database
+          .select()
+          .from(pacaAutomationEventOutbox)
+          .where(eq(pacaAutomationEventOutbox.projectId, project.id)),
+      ).toHaveLength(0);
+
+      await database
+        .update(pacaAutomations)
+        .set({ status: "active" })
+        .where(eq(pacaAutomations.id, draft.id));
+      const [created] = await database
+        .insert(pacaTasks)
+        .values({ projectId: project.id, taskNumber: 2, title: "After activation" })
+        .returning();
+      if (!created) throw new Error("AUTOMATION_EVENT_TASK_INSERT_FAILED");
+      const [status] = await database
+        .insert(pacaTaskStatuses)
+        .values({ projectId: project.id, name: "Ready", category: "ready" })
+        .returning();
+      if (!status) throw new Error("AUTOMATION_EVENT_STATUS_INSERT_FAILED");
+      await database
+        .update(pacaTasks)
+        .set({ statusId: status.id })
+        .where(eq(pacaTasks.id, created.id));
+      await database
+        .update(pacaTasks)
+        .set({ statusId: status.id })
+        .where(eq(pacaTasks.id, created.id));
+      const events = await database
+        .select()
+        .from(pacaAutomationEventOutbox)
+        .where(eq(pacaAutomationEventOutbox.projectId, project.id));
+      expect(events).toHaveLength(2);
+      expect(events.map((event) => event.eventType).sort()).toEqual([
+        "status_changed",
+        "task_created",
+      ]);
+      expect(events.find((event) => event.eventType === "status_changed")?.payload).toEqual({
+        task_id: created.id,
+        previous_status_id: null,
+        status_id: status.id,
+      });
+    } finally {
+      try {
+        await database.delete(organization).where(eq(organization.id, organizationId));
+        await database.delete(user).where(eq(user.id, actorId));
+      } finally {
+        await client.end();
+      }
+    }
+  });
+
   it("isolates project graphs and preserves idempotent run history", async () => {
     if (!databaseURL) throw new Error("PACA_TEST_DATABASE_URL_REQUIRED");
     const client = new Client({

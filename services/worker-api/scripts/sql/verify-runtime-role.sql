@@ -59,7 +59,8 @@ WITH application_tables(table_name) AS (
     ('paca_automation_node'),
     ('paca_automation_edge'),
     ('paca_automation_run'),
-    ('paca_automation_run_step')
+    ('paca_automation_run_step'),
+    ('paca_automation_event_outbox')
 )
 SELECT count(*) = 0 AS crud_is_valid
 FROM application_tables

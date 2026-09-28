@@ -13,6 +13,8 @@ const expectedDevelopmentRealtimeQueue = "paca-realtime-events-development";
 const expectedInternalRealtimeQueue = "paca-realtime-events-internal";
 const expectedDevelopmentDocumentQueue = "paca-document-materialization-development";
 const expectedInternalDocumentQueue = "paca-document-materialization-internal";
+const expectedDevelopmentAutomationQueue = "paca-automation-events-development";
+const expectedInternalAutomationQueue = "paca-automation-events-internal";
 const expectedInternalEnvironmentGateway = "paca-environment-gateway-internal";
 const expectedPartyBindings = new Map([
   ["ProjectParty", "ProjectParty"],
@@ -129,6 +131,27 @@ function assertDocumentQueue(record: JsonRecord, label: string, expectedQueue: s
   }
 }
 
+function assertAutomationQueue(record: JsonRecord, label: string, expectedQueue: string): void {
+  const queues = asRecord(record.queues, `${label}_QUEUES`);
+  const producers = asRecordArray(queues.producers, `${label}_QUEUE_PRODUCERS`);
+  const consumers = asRecordArray(queues.consumers, `${label}_QUEUE_CONSUMERS`);
+  const producer = producers.find((entry) => entry.binding === "AUTOMATION_EVENTS");
+  const consumer = consumers.find((entry) => entry.queue === expectedQueue);
+  if (!producer || producer.queue !== expectedQueue) {
+    throw new Error(`${label}_AUTOMATION_QUEUE_PRODUCER_INVALID`);
+  }
+  if (
+    !consumer ||
+    consumer.max_batch_size !== 10 ||
+    consumer.max_batch_timeout !== 2 ||
+    consumer.max_retries !== 5 ||
+    consumer.retry_delay !== 5 ||
+    consumer.dead_letter_queue !== `${expectedQueue}-dlq`
+  ) {
+    throw new Error(`${label}_AUTOMATION_QUEUE_CONSUMER_INVALID`);
+  }
+}
+
 function assertEnvironmentGateway(record: JsonRecord): void {
   const services = asRecordArray(record.services, "INTERNAL_SERVICES");
   const binding = services.find((entry) => entry.binding === "ENVIRONMENT_GATEWAY");
@@ -160,6 +183,8 @@ async function main(): Promise<void> {
   assertRealtimeQueue(internal, "INTERNAL", expectedInternalRealtimeQueue);
   assertDocumentQueue(config, "ROOT", expectedDevelopmentDocumentQueue);
   assertDocumentQueue(internal, "INTERNAL", expectedInternalDocumentQueue);
+  assertAutomationQueue(config, "ROOT", expectedDevelopmentAutomationQueue);
+  assertAutomationQueue(internal, "INTERNAL", expectedInternalAutomationQueue);
   assertEnvironmentGateway(internal);
 
   if (usesRootDatabase) {

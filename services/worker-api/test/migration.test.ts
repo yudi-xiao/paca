@@ -79,6 +79,8 @@ const removeLegacyEnvironmentBackendSnapshotURL = new URL(
 );
 const automationGraphMigrationURL = new URL("../drizzle/0029_fair_fat_cobra.sql", import.meta.url);
 const automationGraphSnapshotURL = new URL("../drizzle/meta/0029_snapshot.json", import.meta.url);
+const automationEventMigrationURL = new URL("../drizzle/0030_lively_mephisto.sql", import.meta.url);
+const automationEventSnapshotURL = new URL("../drizzle/meta/0030_snapshot.json", import.meta.url);
 
 const applicationTables = [
   "user",
@@ -113,6 +115,7 @@ const applicationTables = [
   "paca_automation_edge",
   "paca_automation_run",
   "paca_automation_run_step",
+  "paca_automation_event_outbox",
   "paca_task_assignee",
   "paca_task_activity",
   "paca_notification",
@@ -451,6 +454,20 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain(`VALUES ('0029_fair_fat_cobra', '${checksum}')`);
     expect(migration).toContain('CONSTRAINT "paca_automation_edge_source_automation_fk"');
     expect(migration).toContain('CONSTRAINT "paca_automation_run_event_unique"');
+  });
+
+  it("records the Automation event outbox and atomic task triggers", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(automationEventMigrationURL, "utf8"),
+      readFile(automationEventSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0030_lively_mephisto', '${checksum}')`);
+    expect(migration).toContain("paca_automation_task_event_insert");
+    expect(migration).toContain("paca_automation_task_event_status");
+    expect(migration).toContain("n.type = event_type");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

@@ -1,6 +1,8 @@
 import { recoverAbandonedAgentTaskLeases } from "./agent-task/recovery";
 import { createApp } from "./app";
 import { ATTACHMENT_CLEANUP_CRON, runScheduledAttachmentCleanup } from "./attachment/scheduled";
+import { consumeAutomationEventQueue } from "./automation/event-consumer";
+import { dispatchAutomationOutbox } from "./automation/event-outbox";
 import { runScheduledBrandingCleanup } from "./branding/scheduled";
 import { consumeDocumentMaterializationQueue } from "./document/materialization";
 import { consumeRealtimeQueue } from "./realtime/consumer";
@@ -17,9 +19,15 @@ const REALTIME_OUTBOX_CRON = "* * * * *";
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 async function dispatchAndLog(env: Env, source: "request" | "scheduled"): Promise<void> {
-  const result = await dispatchRealtimeOutbox(env);
-  if (result.claimed > 0 || result.failed > 0) {
-    console.log(JSON.stringify({ event: "realtime.outbox.dispatched", source, ...result }));
+  const [realtime, automation] = await Promise.all([
+    dispatchRealtimeOutbox(env),
+    dispatchAutomationOutbox(env),
+  ]);
+  if (realtime.claimed > 0 || realtime.failed > 0) {
+    console.log(JSON.stringify({ event: "realtime.outbox.dispatched", source, ...realtime }));
+  }
+  if (automation.claimed > 0 || automation.failed > 0) {
+    console.log(JSON.stringify({ event: "automation.outbox.dispatched", source, ...automation }));
   }
 }
 
@@ -58,6 +66,10 @@ export default {
     console.warn(JSON.stringify({ event: "scheduled.unknown_cron", cron: controller.cron }));
   },
   async queue(batch, env) {
+    if (batch.queue.startsWith("paca-automation-events-")) {
+      await consumeAutomationEventQueue(batch, env);
+      return;
+    }
     if (batch.queue.startsWith("paca-document-materialization-")) {
       await consumeDocumentMaterializationQueue(batch, env);
       return;

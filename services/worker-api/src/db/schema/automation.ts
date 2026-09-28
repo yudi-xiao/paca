@@ -21,6 +21,48 @@ export type PacaAutomationStatus = "active" | "inactive";
 export type PacaAutomationNodeKind = "trigger" | "condition" | "action";
 export type PacaAutomationRunStatus = "running" | "completed" | "failed";
 export type PacaAutomationRunStepStatus = "completed" | "failed" | "skipped";
+export type PacaAutomationEventStatus = "pending" | "enqueuing" | "enqueued" | "delivered";
+
+/** Business events are committed with their source task mutation, independently of realtime. */
+export const pacaAutomationEventOutbox = pgTable(
+  "paca_automation_event_outbox",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => pacaProjects.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id"),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: text("status").$type<PacaAutomationEventStatus>().default("pending").notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    availableAt: timestamp("available_at", { withTimezone: true }).defaultNow().notNull(),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    enqueuedAt: timestamp("enqueued_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    failureCode: text("failure_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("paca_automation_event_dispatch_idx").on(
+      table.status,
+      table.availableAt,
+      table.createdAt,
+    ),
+    index("paca_automation_event_project_idx").on(table.projectId, table.createdAt),
+    check(
+      "paca_automation_event_type_check",
+      sql`${table.eventType} in ('task_created', 'status_changed')`,
+    ),
+    check(
+      "paca_automation_event_status_check",
+      sql`${table.status} in ('pending', 'enqueuing', 'enqueued', 'delivered')`,
+    ),
+    check("paca_automation_event_attempts_check", sql`${table.attempts} >= 0`),
+    check("paca_automation_event_payload_check", sql`jsonb_typeof(${table.payload}) = 'object'`),
+  ],
+);
 
 export const pacaAutomations = pgTable(
   "paca_automation",

@@ -63,7 +63,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.paca_automation_node,
   public.paca_automation_edge,
   public.paca_automation_run,
-  public.paca_automation_run_step
+  public.paca_automation_run_step,
+  public.paca_automation_event_outbox
 TO :"runtime_role";
 
 REVOKE ALL PRIVILEGES ON TABLE public.paca_schema_migration FROM :"runtime_role";
