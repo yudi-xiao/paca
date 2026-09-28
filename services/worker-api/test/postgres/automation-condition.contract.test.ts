@@ -4,6 +4,7 @@ import { Client } from "pg";
 import { describe, expect, it } from "vitest";
 
 import { PostgresAutomationConditionReader } from "../../src/automation/postgres-condition-reader";
+import { PostgresAutomationTargetReader } from "../../src/automation/postgres-target-reader";
 import * as schema from "../../src/db/schema";
 import {
   organization,
@@ -87,12 +88,26 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL) {
         .update(pacaTasks)
         .set({ parentTaskId: parent.id })
         .where(eq(pacaTasks.id, secondChild.id));
-      await database.insert(pacaTaskLinks).values({
-        projectId: project.id,
-        sourceTaskId: parent.id,
-        targetTaskId: linked.id,
-        linkType: "blocks",
-      });
+      await database.insert(pacaTaskLinks).values([
+        {
+          projectId: project.id,
+          sourceTaskId: parent.id,
+          targetTaskId: linked.id,
+          linkType: "blocks",
+        },
+        {
+          projectId: project.id,
+          sourceTaskId: parent.id,
+          targetTaskId: secondChild.id,
+          linkType: "relates_to",
+        },
+        {
+          projectId: project.id,
+          sourceTaskId: parent.id,
+          targetTaskId: firstChild.id,
+          linkType: "duplicates",
+        },
+      ]);
 
       const reader = new PostgresAutomationConditionReader(database);
       const node = (branches: unknown[]) => ({
@@ -219,6 +234,44 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL) {
           ]),
         ),
       ).toBe("inverse");
+
+      const targets = new PostgresAutomationTargetReader(database);
+      expect(await targets.resolveTaskIds(project.id, parent.id, { kind: "self" })).toEqual([
+        parent.id,
+      ]);
+      expect(await targets.resolveTaskIds(project.id, firstChild.id, { kind: "parent" })).toEqual([
+        parent.id,
+      ]);
+      expect(await targets.resolveTaskIds(project.id, parent.id, { kind: "children" })).toEqual(
+        [firstChild.id, secondChild.id].sort(),
+      );
+      expect(await targets.resolveTaskIds(project.id, parent.id, { kind: "blocks" })).toEqual([
+        linked.id,
+      ]);
+      expect(
+        await targets.resolveTaskIds(project.id, linked.id, { kind: "is_blocked_by" }),
+      ).toEqual([parent.id]);
+      expect(await targets.resolveTaskIds(project.id, parent.id, { kind: "relates_to" })).toEqual([
+        secondChild.id,
+      ]);
+      expect(await targets.resolveTaskIds(project.id, parent.id, { kind: "duplicates" })).toEqual([
+        firstChild.id,
+      ]);
+      expect(
+        await targets.resolveTaskIds(project.id, firstChild.id, { kind: "is_duplicated_by" }),
+      ).toEqual([parent.id]);
+      expect(
+        await targets.resolveTaskIds(project.id, parent.id, {
+          kind: "other",
+          other_task_id: firstChild.id,
+        }),
+      ).toEqual([firstChild.id]);
+      await expect(
+        targets.resolveTaskIds(project.id, parent.id, {
+          kind: "other",
+          other_task_id: external.id,
+        }),
+      ).rejects.toThrow("AUTOMATION_TARGET_NOT_FOUND");
     } finally {
       try {
         await database.delete(organization).where(eq(organization.id, organizationId));

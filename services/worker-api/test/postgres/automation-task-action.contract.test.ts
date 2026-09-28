@@ -4,9 +4,11 @@ import { Client } from "pg";
 import { describe, expect, it } from "vitest";
 
 import { taskUpdateFromNode } from "../../src/automation/execution-plan";
+import { PostgresAutomationTargetReader } from "../../src/automation/postgres-target-reader";
 import * as schema from "../../src/db/schema";
 import {
   organization,
+  pacaCustomFieldDefinitions,
   pacaNotifications,
   pacaProjectMembers,
   pacaProjects,
@@ -60,6 +62,10 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL) {
         .insert(pacaProjectMembers)
         .values({ projectId: project.id, userId })
         .returning();
+      await database.insert(pacaCustomFieldDefinitions).values([
+        { projectId: project.id, fieldKey: "existing", displayName: "Existing", fieldType: "text" },
+        { projectId: project.id, fieldKey: "release", displayName: "Release", fieldType: "text" },
+      ]);
       const [status] = await database
         .insert(pacaTaskStatuses)
         .values({ projectId: project.id, name: "Ready", category: "ready" })
@@ -72,16 +78,32 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL) {
         .insert(pacaSprints)
         .values({ projectId: project.id, name: "Sprint 1" })
         .returning();
-      const [parent, task] = await database
+      const [parent, task, sibling] = await database
         .insert(pacaTasks)
         .values([
           { projectId: project.id, taskNumber: 1, title: "Parent" },
-          { projectId: project.id, taskNumber: 2, title: "Before" },
+          {
+            projectId: project.id,
+            taskNumber: 2,
+            title: "Before",
+            customFields: { existing: "keep" },
+          },
+          {
+            projectId: project.id,
+            taskNumber: 3,
+            title: "Sibling",
+            customFields: { existing: "sibling" },
+            parentTaskId: null,
+          },
         ])
         .returning();
-      if (!task || !parent || !status || !taskType || !sprint || !member) {
+      if (!task || !parent || !sibling || !status || !taskType || !sprint || !member) {
         throw new Error("AUTOMATION_ACTION_FIXTURE_MISSING");
       }
+      await database
+        .update(pacaTasks)
+        .set({ parentTaskId: parent.id })
+        .where(eq(pacaTasks.id, sibling.id));
 
       const service = new TaskService(new PostgresTaskRepository(database));
       const update = taskUpdateFromNode({
@@ -97,6 +119,8 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL) {
             description: [{ type: "paragraph", content: [] }],
             importance: 9,
             assignee_ids: [member.id],
+            reporter_id: member.id,
+            custom_fields: { release: "v2" },
             start_date: "2026-09-28T00:00:00Z",
             due_date: "2026-10-01T00:00:00Z",
             tags: ["review"],
@@ -129,8 +153,28 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL) {
         startDate: "2026-09-28",
         dueDate: "2026-10-01",
         assigneeIds: [member.id],
+        reporterId: member.id,
+        customFields: { existing: "keep", release: "v2" },
       });
       expect(second.updatedAt).toEqual(first.updatedAt);
+      await expect(
+        service.updateAs(
+          project.id,
+          task.id,
+          automationTaskActor(runId),
+          { reporterId: crypto.randomUUID() },
+          `${runId}:invalid-reporter`,
+        ),
+      ).rejects.toThrow("TASK_REPORTER_INVALID");
+      await expect(
+        service.updateAs(
+          project.id,
+          task.id,
+          automationTaskActor(runId),
+          { customFieldPatch: { unknown: "no" } },
+          `${runId}:invalid-field`,
+        ),
+      ).rejects.toThrow("TASK_METADATA_INVALID");
 
       const activities = await database
         .select()
@@ -169,6 +213,61 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL) {
       expect(projected.items).toMatchObject([
         { actorFullName: "Automation", actorMemberType: "system", type: "assigned" },
       ]);
+
+      const targets = await new PostgresAutomationTargetReader(database).resolveTaskIds(
+        project.id,
+        parent.id,
+        { kind: "children" },
+      );
+      expect(targets).toEqual([task.id, sibling.id].sort());
+      const fanoutUpdate = taskUpdateFromNode({
+        kind: "action",
+        type: "update_task",
+        config: { target: { kind: "children" }, update: { custom_fields: { release: "v3" } } },
+      });
+      // The first write succeeded before a simulated batch retry. Every target
+      // keeps its own operation key, so replay cannot duplicate its activity.
+      const firstTarget = targets[0];
+      if (!firstTarget) throw new Error("AUTOMATION_ACTION_TARGET_MISSING");
+      await service.updateAs(
+        project.id,
+        firstTarget,
+        automationTaskActor(runId),
+        fanoutUpdate,
+        `${runId}:fanout:${firstTarget}`,
+      );
+      for (const targetId of targets) {
+        await service.updateAs(
+          project.id,
+          targetId,
+          automationTaskActor(runId),
+          fanoutUpdate,
+          `${runId}:fanout:${targetId}`,
+        );
+      }
+      const fanoutRows = await database
+        .select({ id: pacaTasks.id, customFields: pacaTasks.customFields })
+        .from(pacaTasks)
+        .where(eq(pacaTasks.projectId, project.id));
+      expect(fanoutRows.find((row) => row.id === parent.id)?.customFields).toEqual({});
+      expect(fanoutRows.find((row) => row.id === task.id)?.customFields).toEqual({
+        existing: "keep",
+        release: "v3",
+      });
+      expect(fanoutRows.find((row) => row.id === sibling.id)?.customFields).toEqual({
+        existing: "sibling",
+        release: "v3",
+      });
+      const fanoutMarkers = await database
+        .select()
+        .from(pacaTaskMutationIdempotency)
+        .where(eq(pacaTaskMutationIdempotency.projectId, project.id));
+      expect(fanoutMarkers).toHaveLength(3);
+      const fanoutActivities = await database
+        .select()
+        .from(pacaTaskActivities)
+        .where(eq(pacaTaskActivities.projectId, project.id));
+      expect(fanoutActivities).toHaveLength(3);
     } finally {
       try {
         await database.delete(organization).where(eq(organization.id, organizationId));

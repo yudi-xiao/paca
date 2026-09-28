@@ -645,8 +645,23 @@ export class PostgresTaskRepository implements TaskRepository {
         if (completed) return current;
       }
 
+      const { customFieldPatch, ...taskInput } = input;
+      const effectiveInput: PersistedTaskUpdate =
+        customFieldPatch === undefined
+          ? taskInput
+          : {
+              ...taskInput,
+              customFields: { ...current.customFields, ...customFieldPatch },
+            };
+      if (
+        effectiveInput.customFields !== undefined &&
+        JSON.stringify(effectiveInput.customFields).length > 64_000
+      ) {
+        throw new TaskError(taskErrorCodes.metadataInvalid);
+      }
+
       const currentAssigneeIds =
-        input.assigneeIds === undefined
+        effectiveInput.assigneeIds === undefined
           ? []
           : (
               await transaction
@@ -655,26 +670,29 @@ export class PostgresTaskRepository implements TaskRepository {
                 .where(eq(pacaTaskAssignees.taskId, taskId))
             ).map((row) => row.memberId);
 
-      if (input.taskTypeId !== undefined) {
-        await this.resolveTaskType(transaction, projectId, input.taskTypeId);
+      if (effectiveInput.taskTypeId !== undefined) {
+        await this.resolveTaskType(transaction, projectId, effectiveInput.taskTypeId);
       }
-      if (input.statusId !== undefined) {
-        await this.resolveTaskStatus(transaction, projectId, input.statusId);
+      if (effectiveInput.statusId !== undefined) {
+        await this.resolveTaskStatus(transaction, projectId, effectiveInput.statusId);
       }
-      if (input.sprintId !== undefined) {
-        await this.validateSprint(transaction, projectId, input.sprintId);
+      if (effectiveInput.sprintId !== undefined) {
+        await this.validateSprint(transaction, projectId, effectiveInput.sprintId);
       }
-      if (input.parentTaskId !== undefined) {
-        await this.validateParent(transaction, projectId, input.parentTaskId, taskId);
+      if (effectiveInput.parentTaskId !== undefined) {
+        await this.validateParent(transaction, projectId, effectiveInput.parentTaskId, taskId);
       }
-      if (input.assigneeIds !== undefined) {
-        await this.validateAssignees(transaction, projectId, input.assigneeIds);
+      if (effectiveInput.assigneeIds !== undefined) {
+        await this.validateAssignees(transaction, projectId, effectiveInput.assigneeIds);
       }
-      if (input.customFields !== undefined) {
-        await this.validateCustomFields(transaction, projectId, input.customFields);
+      if (effectiveInput.reporterId !== undefined && effectiveInput.reporterId !== null) {
+        await this.validateReporter(transaction, projectId, effectiveInput.reporterId);
+      }
+      if (effectiveInput.customFields !== undefined) {
+        await this.validateCustomFields(transaction, projectId, effectiveInput.customFields);
       }
 
-      const { assigneeIds, ...taskChanges } = input;
+      const { assigneeIds, ...taskChanges } = effectiveInput;
       const [updated] = await transaction
         .update(pacaTasks)
         .set({ ...taskChanges, updatedAt: new Date() })
@@ -690,7 +708,12 @@ export class PostgresTaskRepository implements TaskRepository {
             .values(assigneeIds.map((memberId) => ({ taskId, memberId, projectId })));
         }
       }
-      const changes = await this.buildFieldChanges(transaction, current, currentAssigneeIds, input);
+      const changes = await this.buildFieldChanges(
+        transaction,
+        current,
+        currentAssigneeIds,
+        effectiveInput,
+      );
       if (changes.length > 0) {
         const activityId = await this.recordActivity(transaction, {
           projectId,
@@ -699,14 +722,14 @@ export class PostgresTaskRepository implements TaskRepository {
           activityType: "task.updated",
           content: { changes },
         });
-        if (input.assigneeIds !== undefined) {
+        if (effectiveInput.assigneeIds !== undefined) {
           const currentAssignees = new Set(currentAssigneeIds);
           await createAssignmentNotifications(transaction, {
             projectId,
             taskId,
             sourceActivityId: activityId,
             actor,
-            addedAssigneeMemberIds: input.assigneeIds.filter(
+            addedAssigneeMemberIds: effectiveInput.assigneeIds.filter(
               (memberId) => !currentAssignees.has(memberId),
             ),
           });
@@ -789,6 +812,9 @@ export class PostgresTaskRepository implements TaskRepository {
     }
     if (input.assigneeIds !== undefined && !sameStringSet(input.assigneeIds, currentAssigneeIds)) {
       changes.push({ field: "assignee", old: currentAssigneeIds, new: input.assigneeIds });
+    }
+    if (input.reporterId !== undefined && input.reporterId !== current.reporterId) {
+      changes.push({ field: "reporter", old: current.reporterId, new: input.reporterId });
     }
     if (input.customFields !== undefined && !sameJson(input.customFields, current.customFields)) {
       changes.push({ field: "custom_fields", old: current.customFields, new: input.customFields });
@@ -1021,6 +1047,21 @@ export class PostgresTaskRepository implements TaskRepository {
         ),
       );
     if (rows.length !== assigneeIds.length) throw new TaskError(taskErrorCodes.assigneeInvalid);
+  }
+
+  private async validateReporter(
+    database: Pick<PacaDatabase, "select">,
+    projectId: string,
+    reporterId: string,
+  ): Promise<void> {
+    const [member] = await database
+      .select({ id: pacaProjectMembers.id })
+      .from(pacaProjectMembers)
+      .where(
+        and(eq(pacaProjectMembers.projectId, projectId), eq(pacaProjectMembers.id, reporterId)),
+      )
+      .limit(1);
+    if (!member) throw new TaskError(taskErrorCodes.reporterInvalid);
   }
 
   private async validateCustomFields(

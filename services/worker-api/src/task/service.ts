@@ -8,6 +8,7 @@ export const taskErrorCodes = {
   metadataInvalid: "TASK_METADATA_INVALID",
   notFound: "TASK_NOT_FOUND",
   parentInvalid: "TASK_PARENT_INVALID",
+  reporterInvalid: "TASK_REPORTER_INVALID",
   sortInvalid: "TASK_SORT_INVALID",
   sprintInvalid: "TASK_SPRINT_INVALID",
   statusInvalid: "TASK_STATUS_INVALID",
@@ -173,7 +174,12 @@ export type TaskCreateInput = {
   tags?: string[];
 };
 
-export type TaskUpdateInput = Partial<Omit<TaskCreateInput, "title">> & { title?: string };
+export type TaskUpdateInput = Partial<Omit<TaskCreateInput, "title">> & {
+  title?: string;
+  reporterId?: string | null;
+  /** Merge selected custom-field keys under the task row lock. */
+  customFieldPatch?: unknown;
+};
 
 /**
  * Trusted task mutation actor. Callers must construct this only from a
@@ -228,12 +234,13 @@ export type PersistedTaskUpdate = Partial<
     | "importance"
     | "storyPoints"
     | "assigneeIds"
+    | "reporterId"
     | "customFields"
     | "startDate"
     | "dueDate"
     | "tags"
   >
->;
+> & { customFieldPatch?: Record<string, unknown> };
 
 export interface TaskRepository {
   listTypes(projectId: string): Promise<TaskType[]>;
@@ -478,8 +485,15 @@ export class TaskService {
     if (input.assigneeIds !== undefined) {
       normalized.assigneeIds = normalizeAssignees(input.assigneeIds);
     }
+    if (input.reporterId !== undefined) normalized.reporterId = input.reporterId;
+    if (input.customFields !== undefined && input.customFieldPatch !== undefined) {
+      throw new TaskError(taskErrorCodes.metadataInvalid);
+    }
     if (input.customFields !== undefined) {
       normalized.customFields = normalizeMetadata(input.customFields);
+    }
+    if (input.customFieldPatch !== undefined) {
+      normalized.customFieldPatch = normalizeMetadata(input.customFieldPatch);
     }
     if (input.startDate !== undefined) normalized.startDate = normalizeDate(input.startDate);
     if (input.dueDate !== undefined) normalized.dueDate = normalizeDate(input.dueDate);

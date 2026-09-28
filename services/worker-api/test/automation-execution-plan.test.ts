@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   matchesTaskTrigger,
   orderedReachableNodes,
+  taskUpdateActionFromNode,
   taskUpdateFromNode,
   validateRunnableAutomationGraph,
   waitMinutes,
@@ -98,6 +99,8 @@ describe("automation execution plan", () => {
         description: [{ type: "paragraph", content: [] }],
         importance: 9,
         assignee_ids: [graph.projectId],
+        reporter_id: graph.projectId,
+        custom_fields: { release: "v2" },
         start_date: "2026-09-28T00:00:00Z",
         due_date: "2026-10-01",
         tags: ["review"],
@@ -115,10 +118,24 @@ describe("automation execution plan", () => {
       importance: 9,
       storyPoints: undefined,
       assigneeIds: [graph.projectId],
+      reporterId: graph.projectId,
+      customFieldPatch: { release: "v2" },
       startDate: "2026-09-28",
       dueDate: "2026-10-01",
       tags: ["review"],
     });
+    action.config = { update: { tags: ["review"] }, target: { kind: "children" } };
+    expect(taskUpdateActionFromNode(action)).toMatchObject({
+      target: { kind: "children" },
+      update: { tags: ["review"] },
+    });
+    action.config = { update: { tags: ["review"] }, target: { kind: "other" } };
+    expect(() => taskUpdateActionFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
+    action.config = {
+      update: { tags: ["review"] },
+      target: { kind: "self", other_task_id: graph.event.taskId },
+    };
+    expect(() => taskUpdateActionFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
     action.config = { update: { due_date: "2026-02-29T00:00:00Z" } };
     expect(() => taskUpdateFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
     action.config = { update: { due_date: "2026-10-01T01:00:00Z" } };
@@ -127,7 +144,9 @@ describe("automation execution plan", () => {
     expect(() => taskUpdateFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
     action.config = { update: { description: { type: "paragraph" } } };
     expect(() => taskUpdateFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
-    action.config = { update: { reporter_id: graph.projectId } };
+    action.config = { update: { custom_fields: {} } };
+    expect(() => taskUpdateFromNode(action)).toThrow("AUTOMATION_UPDATE_TASK_CONFIG_INVALID");
+    action.config = { update: { unsupported_field: true } };
     expect(() =>
       validateRunnableAutomationGraph(
         graph.nodes.map((node) => ({ ...node, automationId: graph.projectId })),

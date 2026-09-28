@@ -48,7 +48,7 @@ const targetKinds = [
   "other",
 ] as const;
 
-const targetSchema = z
+export const targetSchema = z
   .object({ kind: z.enum(targetKinds), other_task_id: z.uuid().optional() })
   .strict();
 const leafSchema = z

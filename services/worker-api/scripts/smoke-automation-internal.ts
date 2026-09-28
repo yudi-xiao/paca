@@ -201,6 +201,18 @@ async function main(): Promise<void> {
     const projectMemberId = projectMembership.rows[0]?.id;
     if (!projectMemberId) throw new Error("AUTOMATION_SMOKE_PROJECT_MEMBER_MISSING");
     const base = `/api/v1/projects/${projectId}/automations`;
+    const taskBase = `/api/v1/projects/${projectId}/tasks`;
+    for (const fieldKey of ["existing", "release"]) {
+      await expectJson(
+        await request(`/api/v1/projects/${projectId}/custom-fields`, "POST", cookie, {
+          field_key: fieldKey,
+          display_name: fieldKey,
+          field_type: "text",
+        }),
+        201,
+        "CUSTOM_FIELD_CREATE",
+      );
+    }
 
     const created = await expectJson(
       await request(base, "POST", cookie, { name: `Draft ${suffix}` }),
@@ -241,6 +253,8 @@ async function main(): Promise<void> {
           update: {
             importance: 1,
             assignee_ids: [projectMemberId],
+            reporter_id: projectMemberId,
+            custom_fields: { release: "v2" },
             start_date: "2026-09-28T00:00:00Z",
             due_date: "2026-10-01T00:00:00Z",
           },
@@ -336,6 +350,7 @@ async function main(): Promise<void> {
     const actionTask = await expectJson(
       await request(`/api/v1/projects/${projectId}/tasks`, "POST", cookie, {
         title: `Action task ${suffix}`,
+        custom_fields: { existing: "keep" },
       }),
       201,
       "ACTION_TASK_CREATE",
@@ -368,6 +383,9 @@ async function main(): Promise<void> {
       record(updatedTask.data)?.importance !== 1 ||
       record(updatedTask.data)?.start_date !== "2026-09-28" ||
       record(updatedTask.data)?.due_date !== "2026-10-01" ||
+      record(updatedTask.data)?.reporter_id !== projectMemberId ||
+      record(record(updatedTask.data)?.custom_fields)?.existing !== "keep" ||
+      record(record(updatedTask.data)?.custom_fields)?.release !== "v2" ||
       !Array.isArray(record(updatedTask.data)?.assignee_ids) ||
       !(record(updatedTask.data)?.assignee_ids as unknown[]).includes(projectMemberId)
     ) {
@@ -456,6 +474,130 @@ async function main(): Promise<void> {
     await expectJson(await request(graphPath, "DELETE", cookie), 200, "GRAPH_ARCHIVE");
     automationId = undefined;
     await expectJson(await request(graphPath, "GET", cookie), 404, "ARCHIVED_GRAPH_HIDDEN");
+
+    const statuses = await client.query<{ id: string }>(
+      "SELECT id FROM paca_task_status WHERE project_id = $1 AND name = 'To Do'",
+      [projectId],
+    );
+    const nextStatusId = statuses.rows[0]?.id;
+    if (!nextStatusId) throw new Error("AUTOMATION_SMOKE_STATUS_MISSING");
+    const parentTask = await expectJson(
+      await request(taskBase, "POST", cookie, { title: `Fanout parent ${suffix}` }),
+      201,
+      "FANOUT_PARENT_CREATE",
+    );
+    const parentTaskId = stringField(parentTask.data, "id");
+    const childTaskIds: string[] = [];
+    for (const index of [1, 2]) {
+      const child = await expectJson(
+        await request(taskBase, "POST", cookie, {
+          title: `Fanout child ${index} ${suffix}`,
+          parent_task_id: parentTaskId,
+          custom_fields: { existing: `child-${index}` },
+        }),
+        201,
+        "FANOUT_CHILD_CREATE",
+      );
+      childTaskIds.push(stringField(child.data, "id"));
+    }
+    const fanoutGraph = await expectJson(
+      await request(base, "POST", cookie, { name: `Fanout ${suffix}` }),
+      201,
+      "FANOUT_GRAPH_CREATE",
+    );
+    automationId = stringField(fanoutGraph.data, "id");
+    const fanoutPath = `${base}/${automationId}`;
+    const fanoutTrigger = await expectJson(
+      await request(`${fanoutPath}/nodes`, "POST", cookie, {
+        kind: "trigger",
+        type: "status_changed",
+        config: { status_id: nextStatusId },
+        pos_x: 0,
+        pos_y: 0,
+      }),
+      201,
+      "FANOUT_TRIGGER_CREATE",
+    );
+    const fanoutAction = await expectJson(
+      await request(`${fanoutPath}/nodes`, "POST", cookie, {
+        kind: "action",
+        type: "update_task",
+        config: {
+          target: { kind: "children" },
+          update: { custom_fields: { release: "fanout" } },
+        },
+        pos_x: 200,
+        pos_y: 0,
+      }),
+      201,
+      "FANOUT_ACTION_CREATE",
+    );
+    const fanoutActionId = stringField(fanoutAction.data, "id");
+    await expectJson(
+      await request(`${fanoutPath}/edges`, "POST", cookie, {
+        source_node_id: stringField(fanoutTrigger.data, "id"),
+        target_node_id: fanoutActionId,
+      }),
+      201,
+      "FANOUT_EDGE_CREATE",
+    );
+    await expectJson(
+      await request(`${fanoutPath}/activate`, "POST", cookie),
+      200,
+      "FANOUT_ACTIVATE",
+    );
+    await expectJson(
+      await request(`${taskBase}/${parentTaskId}`, "PATCH", cookie, {
+        status_id: nextStatusId,
+      }),
+      200,
+      "FANOUT_STATUS_CHANGE",
+    );
+    const fanoutRunId = await waitForCompletedRun(fanoutPath, cookie, parentTaskId);
+    const fanoutSteps = await expectJson(
+      await request(`${fanoutPath}/runs/${fanoutRunId}/steps`, "GET", cookie),
+      200,
+      "FANOUT_RUN_STEPS",
+    );
+    const fanoutStep = (record(fanoutSteps.data)?.items as unknown[] | undefined)
+      ?.map(record)
+      .find((step) => step?.node_id === fanoutActionId);
+    const fanoutOutput = record(fanoutStep?.output_snapshot);
+    const fanoutTaskIds = fanoutOutput?.task_ids;
+    if (
+      !Array.isArray(fanoutTaskIds) ||
+      fanoutTaskIds.length !== childTaskIds.length ||
+      !childTaskIds.every((id) => fanoutTaskIds.includes(id))
+    ) {
+      throw new Error("AUTOMATION_SMOKE_FANOUT_TARGETS_INVALID");
+    }
+    for (const childTaskId of childTaskIds) {
+      const child = await expectJson(
+        await request(`${taskBase}/${childTaskId}`, "GET", cookie),
+        200,
+        "FANOUT_CHILD_READ",
+      );
+      if (record(record(child.data)?.custom_fields)?.release !== "fanout") {
+        throw new Error("AUTOMATION_SMOKE_FANOUT_CHILD_NOT_UPDATED");
+      }
+    }
+    const fanoutAudit = await client.query<{ task_id: string; count: string }>(
+      "SELECT task_id, count(*)::text AS count FROM paca_task_activity WHERE task_id = ANY($1::uuid[]) AND activity_type = 'task.updated' GROUP BY task_id",
+      [childTaskIds],
+    );
+    if (
+      fanoutAudit.rows.length !== childTaskIds.length ||
+      fanoutAudit.rows.some((row) => row.count !== "1")
+    ) {
+      throw new Error("AUTOMATION_SMOKE_FANOUT_AUDIT_INVALID");
+    }
+    await expectJson(
+      await request(`${fanoutPath}/deactivate`, "POST", cookie),
+      200,
+      "FANOUT_DEACTIVATE",
+    );
+    await expectJson(await request(fanoutPath, "DELETE", cookie), 200, "FANOUT_ARCHIVE");
+    automationId = undefined;
 
     // Exercise the durable sleep path separately after the immediate task action.
     const workflowGraph = await expectJson(

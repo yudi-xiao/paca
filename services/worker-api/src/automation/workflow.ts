@@ -8,8 +8,9 @@ import { pacaAutomationRunSteps, pacaAutomationRuns } from "../db/schema";
 import { PostgresTaskRepository } from "../task/postgres-repository";
 import { automationTaskActor, TaskService } from "../task/service";
 import { conditionConfigFromNode } from "./condition";
-import { orderedReachableNodes, taskUpdateFromNode, waitMinutes } from "./execution-plan";
+import { orderedReachableNodes, taskUpdateActionFromNode, waitMinutes } from "./execution-plan";
 import { PostgresAutomationConditionReader } from "./postgres-condition-reader";
+import { PostgresAutomationTargetReader } from "./postgres-target-reader";
 import {
   type AutomationWorkflowParams,
   automationRunSnapshotSchema,
@@ -133,20 +134,52 @@ export class AutomationWorkflow extends WorkflowEntrypoint<Env, AutomationWorkfl
           advance(node.id, null);
           continue;
         }
-        const update = taskUpdateFromNode(node);
-        await step.do(`update-task-${node.id}`, RETRY, () =>
-          withDatabase(this.env, async (database) => {
-            const service = new TaskService(new PostgresTaskRepository(database));
-            const task = await service.updateAs(
-              run.snapshot.projectId,
-              run.snapshot.event.taskId,
-              automationTaskActor(params.runId),
-              update,
-              `${params.runId}:${node.id}`,
+        const { update, target } = taskUpdateActionFromNode(node);
+        let targetIds: string[];
+        if (!target || target.kind === "self") {
+          // Preserve the existing step name and operation key for in-flight runs.
+          const taskId = await step.do(`update-task-${node.id}`, RETRY, () =>
+            withDatabase(this.env, async (database) => {
+              const service = new TaskService(new PostgresTaskRepository(database));
+              const task = await service.updateAs(
+                run.snapshot.projectId,
+                run.snapshot.event.taskId,
+                automationTaskActor(params.runId),
+                update,
+                `${params.runId}:${node.id}`,
+              );
+              return task.id;
+            }),
+          );
+          targetIds = [taskId];
+        } else {
+          targetIds = await step.do(`resolve-update-targets-${node.id}`, RETRY, () =>
+            withDatabase(this.env, (database) =>
+              new PostgresAutomationTargetReader(database).resolveTaskIds(
+                run.snapshot.projectId,
+                run.snapshot.event.taskId,
+                target,
+              ),
+            ),
+          );
+          for (let offset = 0; offset < targetIds.length; offset += 20) {
+            const batch = targetIds.slice(offset, offset + 20);
+            await step.do(`update-task-${node.id}-batch-${offset / 20}`, RETRY, () =>
+              withDatabase(this.env, async (database) => {
+                const service = new TaskService(new PostgresTaskRepository(database));
+                for (const taskId of batch) {
+                  await service.updateAs(
+                    run.snapshot.projectId,
+                    taskId,
+                    automationTaskActor(params.runId),
+                    update,
+                    `${params.runId}:${node.id}:${taskId}`,
+                  );
+                }
+              }),
             );
-            return task.id;
-          }),
-        );
+          }
+        }
         await step.do(`record-update-task-${node.id}`, RETRY, () =>
           withDatabase(this.env, async (database) => {
             await database
@@ -161,7 +194,10 @@ export class AutomationWorkflow extends WorkflowEntrypoint<Env, AutomationWorkfl
                     .filter(([, value]) => value !== undefined)
                     .map(([key]) => key),
                 },
-                outputSnapshot: { task_id: run.snapshot.event.taskId },
+                outputSnapshot:
+                  targetIds.length === 1
+                    ? { task_id: targetIds[0], task_ids: targetIds }
+                    : { task_ids: targetIds },
               })
               .onConflictDoNothing({
                 target: [pacaAutomationRunSteps.runId, pacaAutomationRunSteps.stepKey],

@@ -1,7 +1,7 @@
 import * as z from "zod";
 
 import type { TaskUpdateInput } from "../task/service";
-import { conditionConfigFromNode } from "./condition";
+import { type ConditionTarget, conditionConfigFromNode, targetSchema } from "./condition";
 import { AutomationExecutionError } from "./errors";
 import {
   type GraphEdge,
@@ -50,12 +50,24 @@ const taskUpdateConfigSchema = z
         importance: z.number().int().min(0).max(1_000_000).optional(),
         story_points: z.number().int().min(0).max(1_000_000).nullable().optional(),
         assignee_ids: z.array(z.uuid()).max(20).optional(),
+        reporter_id: z.uuid().optional(),
+        custom_fields: z
+          .record(z.string().min(1).max(100), z.unknown())
+          .refine(
+            (value) => Object.keys(value).length > 0 && JSON.stringify(value).length <= 64_000,
+          )
+          .optional(),
         start_date: taskDateSchema.optional(),
         due_date: taskDateSchema.optional(),
         tags: z.array(z.string().max(100)).max(50).optional(),
       })
       .strict()
       .refine((update) => Object.keys(update).length > 0),
+    target: targetSchema
+      .refine((target) =>
+        target.kind === "other" ? target.other_task_id !== undefined : !target.other_task_id,
+      )
+      .optional(),
   })
   .strict();
 
@@ -128,9 +140,10 @@ export function matchesTaskTrigger(
   throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
 }
 
-export function taskUpdateFromNode(
-  node: Pick<SnapshotNode, "kind" | "type" | "config">,
-): TaskUpdateInput {
+export function taskUpdateActionFromNode(node: Pick<SnapshotNode, "kind" | "type" | "config">): {
+  update: TaskUpdateInput;
+  target: ConditionTarget | undefined;
+} {
   if (node.kind !== "action" || node.type !== "update_task") {
     throw new AutomationExecutionError("AUTOMATION_ACTION_UNSUPPORTED");
   }
@@ -140,19 +153,30 @@ export function taskUpdateFromNode(
   }
   const update = parsed.data.update;
   return {
-    taskTypeId: update.task_type_id,
-    statusId: update.status_id,
-    sprintId: update.sprint_id,
-    parentTaskId: update.parent_task_id,
-    title: update.title,
-    description: update.description,
-    importance: update.importance,
-    storyPoints: update.story_points,
-    assigneeIds: update.assignee_ids,
-    startDate: update.start_date,
-    dueDate: update.due_date,
-    tags: update.tags,
+    target: parsed.data.target,
+    update: {
+      taskTypeId: update.task_type_id,
+      statusId: update.status_id,
+      sprintId: update.sprint_id,
+      parentTaskId: update.parent_task_id,
+      title: update.title,
+      description: update.description,
+      importance: update.importance,
+      storyPoints: update.story_points,
+      assigneeIds: update.assignee_ids,
+      reporterId: update.reporter_id,
+      customFieldPatch: update.custom_fields,
+      startDate: update.start_date,
+      dueDate: update.due_date,
+      tags: update.tags,
+    },
   };
+}
+
+export function taskUpdateFromNode(
+  node: Pick<SnapshotNode, "kind" | "type" | "config">,
+): TaskUpdateInput {
+  return taskUpdateActionFromNode(node).update;
 }
 
 export function orderedReachableNodes(

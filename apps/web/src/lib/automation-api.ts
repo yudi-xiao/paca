@@ -311,8 +311,8 @@ export interface ConditionConfig {
 /** ActionUpdateTask's config: every field change to apply, in one node —
  * replaces the old one-node-per-field actions (assign/set_status/
  * set_priority/add_tag/set_custom_field). A field left unset means "don't
- * touch it"; tags/custom_fields are full replacements, not merges (mirrors
- * the Go worker's TaskFieldUpdate). */
+ * touch it"; tags replace the list, while custom_fields merges provided keys
+ * into the task's existing custom fields. */
 export interface TaskFieldUpdate {
 	task_type_id?: string;
 	status_id?: string;

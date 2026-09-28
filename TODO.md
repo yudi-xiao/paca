@@ -21,7 +21,7 @@
 - Agent Auth 的用户审批、Agent/Host、受约束 Grant、任务/文档/环境执行、审计和撤销边界已可用；`capability.executed` 以真实 Agent 为 actor，delegated 用户仅保留为委托上下文。
 - PostgreSQL 测试流程已能从空库应用 33 个 migration，并覆盖 migration ledger、clean-slate schema、前滚恢复演练和 repository contract。
 - Worker 业务路由权限边界、Go legacy JWT role 移除、Agent Runner 单 Agent 身份隔离及 legacy Environment backend 删除均已通过 CI；已落地提交已同步至远端 `master`。
-- 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。Automation 已开放受限图激活，`task_created`/`status_changed` 可触发条件分支、`wait` 与限定字段的 `update_task`；完整动作、Webhook 和调度仍未完成。
+- 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。Automation 已开放受限图激活，`task_created`/`status_changed` 可触发条件分支、`wait` 与受限 `update_task`；完整动作、Webhook 和调度仍未完成。
 
 ### 当前优先顺序
 
@@ -135,7 +135,8 @@
 - [x] `0031` 的任务写入幂等 marker 与业务更新、系统 actor 审计同事务提交；PostgreSQL 契约覆盖重复调用，internal 真实烟测覆盖激活、任务事件→Workflow→`update_task`、活动记录、停用以及独立 wait 路径。
 - [x] 条件节点的有序分支与 else 已接入持久 Workflow 步骤；支持任务/Sprint 字段、父子与关联任务目标及 any/all，并对配置、项目隔离和目标数量实施校验。PostgreSQL 契约与 internal 真实事件烟测覆盖命中/else 路径。
 - [x] `update_task` 已扩展类型、状态、Sprint、父任务、描述、日期和指派；日期配置严格转为任务日期。`0032` 允许真实 `system` actor 的指派通知，PostgreSQL 契约覆盖重试时通知与审计不重复。
-- [ ] 扩展 Automation 剩余字段（reporter/custom field）、目标任务集合、完整触发器与动作、Webhook token、调度和前端入口；补齐事件/动作矩阵、目标集合扩容、故障恢复与真实浏览器验收。
+- [x] `update_task` 已支持 reporter 和 custom field 合并写入，并可将任务目标解析为当前、父子、指定或关联任务；目标集合在 Workflow 步骤中冻结，逐任务幂等键抵御批次部分成功后的重试。PostgreSQL 契约覆盖作用域、双子任务和重复投递；internal 真实事件烟测覆盖两个子任务的 Workflow 扇出、字段和审计。
+- [ ] 扩展 Automation 完整触发器与动作、Webhook token、调度和前端入口；补齐事件/动作矩阵、目标集合扩容、故障恢复与真实浏览器验收。
 
 - [x] 已建立 Go API → Hono Worker 迁移清单、机器可检查 manifest、稳定 501 未迁移边界和 Worker 版本回滚策略。
 - [x] React 保留 TanStack Router/Query/Form；Static Assets 与 `/api/*` 同源，SPA 深链与懒加载版本错位可恢复。
