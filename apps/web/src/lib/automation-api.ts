@@ -31,6 +31,7 @@ export const INTERNAL_PREVIEW_TRIGGER_TYPES = [
 	"assignee_changed",
 	"priority_changed",
 	"tag_added",
+	"predecessor_done",
 ] as const satisfies readonly TriggerType[];
 
 // Groups TRIGGER_TYPES by the activity stream each fires from, so the "Add

@@ -222,5 +222,31 @@ describe("automation execution plan", () => {
         },
       ),
     ).toThrow("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
+    const predecessor = {
+      type: "predecessor_done",
+      config: {
+        target_task_id: firstActionId,
+        watched_task_ids: [triggerId, secondActionId],
+      },
+    };
+    expect(
+      matchesTaskTrigger("predecessor_done", { watched_task_id: triggerId }, predecessor),
+    ).toBe(true);
+    expect(
+      matchesTaskTrigger("predecessor_done", { watched_task_id: unrelatedId }, predecessor),
+    ).toBe(false);
+    expect(() => matchesTaskTrigger("predecessor_done", {}, predecessor)).toThrow(
+      "AUTOMATION_EVENT_PAYLOAD_INVALID",
+    );
+    expect(() =>
+      matchesTaskTrigger(
+        "predecessor_done",
+        { watched_task_id: triggerId },
+        {
+          ...predecessor,
+          config: { target_task_id: firstActionId, watched_task_ids: [triggerId, triggerId] },
+        },
+      ),
+    ).toThrow("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
   });
 });

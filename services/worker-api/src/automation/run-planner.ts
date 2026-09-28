@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, like, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, like, lte } from "drizzle-orm";
 
 import type { PacaDatabase } from "../database";
 import {
@@ -7,8 +7,14 @@ import {
   pacaAutomationNodes,
   pacaAutomationRuns,
   pacaAutomations,
+  pacaTaskStatuses,
+  pacaTasks,
 } from "../db/schema";
-import { matchesTaskTrigger, validateRunnableAutomationGraph } from "./execution-plan";
+import {
+  matchesTaskTrigger,
+  predecessorDoneTriggerConfigFromNode,
+  validateRunnableAutomationGraph,
+} from "./execution-plan";
 import type { AutomationRunSnapshot } from "./run-protocol";
 
 export type AutomationRunPlanner = {
@@ -32,7 +38,8 @@ export class PostgresAutomationRunPlanner implements AutomationRunPlanner {
           event.eventType !== "status_changed" &&
           event.eventType !== "assignee_changed" &&
           event.eventType !== "priority_changed" &&
-          event.eventType !== "tag_added"
+          event.eventType !== "tag_added" &&
+          event.eventType !== "predecessor_done"
         ) {
           throw new Error("AUTOMATION_EVENT_TYPE_UNSUPPORTED");
         }
@@ -70,6 +77,41 @@ export class PostgresAutomationRunPlanner implements AutomationRunPlanner {
 
         for (const { automation, trigger } of candidates) {
           if (!matchesTaskTrigger(event.eventType, event.payload, trigger)) continue;
+          let runTaskId = event.taskId;
+          if (event.eventType === "predecessor_done") {
+            const eligible = event.payload.eligible_trigger_ids;
+            if (!Array.isArray(eligible) || !eligible.every((id) => typeof id === "string")) {
+              throw new Error("AUTOMATION_EVENT_PAYLOAD_INVALID");
+            }
+            if (!eligible.includes(trigger.id)) continue;
+            const config = predecessorDoneTriggerConfigFromNode(trigger);
+            const taskIds = [...new Set([...config.watched_task_ids, config.target_task_id])];
+            const rows = await tx
+              .select({ id: pacaTasks.id, category: pacaTaskStatuses.category })
+              .from(pacaTasks)
+              .leftJoin(
+                pacaTaskStatuses,
+                and(
+                  eq(pacaTaskStatuses.id, pacaTasks.statusId),
+                  eq(pacaTaskStatuses.projectId, event.projectId),
+                ),
+              )
+              .where(
+                and(
+                  eq(pacaTasks.projectId, event.projectId),
+                  inArray(pacaTasks.id, taskIds),
+                  isNull(pacaTasks.deletedAt),
+                ),
+              );
+            const byId = new Map(rows.map((row) => [row.id, row]));
+            if (
+              rows.length !== taskIds.length ||
+              config.watched_task_ids.some((id) => byId.get(id)?.category !== "done")
+            ) {
+              continue;
+            }
+            runTaskId = config.target_task_id;
+          }
           const [nodes, edges] = await Promise.all([
             tx
               .select()
@@ -89,7 +131,7 @@ export class PostgresAutomationRunPlanner implements AutomationRunPlanner {
             event: {
               id: event.id,
               type: event.eventType,
-              taskId: event.taskId,
+              taskId: runTaskId,
               payload: event.payload,
             },
             nodes: nodes.map((node) => ({
@@ -110,7 +152,7 @@ export class PostgresAutomationRunPlanner implements AutomationRunPlanner {
             .values({
               automationId: automation.id,
               triggerNodeId: trigger.id,
-              taskId: event.taskId,
+              taskId: runTaskId,
               eventKey,
               graphVersion: automation.graphVersion,
               graphSnapshot: snapshot,

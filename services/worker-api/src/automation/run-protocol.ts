@@ -16,6 +16,7 @@ export const automationRunSnapshotSchema = z
           "assignee_changed",
           "priority_changed",
           "tag_added",
+          "predecessor_done",
         ]),
         taskId: z.uuid(),
         payload: z.record(z.string(), z.unknown()),

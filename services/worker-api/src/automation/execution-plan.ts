@@ -17,6 +17,13 @@ const statusTriggerConfigSchema = z.object({ status_id: z.uuid().nullable().opti
 const tagAddedTriggerConfigSchema = z
   .object({ tag: z.string().trim().min(1).max(100).optional() })
   .strict();
+const predecessorDoneTriggerConfigSchema = z
+  .object({
+    target_task_id: z.uuid(),
+    watched_task_ids: z.array(z.uuid()).min(1).max(50),
+  })
+  .strict()
+  .refine((config) => new Set(config.watched_task_ids).size === config.watched_task_ids.length);
 const taskDateSchema = z
   .string()
   .refine((value) => {
@@ -98,6 +105,10 @@ export function validateRunnableAutomationGraph(
       if (node.type === "tag_added" && tagAddedTriggerConfigSchema.safeParse(node.config).success) {
         continue;
       }
+      if (node.type === "predecessor_done") {
+        predecessorDoneTriggerConfigFromNode(node);
+        continue;
+      }
       throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
     }
     if (node.kind === "condition") {
@@ -165,7 +176,28 @@ export function matchesTaskTrigger(
     }
     return !parsed.data.tag || added.includes(parsed.data.tag);
   }
+  if (eventType === "predecessor_done") {
+    const config = predecessorDoneTriggerConfigFromNode(node);
+    const watchedTaskId = payload.watched_task_id;
+    if (typeof watchedTaskId !== "string" || !z.uuid().safeParse(watchedTaskId).success) {
+      throw new AutomationExecutionError("AUTOMATION_EVENT_PAYLOAD_INVALID");
+    }
+    return config.watched_task_ids.includes(watchedTaskId);
+  }
   throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
+}
+
+export function predecessorDoneTriggerConfigFromNode(
+  node: Pick<GraphNode, "type" | "config">,
+): z.infer<typeof predecessorDoneTriggerConfigSchema> {
+  if (node.type !== "predecessor_done") {
+    throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
+  }
+  const parsed = predecessorDoneTriggerConfigSchema.safeParse(node.config);
+  if (!parsed.success) {
+    throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
+  }
+  return parsed.data;
 }
 
 export function taskUpdateActionFromNode(node: Pick<SnapshotNode, "kind" | "type" | "config">): {

@@ -102,6 +102,8 @@ const automationFieldEventSnapshotURL = new URL(
   "../drizzle/meta/0033_snapshot.json",
   import.meta.url,
 );
+const predecessorEventMigrationURL = new URL("../drizzle/0034_cute_payback.sql", import.meta.url);
+const predecessorEventSnapshotURL = new URL("../drizzle/meta/0034_snapshot.json", import.meta.url);
 
 const applicationTables = [
   "user",
@@ -531,6 +533,20 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain("AFTER UPDATE OF status_id, importance, tags ON paca_task");
     expect(migration).toContain("'priority_changed'");
     expect(migration).toContain("'tag_added'");
+  });
+
+  it("captures predecessor completion only on a transition into Done", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(predecessorEventMigrationURL, "utf8"),
+      readFile(predecessorEventSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0034_cute_payback', '${checksum}')`);
+    expect(migration).toContain("AFTER UPDATE OF status_id ON paca_task");
+    expect(migration).toContain("s.category = 'done'");
+    expect(migration).toContain("'watched_task_id'");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import type { PacaDatabase } from "../database";
 import {
@@ -7,8 +7,13 @@ import {
   pacaAutomationRunSteps,
   pacaAutomationRuns,
   pacaAutomations,
+  pacaTasks,
 } from "../db/schema";
-import { validateRunnableAutomationGraph } from "./execution-plan";
+import { AutomationExecutionError } from "./errors";
+import {
+  predecessorDoneTriggerConfigFromNode,
+  validateRunnableAutomationGraph,
+} from "./execution-plan";
 import {
   type GraphNode,
   normalizeAutomationName,
@@ -272,6 +277,28 @@ export class PostgresAutomationRepository {
             .where(eq(pacaAutomationEdges.automationId, automationId)),
         ]);
         validateRunnableAutomationGraph(nodes, edges);
+        const predecessorTaskIds = new Set<string>();
+        for (const node of nodes) {
+          if (node.kind !== "trigger" || node.type !== "predecessor_done") continue;
+          const config = predecessorDoneTriggerConfigFromNode(node);
+          predecessorTaskIds.add(config.target_task_id);
+          for (const id of config.watched_task_ids) predecessorTaskIds.add(id);
+        }
+        if (predecessorTaskIds.size > 0) {
+          const rows = await tx
+            .select({ id: pacaTasks.id })
+            .from(pacaTasks)
+            .where(
+              and(
+                eq(pacaTasks.projectId, projectId),
+                inArray(pacaTasks.id, [...predecessorTaskIds]),
+                isNull(pacaTasks.deletedAt),
+              ),
+            );
+          if (rows.length !== predecessorTaskIds.size) {
+            throw new AutomationExecutionError("AUTOMATION_TRIGGER_TASK_NOT_FOUND");
+          }
+        }
       }
       const [updated] = await tx
         .update(pacaAutomations)
