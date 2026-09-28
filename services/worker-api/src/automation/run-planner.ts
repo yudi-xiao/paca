@@ -27,7 +27,13 @@ export class PostgresAutomationRunPlanner implements AutomationRunPlanner {
           .where(eq(pacaAutomationEventOutbox.id, outboxId));
         if (!event || event.status === "delivered") return [];
         if (!event.taskId) throw new Error("AUTOMATION_EVENT_TASK_MISSING");
-        if (event.eventType !== "task_created" && event.eventType !== "status_changed") {
+        if (
+          event.eventType !== "task_created" &&
+          event.eventType !== "status_changed" &&
+          event.eventType !== "assignee_changed" &&
+          event.eventType !== "priority_changed" &&
+          event.eventType !== "tag_added"
+        ) {
           throw new Error("AUTOMATION_EVENT_TYPE_UNSUPPORTED");
         }
 

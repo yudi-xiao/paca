@@ -94,6 +94,14 @@ const systemNotificationSnapshotURL = new URL(
   "../drizzle/meta/0032_snapshot.json",
   import.meta.url,
 );
+const automationFieldEventMigrationURL = new URL(
+  "../drizzle/0033_light_barracuda.sql",
+  import.meta.url,
+);
+const automationFieldEventSnapshotURL = new URL(
+  "../drizzle/meta/0033_snapshot.json",
+  import.meta.url,
+);
 
 const applicationTables = [
   "user",
@@ -509,6 +517,20 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain(
       '"actor_user_id" is null and "paca_notification"."actor_agent_id" is null',
     );
+  });
+
+  it("expands task event capture in a transactional, checksummed migration", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(automationFieldEventMigrationURL, "utf8"),
+      readFile(automationFieldEventSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0033_light_barracuda', '${checksum}')`);
+    expect(migration).toContain("AFTER UPDATE OF status_id, importance, tags ON paca_task");
+    expect(migration).toContain("'priority_changed'");
+    expect(migration).toContain("'tag_added'");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

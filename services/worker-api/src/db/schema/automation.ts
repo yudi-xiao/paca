@@ -53,7 +53,7 @@ export const pacaAutomationEventOutbox = pgTable(
     index("paca_automation_event_project_idx").on(table.projectId, table.createdAt),
     check(
       "paca_automation_event_type_check",
-      sql`${table.eventType} in ('task_created', 'status_changed')`,
+      sql`${table.eventType} in ('task_created', 'status_changed', 'assignee_changed', 'priority_changed', 'tag_added')`,
     ),
     check(
       "paca_automation_event_status_check",

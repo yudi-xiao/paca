@@ -14,6 +14,9 @@ import type { AutomationRunSnapshot } from "./run-protocol";
 export type SnapshotNode = AutomationRunSnapshot["nodes"][number];
 
 const statusTriggerConfigSchema = z.object({ status_id: z.uuid().nullable().optional() }).strict();
+const tagAddedTriggerConfigSchema = z
+  .object({ tag: z.string().trim().min(1).max(100).optional() })
+  .strict();
 const taskDateSchema = z
   .string()
   .refine((value) => {
@@ -78,11 +81,21 @@ export function validateRunnableAutomationGraph(
   validateAutomationActivation(nodes, edges);
   for (const node of nodes) {
     if (node.kind === "trigger") {
-      if (node.type === "task_created" && Object.keys(node.config).length === 0) continue;
+      if (
+        (node.type === "task_created" ||
+          node.type === "assignee_changed" ||
+          node.type === "priority_changed") &&
+        Object.keys(node.config).length === 0
+      ) {
+        continue;
+      }
       if (
         node.type === "status_changed" &&
         statusTriggerConfigSchema.safeParse(node.config).success
       ) {
+        continue;
+      }
+      if (node.type === "tag_added" && tagAddedTriggerConfigSchema.safeParse(node.config).success) {
         continue;
       }
       throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
@@ -124,7 +137,11 @@ export function matchesTaskTrigger(
   node: Pick<GraphNode, "type" | "config">,
 ): boolean {
   if (node.type !== eventType) return false;
-  if (eventType === "task_created") {
+  if (
+    eventType === "task_created" ||
+    eventType === "assignee_changed" ||
+    eventType === "priority_changed"
+  ) {
     if (Object.keys(node.config).length !== 0) {
       throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
     }
@@ -136,6 +153,17 @@ export function matchesTaskTrigger(
       throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
     }
     return parsed.data.status_id == null || parsed.data.status_id === payload.status_id;
+  }
+  if (eventType === "tag_added") {
+    const parsed = tagAddedTriggerConfigSchema.safeParse(node.config);
+    if (!parsed.success) {
+      throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
+    }
+    const added = payload.added_tags;
+    if (!Array.isArray(added) || !added.every((tag) => typeof tag === "string")) {
+      throw new AutomationExecutionError("AUTOMATION_EVENT_PAYLOAD_INVALID");
+    }
+    return !parsed.data.tag || added.includes(parsed.data.tag);
   }
   throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
 }

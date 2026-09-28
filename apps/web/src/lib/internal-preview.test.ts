@@ -14,6 +14,9 @@ describe("internal preview route availability", () => {
 		expect(INTERNAL_PREVIEW_TRIGGER_TYPES).toEqual([
 			"task_created",
 			"status_changed",
+			"assignee_changed",
+			"priority_changed",
+			"tag_added",
 		]);
 		expect(INTERNAL_PREVIEW_ACTION_TYPES).toEqual(["update_task", "wait"]);
 	});

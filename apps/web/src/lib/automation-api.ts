@@ -28,6 +28,9 @@ export type TriggerType = (typeof TRIGGER_TYPES)[number];
 export const INTERNAL_PREVIEW_TRIGGER_TYPES = [
 	"task_created",
 	"status_changed",
+	"assignee_changed",
+	"priority_changed",
+	"tag_added",
 ] as const satisfies readonly TriggerType[];
 
 // Groups TRIGGER_TYPES by the activity stream each fires from, so the "Add

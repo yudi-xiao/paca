@@ -200,5 +200,27 @@ describe("automation execution plan", () => {
     expect(() =>
       matchesTaskTrigger("status_changed", {}, { ...status, config: { status_id: "bad" } }),
     ).toThrow("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
+    for (const type of ["assignee_changed", "priority_changed"]) {
+      expect(matchesTaskTrigger(type, {}, { type, config: {} })).toBe(true);
+      expect(() => matchesTaskTrigger(type, {}, { type, config: { unexpected: true } })).toThrow(
+        "AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED",
+      );
+    }
+    const tag = { type: "tag_added", config: { tag: "urgent" } };
+    expect(matchesTaskTrigger("tag_added", { added_tags: ["urgent", "review"] }, tag)).toBe(true);
+    expect(matchesTaskTrigger("tag_added", { added_tags: ["review"] }, tag)).toBe(false);
+    expect(() => matchesTaskTrigger("tag_added", {}, tag)).toThrow(
+      "AUTOMATION_EVENT_PAYLOAD_INVALID",
+    );
+    expect(() =>
+      matchesTaskTrigger(
+        "tag_added",
+        { added_tags: ["urgent"] },
+        {
+          ...tag,
+          config: { tag: "" },
+        },
+      ),
+    ).toThrow("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
   });
 });

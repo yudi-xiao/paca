@@ -20,6 +20,9 @@ import {
 
 import type { PacaDatabase } from "../database";
 import {
+  pacaAutomationEventOutbox,
+  pacaAutomationNodes,
+  pacaAutomations,
   pacaCustomFieldDefinitions,
   pacaProjectMembers,
   pacaProjects,
@@ -706,6 +709,39 @@ export class PostgresTaskRepository implements TaskRepository {
           await transaction
             .insert(pacaTaskAssignees)
             .values(assigneeIds.map((memberId) => ({ taskId, memberId, projectId })));
+        }
+        if (!sameStringSet(currentAssigneeIds, assigneeIds)) {
+          // The assignee set lives in a separate table. Capture one aggregate
+          // event in the same transaction, not one event per inserted row.
+          const [activeTrigger] = await transaction
+            .select({ id: pacaAutomationNodes.id })
+            .from(pacaAutomations)
+            .innerJoin(
+              pacaAutomationNodes,
+              eq(pacaAutomationNodes.automationId, pacaAutomations.id),
+            )
+            .where(
+              and(
+                eq(pacaAutomations.projectId, projectId),
+                eq(pacaAutomations.status, "active"),
+                isNull(pacaAutomations.deletedAt),
+                eq(pacaAutomationNodes.kind, "trigger"),
+                eq(pacaAutomationNodes.type, "assignee_changed"),
+              ),
+            )
+            .limit(1);
+          if (activeTrigger) {
+            await transaction.insert(pacaAutomationEventOutbox).values({
+              projectId,
+              taskId,
+              eventType: "assignee_changed",
+              payload: {
+                task_id: taskId,
+                previous_assignee_ids: [...currentAssigneeIds].sort(),
+                assignee_ids: [...assigneeIds].sort(),
+              },
+            });
+          }
         }
       }
       const changes = await this.buildFieldChanges(

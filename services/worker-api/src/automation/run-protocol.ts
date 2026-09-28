@@ -10,7 +10,13 @@ export const automationRunSnapshotSchema = z
     event: z
       .object({
         id: z.uuid(),
-        type: z.enum(["task_created", "status_changed"]),
+        type: z.enum([
+          "task_created",
+          "status_changed",
+          "assignee_changed",
+          "priority_changed",
+          "tag_added",
+        ]),
         taskId: z.uuid(),
         payload: z.record(z.string(), z.unknown()),
       })
