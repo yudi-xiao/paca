@@ -54,7 +54,12 @@ WITH application_tables(table_name) AS (
     ('paca_agent_host_runtime'),
     ('paca_agent_task_requirement'),
     ('paca_agent_task_lease'),
-    ('paca_agent_task_lease_event')
+    ('paca_agent_task_lease_event'),
+    ('paca_automation'),
+    ('paca_automation_node'),
+    ('paca_automation_edge'),
+    ('paca_automation_run'),
+    ('paca_automation_run_step')
 )
 SELECT count(*) = 0 AS crud_is_valid
 FROM application_tables

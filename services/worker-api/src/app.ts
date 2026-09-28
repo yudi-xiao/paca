@@ -54,6 +54,8 @@ import {
   readCurrentAgentSession,
   readCurrentUserSession,
 } from "./auth/runtime";
+import { createAutomationRoutes } from "./automation/http";
+import { type AutomationRuntime, automationRuntime } from "./automation/runtime";
 import type { AppBindings, AppVariables } from "./bindings";
 import { type BrandingRuntime, brandingRuntime } from "./branding/runtime";
 import {
@@ -170,6 +172,7 @@ type LogEvent = {
 
 type AppDependencies = {
   attachments: AttachmentRuntime;
+  automations: AutomationRuntime;
   branding: BrandingRuntime;
   agentProject: (
     env: AppBindings,
@@ -1412,6 +1415,7 @@ function agentTaskControlFailure(context: AppContext, error: unknown) {
 
 const defaultDependencies: AppDependencies = {
   attachments: attachmentRuntime,
+  automations: automationRuntime,
   branding: brandingRuntime,
   agentProject: (env, session, scope) =>
     withDatabase(env, (database) => readPostgresProjectAsAgent(database, session, scope)),
@@ -1492,6 +1496,10 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
   );
 
   app.use("/api/v1/*", protectAuthOrigin);
+  app.route(
+    "/api/v1/projects/:projectId/automations",
+    createAutomationRoutes(dependencies.automations, dependencies.authorizeProjectPermission),
+  );
 
   app.get("/.well-known/agent-configuration", (context) =>
     dependencies.agentConfigurationHandler(context.req.raw, context.env),

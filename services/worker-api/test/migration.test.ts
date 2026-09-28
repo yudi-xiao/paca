@@ -77,6 +77,8 @@ const removeLegacyEnvironmentBackendSnapshotURL = new URL(
   "../drizzle/meta/0028_snapshot.json",
   import.meta.url,
 );
+const automationGraphMigrationURL = new URL("../drizzle/0029_fair_fat_cobra.sql", import.meta.url);
+const automationGraphSnapshotURL = new URL("../drizzle/meta/0029_snapshot.json", import.meta.url);
 
 const applicationTables = [
   "user",
@@ -106,6 +108,11 @@ const applicationTables = [
   "paca_task_view",
   "paca_view_task_position",
   "paca_task",
+  "paca_automation",
+  "paca_automation_node",
+  "paca_automation_edge",
+  "paca_automation_run",
+  "paca_automation_run_step",
   "paca_task_assignee",
   "paca_task_activity",
   "paca_notification",
@@ -430,6 +437,20 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain(`VALUES ('0028_unknown_thunderbolts', '${checksum}')`);
     expect(migration).toContain("'cloudflare-sandbox', 'cloudflare-computer'");
     expect(migration).not.toContain("legacy-agent-runner");
+  });
+
+  it("records the Automation graph schema with its reviewed snapshot checksum", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(automationGraphMigrationURL, "utf8"),
+      readFile(automationGraphSnapshotURL),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0029_fair_fat_cobra', '${checksum}')`);
+    expect(migration).toContain('CONSTRAINT "paca_automation_edge_source_automation_fk"');
+    expect(migration).toContain('CONSTRAINT "paca_automation_run_event_unique"');
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

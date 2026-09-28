@@ -20,7 +20,14 @@ describe("API migration manifest", () => {
     expect(matchUnmigratedApi("/api/v1/admin/agents/agent-1")).toMatchObject({
       domain: "agent-management",
     });
-    expect(matchUnmigratedApi("/api/v1/projects/project-1/automations")).toMatchObject({
+    expect(
+      matchUnmigratedApi("/api/v1/projects/project-1/automations/automation-1/activate", "POST"),
+    ).toMatchObject({
+      domain: "automations",
+    });
+    expect(
+      matchUnmigratedApi("/api/v1/projects/project-1/automation-dependency-map"),
+    ).toMatchObject({
       domain: "automations",
     });
     expect(matchUnmigratedApi("/api/v1/projects/project-1/environmental-report")).toBeNull();
@@ -37,6 +44,14 @@ describe("API migration manifest", () => {
     });
     expect(matchUnmigratedApi("/api/v1/projects/project-1/environments", "GET")).toBeNull();
     expect(matchUnmigratedApi("/api/v1/projects/project-1/environments", "POST")).toBeNull();
+    expect(matchUnmigratedApi("/api/v1/projects/project-1/automations", "GET")).toBeNull();
+    expect(matchUnmigratedApi("/api/v1/projects/project-1/automations", "POST")).toBeNull();
+    expect(
+      matchUnmigratedApi(
+        "/api/v1/projects/project-1/automations/automation-1/nodes/node-1",
+        "PATCH",
+      ),
+    ).toBeNull();
     expect(
       matchUnmigratedApi("/api/v1/projects/project-1/environments/environment-1", "PATCH"),
     ).toBeNull();

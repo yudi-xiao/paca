@@ -78,7 +78,33 @@ export const apiMigrationManifest = [
     dependsOn: ["automation repository migration", "Queue and Workflow event contract"],
     owner: "go-api",
     rollback: "worker-version",
-    routePrefixes: ["/api/v1/projects/:projectId/automations", "/api/v1/webhooks/automations"],
+    routePrefixes: [
+      "/api/v1/projects/:projectId/automations",
+      "/api/v1/projects/:projectId/automation-dependency-map",
+      "/api/v1/projects/:projectId/automation-plugin-node-types",
+      "/api/v1/webhooks/automations",
+    ],
+    workerNativeRoutes: [
+      { method: "GET", path: "/api/v1/projects/:projectId/automations" },
+      { method: "POST", path: "/api/v1/projects/:projectId/automations" },
+      { method: "GET", path: "/api/v1/projects/:projectId/automations/:automationId" },
+      { method: "PATCH", path: "/api/v1/projects/:projectId/automations/:automationId" },
+      { method: "DELETE", path: "/api/v1/projects/:projectId/automations/:automationId" },
+      { method: "POST", path: "/api/v1/projects/:projectId/automations/:automationId/nodes" },
+      {
+        method: "PATCH",
+        path: "/api/v1/projects/:projectId/automations/:automationId/nodes/:nodeId",
+      },
+      {
+        method: "DELETE",
+        path: "/api/v1/projects/:projectId/automations/:automationId/nodes/:nodeId",
+      },
+      { method: "POST", path: "/api/v1/projects/:projectId/automations/:automationId/edges" },
+      {
+        method: "DELETE",
+        path: "/api/v1/projects/:projectId/automations/:automationId/edges/:edgeId",
+      },
+    ],
   },
 ] as const satisfies readonly ApiMigrationEntry[];
 

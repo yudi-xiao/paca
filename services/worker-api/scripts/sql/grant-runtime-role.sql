@@ -58,7 +58,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.paca_agent_host_runtime,
   public.paca_agent_task_requirement,
   public.paca_agent_task_lease,
-  public.paca_agent_task_lease_event
+  public.paca_agent_task_lease_event,
+  public.paca_automation,
+  public.paca_automation_node,
+  public.paca_automation_edge,
+  public.paca_automation_run,
+  public.paca_automation_run_step
 TO :"runtime_role";
 
 REVOKE ALL PRIVILEGES ON TABLE public.paca_schema_migration FROM :"runtime_role";

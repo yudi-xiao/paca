@@ -204,6 +204,13 @@
       "when": 1789107930315,
       "tag": "0028_unknown_thunderbolts",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1790574819426,
+      "tag": "0029_fair_fat_cobra",
+      "breakpoints": true
     }
   ]
 }
