@@ -14,6 +14,8 @@ import {
 import {
 	ACTION_TYPES,
 	CONDITION_NODE_TYPE,
+	INTERNAL_PREVIEW_ACTION_TYPES,
+	INTERNAL_PREVIEW_TRIGGER_TYPES,
 	type PluginNodeType,
 	pluginNodeTypesQueryOptions,
 	TRIGGER_TYPE_GROUPS,
@@ -35,14 +37,27 @@ export function AutomationNodePalette({
 	onAddAction,
 }: AutomationNodePaletteProps) {
 	const { t } = useTranslation("projects");
-	const { data: pluginTypes } = useQuery(
-		pluginNodeTypesQueryOptions(projectId),
-	);
+	const internalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const { data: pluginTypes } = useQuery({
+		...pluginNodeTypesQueryOptions(projectId),
+		enabled: !internalPreview,
+	});
 	if (!canEdit) return null;
 
 	const pluginTriggers = pluginTypes?.triggers ?? [];
 	const pluginConditions = pluginTypes?.conditions ?? [];
 	const pluginActions = pluginTypes?.actions ?? [];
+	const runnableTriggers = new Set<string>(INTERNAL_PREVIEW_TRIGGER_TYPES);
+	const runnableActions = new Set<string>(INTERNAL_PREVIEW_ACTION_TYPES);
+	const triggerGroups = TRIGGER_TYPE_GROUPS.map((group) => ({
+		...group,
+		types: internalPreview
+			? group.types.filter((type) => runnableTriggers.has(type))
+			: group.types,
+	})).filter((group) => group.types.length > 0);
+	const actionTypes = internalPreview
+		? ACTION_TYPES.filter((type) => runnableActions.has(type))
+		: ACTION_TYPES;
 
 	return (
 		<div className="flex items-center gap-2">
@@ -56,7 +71,7 @@ export function AutomationNodePalette({
 					}
 				/>
 				<DropdownMenuContent align="start" className="w-56">
-					{TRIGGER_TYPE_GROUPS.map((group, i) => (
+					{triggerGroups.map((group, i) => (
 						<DropdownMenuGroup key={group.labelKey}>
 							{i > 0 && <DropdownMenuSeparator />}
 							<DropdownMenuLabel>
@@ -126,7 +141,7 @@ export function AutomationNodePalette({
 								{t("automation.palette.builtIn")}
 							</DropdownMenuLabel>
 						)}
-						{ACTION_TYPES.map((type) => (
+						{actionTypes.map((type) => (
 							<DropdownMenuItem key={type} onClick={() => onAddAction(type)}>
 								{t(`automation.actionTypes.${type}`)}
 							</DropdownMenuItem>

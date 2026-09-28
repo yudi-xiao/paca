@@ -24,6 +24,12 @@ export const TRIGGER_TYPES = [
 ] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 
+/** Nodes the internal Worker executor can activate and run today. */
+export const INTERNAL_PREVIEW_TRIGGER_TYPES = [
+	"task_created",
+	"status_changed",
+] as const satisfies readonly TriggerType[];
+
 // Groups TRIGGER_TYPES by the activity stream each fires from, so the "Add
 // Trigger" picker can section a flat 13-item list instead of dumping it all
 // in one scroll — see AutomationNodePalette.
@@ -67,6 +73,11 @@ export const ACTION_TYPES = [
 	"complete_sprint",
 ] as const;
 export type ActionType = (typeof ACTION_TYPES)[number];
+
+export const INTERNAL_PREVIEW_ACTION_TYPES = [
+	"update_task",
+	"wait",
+] as const satisfies readonly ActionType[];
 
 export const CONDITION_NODE_TYPE = "condition";
 

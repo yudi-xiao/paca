@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	INTERNAL_PREVIEW_ACTION_TYPES,
+	INTERNAL_PREVIEW_TRIGGER_TYPES,
+} from "./automation-api";
+import {
 	internalPreviewNavigationTarget,
 	isInternalPreviewRouteAvailable,
 } from "./internal-preview";
 
 describe("internal preview route availability", () => {
+	it("offers only Worker-executable Automation nodes", () => {
+		expect(INTERNAL_PREVIEW_TRIGGER_TYPES).toEqual([
+			"task_created",
+			"status_changed",
+		]);
+		expect(INTERNAL_PREVIEW_ACTION_TYPES).toEqual(["update_task", "wait"]);
+	});
+
 	it.each([
 		"/home",
 		"/home/",
@@ -26,6 +38,8 @@ describe("internal preview route availability", () => {
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/tasks/c9d8cdf1-b208-4c87-b71f-cf4cdf2d373a",
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/environments",
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/environments/c9d8cdf1-b208-4c87-b71f-cf4cdf2d373a/terminal",
+		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/automation",
+		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/automation/c9d8cdf1-b208-4c87-b71f-cf4cdf2d373a",
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/docs/c9d8cdf1-b208-4c87-b71f-cf4cdf2d373a",
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/interactions/backlog",
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/interactions/timeline",
@@ -52,7 +66,7 @@ describe("internal preview route availability", () => {
 		).toBe("/projects/project-123/tasks/task-123");
 		expect(
 			internalPreviewNavigationTarget("/projects/project-123/automation"),
-		).toBe("/home");
+		).toBe("/projects/project-123/automation");
 		expect(
 			internalPreviewNavigationTarget(
 				"/projects/project-123/docs",

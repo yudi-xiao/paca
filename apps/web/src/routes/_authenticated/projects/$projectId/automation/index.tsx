@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	Workflow as AutomationIcon,
 	Clock,
@@ -37,14 +37,6 @@ import { timeAgo } from "@/lib/time-ago";
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/automation/",
 )({
-	beforeLoad: ({ params: { projectId } }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
-			throw redirect({
-				to: "/projects/$projectId",
-				params: { projectId },
-			});
-		}
-	},
 	loader: async ({ context: { queryClient }, params: { projectId } }) => {
 		await queryClient.ensureQueryData(automationsQueryOptions(projectId));
 	},
@@ -125,15 +117,17 @@ function AutomationListPage() {
 						</p>
 					</div>
 					<div className="flex items-center gap-2">
-						<Button
-							variant="outline"
-							size="sm"
-							className="gap-1.5"
-							onClick={() => setShowDependencyMap((v) => !v)}
-						>
-							<GitBranch className="size-3.5" />
-							{t("automation.dependencyMap.title")}
-						</Button>
+						{import.meta.env.VITE_INTERNAL_PREVIEW === "true" ? null : (
+							<Button
+								variant="outline"
+								size="sm"
+								className="gap-1.5"
+								onClick={() => setShowDependencyMap((v) => !v)}
+							>
+								<GitBranch className="size-3.5" />
+								{t("automation.dependencyMap.title")}
+							</Button>
+						)}
 						{canManage ? (
 							<Button
 								size="sm"

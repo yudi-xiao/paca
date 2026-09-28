@@ -1618,6 +1618,11 @@ export function AppSidebar() {
 											label={t("nav.environments")}
 										/>
 										<NavItem
+											to={`/projects/${projectId}/automation`}
+											icon={Workflow}
+											label={t("nav.automation")}
+										/>
+										<NavItem
 											to={`/projects/${projectId}/team`}
 											icon={Users}
 											label={t("nav.team")}

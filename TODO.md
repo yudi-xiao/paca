@@ -136,7 +136,7 @@
 - [x] 条件节点的有序分支与 else 已接入持久 Workflow 步骤；支持任务/Sprint 字段、父子与关联任务目标及 any/all，并对配置、项目隔离和目标数量实施校验。PostgreSQL 契约与 internal 真实事件烟测覆盖命中/else 路径。
 - [x] `update_task` 已扩展类型、状态、Sprint、父任务、描述、日期和指派；日期配置严格转为任务日期。`0032` 允许真实 `system` actor 的指派通知，PostgreSQL 契约覆盖重试时通知与审计不重复。
 - [x] `update_task` 已支持 reporter 和 custom field 合并写入，并可将任务目标解析为当前、父子、指定或关联任务；目标集合在 Workflow 步骤中冻结，逐任务幂等键抵御批次部分成功后的重试。PostgreSQL 契约覆盖作用域、双子任务和重复投递；internal 真实事件烟测覆盖两个子任务的 Workflow 扇出、字段和审计。
-- [ ] 扩展 Automation 完整触发器与动作、Webhook token、调度和前端入口；补齐事件/动作矩阵、目标集合扩容、故障恢复与真实浏览器验收。
+- [ ] 扩展 Automation 完整触发器与动作、Webhook token、调度和前端入口；补齐事件/动作矩阵、目标集合扩容、故障恢复与真实浏览器验收。受限图列表/编辑入口与节点选择已在前端代码启用，但尚待重新部署 internal 和浏览器验收；当前 Wrangler 登录账号无目标 Worker 所属账号的权限。
 
 - [x] 已建立 Go API → Hono Worker 迁移清单、机器可检查 manifest、稳定 501 未迁移边界和 Worker 版本回滚策略。
 - [x] React 保留 TanStack Router/Query/Form；Static Assets 与 `/api/*` 同源，SPA 深链与懒加载版本错位可恢复。
