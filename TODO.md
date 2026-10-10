@@ -110,6 +110,7 @@
 - [x] 服务端人工接受/要求修改、失效与历史状态：接受前重新取证，保留人工要求修改，拒绝过期或未知证据，不自动关闭任务。
 - [x] 专用私有只读 GitHub App `paca-yudi-delivery` 已创建，安装事件确认仅选择 `yudi-xiao/paca`；internal 三项 Secret 已配置，单仓库访问与签名 ping 验证通过，真实安装事件及首次 ping 重投均收到成功响应。本地 manifest 引导与私有凭据恢复流程已验证，临时创建页面已关闭。
 - [ ] 项目仓库与任务交付页面、浏览器体验及真实 PR→CI→人工验收链路。
+- [ ] 发布交付 PR 并验证真实 CI：本地 `codex/paca-release-readiness` 分支已保存当前实现，Worker CI 已补充 Workers runtime contracts；本机 GitHub CLI 登录待恢复，连接服务的 Git 对象写入返回权限拒绝。专用 Paca App 的只读权限保持不变。
 
 ### 已纳入计划的上游功能（2026-10-10）
 
