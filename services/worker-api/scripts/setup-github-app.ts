@@ -1,10 +1,16 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { open } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { githubJson } from "../src/github-delivery/github-http";
+import {
+  configureGitHubAppEnvironment,
+  githubAppDeployment,
+  githubAppEnvironment,
+  githubAppOrigin,
+} from "./github-app-environment";
 import {
   githubAppConfiguration,
   githubAppManifest,
@@ -17,7 +23,6 @@ import {
 } from "./github-app-private-config";
 
 const directory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const configurationPath = resolve(directory, "../../.paca/github-app/internal.json");
 type Configuration = ReturnType<typeof githubAppConfiguration>;
 function command(args: string[], input?: string) {
   return new Promise<void>((success, failure) => {
@@ -35,26 +40,6 @@ function command(args: string[], input?: string) {
     child.stdin.end(input);
   });
 }
-async function configure(configuration: Configuration) {
-  await command(
-    ["x", "wrangler", "secret", "bulk", "--env", "internal", "--profile", "paca"],
-    JSON.stringify({
-      GITHUB_APP_ID: String(configuration.id),
-      GITHUB_APP_PRIVATE_KEY: configuration.pem,
-      GITHUB_WEBHOOK_SECRET: configuration.webhook_secret,
-    }),
-  );
-  console.log(
-    JSON.stringify({
-      status: "configured",
-      appId: configuration.id,
-      slug: configuration.slug,
-      installUrl: `https://github.com/apps/${configuration.slug}/installations/new`,
-      repository: "yudi-xiao/paca",
-      environment: "internal",
-    }),
-  );
-}
 function escapeHtml(value: string) {
   return value.replace(
     /[&<>"']/g,
@@ -66,7 +51,40 @@ function html(body: string) {
   return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paca GitHub App</title><style>body{font:16px system-ui;color:#17202a;background:#f5f7fa;margin:0;padding:48px 24px}main{max-width:640px;margin:auto;background:white;border-radius:16px;padding:32px;box-shadow:0 4px 24px #15243b12}h1{font-size:26px}p,li{line-height:1.8}button,a.button{display:inline-block;background:#2563eb;color:white;border:0;border-radius:8px;padding:12px 20px;font:inherit;text-decoration:none;cursor:pointer}small{color:#5b6470}</style><main>${body}</main></html>`;
 }
 async function main() {
-  await command(["run", "deploy:guard"]);
+  const environment = githubAppEnvironment(process.env.PACA_GITHUB_APP_ENVIRONMENT);
+  const deployment = githubAppDeployment(environment);
+  const configurationPath = resolve(directory, "../../.paca/github-app", deployment.privateFile);
+  const workerConfiguration = JSON.parse(
+    await readFile(resolve(directory, "wrangler.jsonc"), "utf8"),
+  );
+  const appOrigin = githubAppOrigin(
+    environment,
+    workerConfiguration.env?.[environment]?.vars?.BETTER_AUTH_URL,
+  );
+  const configure = async (configuration: Configuration) => {
+    if (environment === "production") {
+      const internal = await readGitHubAppConfiguration(
+        resolve(directory, "../../.paca/github-app/internal.json"),
+      );
+      if (internal.id === configuration.id) throw Error("GITHUB_APP_ENVIRONMENT_REUSE_FORBIDDEN");
+    }
+    const report = await configureGitHubAppEnvironment(environment, configuration, (secrets) =>
+      command(
+        [
+          "node_modules/wrangler/bin/wrangler.js",
+          "secret",
+          "bulk",
+          "--env",
+          "internal",
+          "--profile",
+          "paca",
+        ],
+        JSON.stringify(secrets),
+      ),
+    );
+    console.log(JSON.stringify(report));
+  };
+  await command(["run", deployment.guard]);
   if (process.argv.includes("--resume")) {
     await configure(await readGitHubAppConfiguration(configurationPath));
     return;
@@ -100,10 +118,10 @@ async function main() {
     }
     const url = new URL(request.url ?? "/", origin);
     if (url.pathname === `/setup/${nonce}` && !url.search) {
-      const manifest = githubAppManifest(`${origin}/callback/${nonce}`);
+      const manifest = githubAppManifest(`${origin}/callback/${nonce}`, environment, appOrigin);
       response.end(
         html(
-          `<h1>创建 Paca 交付验收 App</h1><p>专用于 <strong>yudi-xiao/paca</strong>。请在 GitHub 上以 yudi-xiao 登录，创建后选择 <strong>Only select repositories → paca</strong>。</p><ul><li>Metadata：只读</li><li>Checks：只读</li><li>Pull requests：只读</li></ul><p>私钥将通过本机回调保存为私有配置，并写入当前项目的 Cloudflare internal Worker Secret。</p><form action="https://github.com/settings/apps/new?state=${nonce}" method="post"><input type="hidden" name="manifest" value="${escapeHtml(JSON.stringify(manifest))}"><button type="submit">前往 GitHub 创建 App</button></form><p><small>此页面不会请求代码写入、合并、发布或用户 OAuth 权限。</small></p>`,
+          `<h1>创建 Paca ${environment} 交付验收 App</h1><p>专用于 <strong>yudi-xiao/paca</strong>。请在 GitHub 上以 yudi-xiao 登录，创建后选择 <strong>Only select repositories → paca</strong>。</p><ul><li>Metadata：只读</li><li>Checks：只读</li><li>Pull requests：只读</li></ul><p>${deployment.stageOnly ? "生产 App 私钥将通过本机回调保存为独立私有配置；候选部署完成后再写入 production Worker Secret。" : "私钥将通过本机回调保存为私有配置，并写入当前项目的 Cloudflare internal Worker Secret。"}</p><form action="https://github.com/settings/apps/new?state=${nonce}" method="post"><input type="hidden" name="manifest" value="${escapeHtml(JSON.stringify(manifest))}"><button type="submit">前往 GitHub 创建 App</button></form><p><small>此页面不会请求代码写入、合并、发布或用户 OAuth 权限。</small></p>`,
         ),
       );
       return;
@@ -112,8 +130,8 @@ async function main() {
       response.end(
         html(
           state === "configured" && slug
-            ? `<h1>App 凭据已配置</h1><p>继续安装，仅选择 <strong>yudi-xiao/paca</strong> 仓库。</p><a class="button" href="https://github.com/apps/${slug}/installations/new">安装到 Paca 仓库</a>`
-            : `<h1>${state === "failed" ? "配置需要恢复" : "正在配置 Worker"}</h1><p>${state === "failed" ? "请返回 Codex 继续恢复。私钥不会显示在此页面。" : "稍后刷新本页查看结果。"}</p>`,
+            ? `<h1>App 凭据已${deployment.stageOnly ? "安全保存" : "配置"}</h1><p>继续安装，仅选择 <strong>yudi-xiao/paca</strong> 仓库。</p><a class="button" href="https://github.com/apps/${slug}/installations/new">安装到 Paca 仓库</a>`
+            : `<h1>${state === "failed" ? "配置需要恢复" : "正在保存配置"}</h1><p>${state === "failed" ? "请返回 Codex 继续恢复。私钥不会显示在此页面。" : "稍后刷新本页查看结果。"}</p>`,
         ),
       );
       return;
@@ -151,7 +169,7 @@ async function main() {
         JSON.stringify({
           status: "failed",
           code: "GITHUB_APP_SETUP_FAILED",
-          recovery: "bun run github:app:setup --resume",
+          recovery: `PACA_GITHUB_APP_ENVIRONMENT=${environment} bun run github:app:setup --resume`,
         }),
       );
       if (!response.headersSent)

@@ -159,6 +159,7 @@ export function assertProductionConfiguration(
   for (const root of [worker, gateway]) {
     requireCondition(root.account_id === accountId, "RELEASE_ACCOUNT_INVALID");
     requireCondition(root.workers_dev === false, "RELEASE_DEFAULT_PUBLIC_ACCESS_FORBIDDEN");
+    requireCondition(root.preview_urls === false, "RELEASE_DEFAULT_PREVIEW_ACCESS_FORBIDDEN");
     assertRoutes(root, undefined);
   }
   const rootId = assertBusinessBindings(worker, "development");
@@ -181,6 +182,10 @@ export function assertProductionConfiguration(
   requireCondition(
     production.workers_dev === false && productionGateway.workers_dev === false,
     "RELEASE_PRODUCTION_WORKERS_DEV_FORBIDDEN",
+  );
+  requireCondition(
+    production.preview_urls === false && productionGateway.preview_urls === false,
+    "RELEASE_PRODUCTION_PREVIEW_ACCESS_FORBIDDEN",
   );
   assertOrigin(record(production.vars), productionOrigin);
   assertOrigin(record(productionGateway.vars), productionGatewayOrigin, true);

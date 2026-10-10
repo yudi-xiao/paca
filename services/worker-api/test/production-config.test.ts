@@ -9,6 +9,7 @@ type Config = {
   name: string;
   account_id: string;
   workers_dev: boolean;
+  preview_urls?: boolean;
   routes: { pattern: string; custom_domain: boolean }[];
   vars: Record<string, string>;
   hyperdrive: { binding: string; id: string; localConnectionString?: string }[];
@@ -88,6 +89,18 @@ describe("production deployment isolation", () => {
       "production public hostname before acceptance",
       ({ production }) => {
         production.workers_dev = true;
+      },
+    ],
+    [
+      "production version preview URL",
+      ({ production }) => {
+        production.preview_urls = true;
+      },
+    ],
+    [
+      "gateway default preview URL",
+      ({ gateway }) => {
+        delete gateway.env.production.preview_urls;
       },
     ],
     [

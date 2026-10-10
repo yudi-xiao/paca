@@ -1,24 +1,39 @@
+import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as z from "zod";
 import { githubAppJwt } from "../src/github-delivery/github-app";
 import { githubJson } from "../src/github-delivery/github-http";
+import { githubAppDeployment, githubAppEnvironment } from "./github-app-environment";
 import { readGitHubAppConfiguration } from "./github-app-private-config";
+import { configureGitHubAppWebhook } from "./github-app-webhook";
 
 let stage = "configuration";
 
 async function main() {
-  const configuration = await readGitHubAppConfiguration(
-    resolve(dirname(fileURLToPath(import.meta.url)), "../../../.paca/github-app/internal.json"),
+  const environment = githubAppEnvironment(process.env.PACA_GITHUB_APP_ENVIRONMENT);
+  const privateDirectory = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../.paca/github-app",
   );
+  const configuration = await readGitHubAppConfiguration(
+    resolve(privateDirectory, githubAppDeployment(environment).privateFile),
+  );
+  if (environment === "production") {
+    const internal = await readGitHubAppConfiguration(resolve(privateDirectory, "internal.json"));
+    if (internal.id === configuration.id) throw Error("GITHUB_APP_ENVIRONMENT_REUSE_FORBIDDEN");
+  }
   const token = githubAppJwt({ appId: String(configuration.id), privateKey: configuration.pem });
   const signal = AbortSignal.timeout(20000);
   stage = "webhook_configuration";
-  z.object({
-    url: z.literal("https://paca.howlearnwood.com/api/integrations/github/webhook"),
-    content_type: z.literal("json"),
-    insecure_ssl: z.literal("0"),
-  }).parse(await githubJson("/app/hook/config", token, signal));
+  const worker = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
+  const hook = await configureGitHubAppWebhook({
+    environment,
+    origin: worker.env?.[environment]?.vars?.BETTER_AUTH_URL,
+    token,
+    apply: false,
+  });
+  if (hook.status !== "verified") throw Error("GITHUB_APP_WEBHOOK_UPDATE_REQUIRED");
   const deliverySchema = z.object({
     id: z.union([
       z.number().int().positive().safe().transform(String),
@@ -48,7 +63,7 @@ async function main() {
         `https://api.github.com/app/hook/deliveries/${failed.id}/attempts`,
         {
           method: "POST",
-          redirect: "error",
+          redirect: "manual",
           signal,
           headers: {
             accept: "application/vnd.github+json",
@@ -89,6 +104,7 @@ async function main() {
   console.log(
     JSON.stringify({
       status: "ok",
+      environment,
       webhookConfiguration: "verified",
       installedRepositories,
       deliveries: deliveries.map((delivery) => ({

@@ -1,12 +1,21 @@
 import * as z from "zod";
 import { githubAppJwt } from "../src/github-delivery/github-app";
+import {
+  type GitHubAppEnvironment,
+  githubAppDeployment,
+  githubAppOrigin,
+} from "./github-app-environment";
 
 export const githubAppPermissions = {
   metadata: "read",
   checks: "read",
   pull_requests: "read",
 } as const;
-export function githubAppManifest(callback: string) {
+export function githubAppManifest(
+  callback: string,
+  environment: GitHubAppEnvironment = "internal",
+  configuredOrigin?: string,
+) {
   const url = new URL(callback);
   if (
     url.protocol !== "http:" ||
@@ -17,15 +26,17 @@ export function githubAppManifest(callback: string) {
     url.hash
   )
     throw Error("GITHUB_APP_CALLBACK_INVALID");
+  const deployment = githubAppDeployment(environment);
+  const origin = githubAppOrigin(environment, configuredOrigin ?? deployment.origin);
   return {
-    name: "paca-yudi-delivery",
+    name: deployment.name,
     description:
       "Paca delivery verification for yudi-xiao/paca. Read-only checks and pull requests.",
-    url: "https://paca.howlearnwood.com",
+    url: origin,
     public: false,
     redirect_url: callback,
     hook_attributes: {
-      url: "https://paca.howlearnwood.com/api/integrations/github/webhook",
+      url: `${origin}/api/integrations/github/webhook`,
       active: true,
     },
     default_permissions: githubAppPermissions,

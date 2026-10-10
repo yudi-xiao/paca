@@ -1,16 +1,28 @@
+import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as z from "zod";
 import { GitHubAppDeliverySource, githubAppJwt } from "../src/github-delivery/github-app";
 import { githubJson } from "../src/github-delivery/github-http";
+import {
+  githubAppDeployment,
+  githubAppEnvironment,
+  githubAppOrigin,
+} from "./github-app-environment";
 import { readGitHubAppConfiguration } from "./github-app-private-config";
 
 async function main() {
+  const environment = githubAppEnvironment(process.env.PACA_GITHUB_APP_ENVIRONMENT);
+  const deployment = githubAppDeployment(environment);
   const path = resolve(
     dirname(fileURLToPath(import.meta.url)),
-    "../../../.paca/github-app/internal.json",
+    `../../../.paca/github-app/${deployment.privateFile}`,
   );
   const configuration = await readGitHubAppConfiguration(path);
+  if (environment === "production") {
+    const internal = await readGitHubAppConfiguration(resolve(dirname(path), "internal.json"));
+    if (internal.id === configuration.id) throw Error("GITHUB_APP_ENVIRONMENT_REUSE_FORBIDDEN");
+  }
   const credentials = { appId: String(configuration.id), privateKey: configuration.pem };
   const jwt = githubAppJwt(credentials);
   const signal = AbortSignal.timeout(20000);
@@ -67,6 +79,29 @@ async function main() {
     },
   });
   const body = JSON.stringify({ zen: "Paca signed webhook readiness check" });
+  if (process.argv.includes("--installation-only")) {
+    console.log(
+      JSON.stringify({
+        status: "ok",
+        environment,
+        appId: configuration.id,
+        repository: "yudi-xiao/paca",
+        repositoryId,
+        installationId: installation.id,
+        repositorySelection: "selected",
+        permissions: configuration.permissions,
+        signedWebhook: "not_checked",
+      }),
+    );
+    return;
+  }
+  const workerConfiguration = JSON.parse(
+    await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+  );
+  const origin = githubAppOrigin(
+    environment,
+    workerConfiguration.env?.[environment]?.vars?.BETTER_AUTH_URL,
+  );
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(configuration.webhook_secret),
@@ -78,7 +113,7 @@ async function main() {
     new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))),
     (byte) => byte.toString(16).padStart(2, "0"),
   ).join("");
-  const response = await fetch("https://paca.howlearnwood.com/api/integrations/github/webhook", {
+  const response = await fetch(`${origin}/api/integrations/github/webhook`, {
     method: "POST",
     redirect: "error",
     signal: AbortSignal.timeout(20000),
@@ -95,7 +130,7 @@ async function main() {
   console.log(
     JSON.stringify({
       status: "ok",
-      environment: "internal",
+      environment,
       appId: configuration.id,
       repository: "yudi-xiao/paca",
       repositoryId,

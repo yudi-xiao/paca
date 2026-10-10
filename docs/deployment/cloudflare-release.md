@@ -14,7 +14,7 @@ configuration is a candidate and has no public routes.
 | Production | `paca-worker-api-production` | `https://paca.howlearnwood.com` | `paca-environment-gateway-production` at `https://paca-env.howlearnwood.com` |
 
 During candidate preparation, internal still owns both current domains. Production's route
-arrays are empty and `workers_dev` is false. A configuration guard rejects taking those domains
+arrays are empty and both `workers_dev` and `preview_urls` are false. A configuration guard rejects taking those domains
 early. Do not deploy the default local Worker: its all-zero Hyperdrive ID represents only a local
 simulator, supplied with `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE`.
 
@@ -90,6 +90,47 @@ direct input and expires shortly. Production stays unpublished until this step a
 the remaining candidate validation gates pass.
 
 ## Candidate validation
+
+### Isolated GitHub Apps and webhook cutover
+
+From `services/worker-api`, create production's private read-only App separately:
+
+```bash
+bun run github:app:setup:production
+bun run github:app:verify:production-installation
+```
+
+The manifest uses a different App name and saves its one-time conversion to
+`.paca/github-app/production.json` with owner-only permissions. It does not create a placeholder
+Worker or write production Secrets before the owner/database gates pass. Internal's App and
+private configuration remain separate. If conversion was already saved, resume with
+`PACA_GITHUB_APP_ENVIRONMENT=production bun run github:app:setup --resume` rather than creating
+another App. Installation verification checks the exact owner, selected repository, immutable
+repository ID and read-only Metadata/Checks/Pull requests permissions. This command deliberately
+reports `signedWebhook: not_checked`; it is not an end-to-end callback test.
+
+After changing the checked-in origins and moving the domains, inspect/apply each App's webhook:
+
+```bash
+PACA_GITHUB_APP_ENVIRONMENT=internal bun run github:app:webhook-config --apply
+PACA_GITHUB_APP_ENVIRONMENT=production bun run github:app:webhook-config --apply
+PACA_GITHUB_APP_ENVIRONMENT=internal bun run github:app:verify
+PACA_GITHUB_APP_ENVIRONMENT=production bun run github:app:verify
+```
+
+Without `--apply`, webhook configuration is read-only. Applying first checks that the intended
+origin's health endpoint reports the matching Paca environment, then updates only the fixed
+GitHub App hook endpoint and verifies it by readback. Redirects are refused, responses are bounded,
+TLS verification stays enabled, and neither App JWT nor webhook secret is printed. Keep actual
+delivery inspection/redelivery evidence separate from a synthetic signed ping. The operator API
+uses GitHub's documented [App webhook configuration](https://docs.github.com/en/rest/apps/webhooks)
+and [manifest conversion](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest).
+
+For first deployment, upload independent Secrets alongside code using Wrangler's
+[`--secrets-file` option](https://developers.cloudflare.com/workers/configuration/secrets/#upload-secrets-alongside-code).
+Use an owner-only temporary file and remove it after deployment. This avoids a Secret operation
+creating a placeholder Worker before database/owner validation. Later deployments preserve
+existing Secrets; do not generate a new auth/ticket key for every deployment.
 
 From `services/worker-api`:
 
