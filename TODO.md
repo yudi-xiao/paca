@@ -38,7 +38,7 @@
 - 最小交付物：`due_date_reached` 严格配置校验、UTC 日期/分钟偏移契约、有界到期扫描、数据库唯一调度键与持久 outbox、消费时日期/图版本复查，以及前端节点入口与偏移输入校验。
 - 验证命令：Worker `db:check`、`typecheck`、`lint`、`test`、`test:postgres`，Web `test` 与 prod build；部署权限恢复后执行 prod 真实事件和浏览器验收。
 - 回滚路径：先停用到期图并等待已接受的到期 Run 完成，再回滚至已验证 Worker；保留 additive migration 和调度去重记录，不执行破坏性 down migration。
-- [x] 实现并完成本地到期调度及延期、并发扫描、重投、停用、多触发节点和 UTC 边界契约验收。`0035_cold_steve_rogers` 在独立本地 `_test` 库重放，Drizzle 检查、Worker 类型/lint/回归、PostgreSQL 契约和迁移恢复、Web 回归/internal build、Workers 运行时、binding types 与部署 dry-run 均通过。
+- [x] 实现并完成本地到期调度及延期、并发扫描、重投、停用、多触发节点和 UTC 边界契约验收。`0035_cold_steve_rogers` 在独立本地 `_test` 库重放，Drizzle 检查、Worker 类型/lint/回归、PostgreSQL 契约和迁移恢复、Web 回归/prod build、Workers 运行时、binding types 与部署 dry-run 均通过。
 - [x] 修复分钟维护失败互相阻塞与 Automation producer 晚到覆写 delivered 状态的竞态；故障隔离与实际数据库交错写入契约通过。到期输入拒绝空值、小数、越界，所有支持语言明确 UTC 及补触发语义。
 - [x] prod 已应用 `0035`/`0036`/`0037`，迁移 ledger、runtime role 权限验证及临时迁移身份回收完成；本地迁移恢复演练再次通过。
 - [x] prod Worker 已部署，原 Cloudflare `10000` 授权阻塞已解除。
@@ -51,7 +51,7 @@
 - 回滚路径：先停用周期/Sprint 图并等待已接受的新类型 Run 完成，再回滚 Worker，保留 additive migration、outbox 与调度游标；不复用旧 Valkey scheduler、不执行破坏性 down migration。
 - [x] `0036` 版本化迁移、UTC 五字段 Cron 和索引游标、遗漏周期合并补执行、并发锁及 occurrence 幂等事件已完成；Sprint 生命周期同事务捕获、筛选与删除快照已完成。空库重放、PostgreSQL 事务/并发/项目隔离/无任务上下文契约和迁移恢复通过。
 - [x] Workflow 支持没有基础 Task 的等待、Sprint 条件与显式其他任务目标；激活和执行时拒绝缺少基础任务的相对目标。正式 Workflow 的 Workers 运行时编排测试通过，数据库步骤由官方 introspector 替换，SQL 行为由真实 PostgreSQL 契约验证。
-- [x] 前端启用已验收节点，校验 Cron 并显示本地化输入错误，补齐 Sprint 筛选、删除提示和加载重试；修正无 Task 连线、前置任务必填及数量限制，并允许清除已删除的监听项。Worker 类型/lint/完整回归、Web 完整回归与最终类型/internal build、binding types 与部署 dry-run 通过。
+- [x] 前端启用已验收节点，校验 Cron 并显示本地化输入错误，补齐 Sprint 筛选、删除提示和加载重试；修正无 Task 连线、前置任务必填及数量限制，并允许清除已删除的监听项。Worker 类型/lint/完整回归、Web 完整回归与最终类型/prod build、binding types 与部署 dry-run 通过。
 - [x] 两类调度每分钟各捕获至多 50 项，合计匹配单批 100 项 outbox 派发上限；故障隔离与延期恢复仍保持独立可靠。
 - [x] prod 数据库已应用 `0036`。
 - [x] prod Worker 已部署 Cron/Sprint 事件支持。
@@ -60,7 +60,7 @@
 ### 本轮实施：Sprint 自动化动作
 
 - 最小交付物：`update_sprint` 和 `complete_sprint` 的严格配置、真实 Sprint 目标解析、复用迭代领域校验和完成时任务流转、同事务 Run 步骤/业务审计/事件，以及前端已验收入口与输入反馈。
-- 验证命令：Worker 类型/lint/回归、PostgreSQL 事务/幂等/作用域/任务流转契约、Workers 编排；Web 类型/回归/internal build 和部署预检。
+- 验证命令：Worker 类型/lint/回归、PostgreSQL 事务/幂等/作用域/任务流转契约、Workers 编排；Web 类型/回归/prod build 和部署预检。
 - 回滚路径：先停用相关图并等待已接受的新动作 Run 完成，再回滚 Worker；保留数据库事件和 Run 审计，不回退至 legacy 执行器。
 - [x] Sprint 动作实现及完整本地验收：严格字段与日期配置、空字段清除、目标持久化、冻结 Run 配置、同事务业务写入/步骤与审计、未完成任务迁移、重复完成 no-op、权限作用域和归档/删除拒绝；修复用户完成 Sprint 时 Drizzle insert-select 缺少默认列的真实数据库错误。前端输入反馈、目的 Sprint 加载重试与失效目标保护、九种语言、完整回归和类型/lint/build，真实 PostgreSQL 并发/回滚/用户审计与 Workers 编排及部署预检通过。
 - [x] prod Worker 已部署 Sprint 动作，真实 `sprint_started` 事件→更新目标与清除日期→完成迭代→未完成任务迁移及 Done 任务保留、两步记录和 system 审计验收通过；同轮任务条件、扇出及 wait 链路通过，临时资源和数据库角色清理完成。
@@ -95,7 +95,9 @@
 - [x] 重复候选 Worker/Gateway、Container、Queues/DLQ、Workflow、R2、Hyperdrive、未使用 development 附件桶及 `main` 数据库分支已删除；只保留 prod，删除前已检查无消费者。候选备份曾成功创建，但删除分支后 CLI 无法定位，不能作为可用恢复点。当前 prod 备份 `9iw3ubly3mw4` 已成功并开启保护，完成于 2026-10-10 11:09 UTC；尚未验证该备份的恢复。
 - [x] 核验原管理员 SUPER_ADMIN/OWNER/owner 与原 Session 保留；40 份 migration/runtime role 边界不变，临时用户/角色已清理。数据库已原地升级 PS-5 单节点，分支 production/ready 均为 true。
 - [x] prod 真实中文/字面正文搜索、分页、匿名拒绝、本地 Agent doctor、MCP stdio 精确 Grant/任务租约/撤销及删除内容隐藏；GitHub 仓库发现、保存幂等、版本冲突和当前权限撤销验收通过。
+- [x] 2026-10-10 单一 prod Automation 实测通过：图配置/激活限制、条件动作、扇出、Sprint 更新/完成及任务迁移/审计、一分钟持久 wait；临时项目、账号、Session 与数据库角色已清理。
 - [x] Cloudflare 盘点确认只剩 API/Gateway 两个 Worker，所有既有 DO namespace ID 保持不变，预览及 workers.dev 关闭。
+- [x] 代码提交 `252abd32` 的 Web、MCP、Worker 三项 GitHub CI 均通过；包含 Gateway、Workers runtime、真实 PostgreSQL/恢复及单一 prod 配置验证。
 - [ ] 继续完成真实用户本地 Agent 开发任务、GitHub 人工交付验收与浏览器上线验收；内置浏览器本轮创建/读取再次超时，不能用服务端验收替代。
 
 
@@ -235,7 +237,7 @@
 - [x] 附件使用 R2 保存对象、PostgreSQL 保存作用域/哈希/ETag/状态；上传、Range 下载、软删除、恢复和分片取消均受 Paca Permission 保护。
 - [x] 已实现保留期、stale claim、失败重试和孤儿审计；clean-slate 决策后已删除历史附件迁移 CLI、运行手册和专用账本 schema。
 - [x] prod 真实 smoke 已覆盖小文件、multipart、重复/取消、权限撤销、恢复和物理清理。
-- [ ] 在生产 Worker/Hyperdrive 建立后接入并验收 production R2 binding。
+- [x] 唯一 prod 已接入原有 R2 binding，两桶写/读/删除与临时对象清理的真实验收通过。
 
 ## M7：PartyServer 实时事件
 
