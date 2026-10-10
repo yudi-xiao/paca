@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { cloudflareEnvironmentsQueryOptions } from "@/lib/cloudflare-environment-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import {
 	ENVIRONMENT_STATUS_COLORS,
 	environmentsQueryOptions,
@@ -24,7 +25,7 @@ export const Route = createFileRoute(
 		create: search.create === true || search.create === "true",
 	}),
 	loader: async ({ context: { queryClient }, params: { projectId } }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+		if (usesCloudflareRuntime()) {
 			await queryClient.ensureQueryData(
 				cloudflareEnvironmentsQueryOptions(projectId),
 			);
@@ -38,7 +39,7 @@ export const Route = createFileRoute(
 function EnvironmentRoute() {
 	const { projectId } = Route.useParams();
 	const { create } = Route.useSearch();
-	return import.meta.env.VITE_INTERNAL_PREVIEW === "true" ? (
+	return usesCloudflareRuntime() ? (
 		<CloudflareEnvironmentPage projectId={projectId} initialCreate={create} />
 	) : (
 		<LegacyEnvironmentsPage />

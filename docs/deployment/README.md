@@ -1,5 +1,12 @@
 # Deployment Documentation
 
+The active Cloudflare reconstruction uses the [Cloudflare release runbook](cloudflare-release.md)
+and the Worker/Gateway configurations in `services/`. Release status and acceptance evidence live
+in the root `TODO.md`; the production candidate still needs validation before domain cutover.
+
+The Compose documentation below describes the legacy architecture retained for local reference.
+It is not the release procedure for the reconstructed Cloudflare application.
+
 Paca ships three Docker Compose entry points under [`deploy/`](../../deploy/README.md):
 
 - `docker-compose.dev.yml` for local development;

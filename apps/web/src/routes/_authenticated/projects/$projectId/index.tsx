@@ -2,14 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { CalendarDays, FolderKanban, Globe, Lock } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { projectQueryOptions } from "@/lib/project-api";
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId/")({
 	beforeLoad: ({ params }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") return;
+		if (usesCloudflareRuntime()) return;
 		throw redirect({
 			to: "/projects/$projectId/interactions/timeline",
 			params: { projectId: params.projectId },

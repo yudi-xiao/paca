@@ -6,8 +6,8 @@
   "scripts": {
     "deploy:internal": "wrangler deploy --env internal --containers-rollout=immediate",
     "deploy:dry-run": "wrangler deploy --dry-run --env internal",
-    "types": "wrangler types worker-configuration.d.ts --env internal",
-    "types:check": "wrangler types worker-configuration.d.ts --env internal --check",
+    "types": "wrangler types worker-configuration.d.ts",
+    "types:check": "wrangler types worker-configuration.d.ts --check",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "test": "vitest run",

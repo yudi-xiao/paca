@@ -18,8 +18,10 @@ bun run db:check
 bun run check
 ```
 
-`bun run dev` uses `wrangler dev --remote --env internal`. Prefer `dev:local` for local route
-work because the legacy remote-preview mode can be unreliable behind a system proxy.
+`bun run dev` and `dev:local` use the default local development configuration. Its Hyperdrive
+ID is an unbound simulator placeholder, so it cannot reach the future production branch.
+Use `dev:internal` explicitly for the remote internal preview. The legacy remote-preview mode
+can be unreliable behind a system proxy.
 
 For local execution, copy `.dev.vars.example` to `.dev.vars`, export the Hyperdrive local
 connection environment variable from the root `DATABASE_URL`, and run:
@@ -31,6 +33,12 @@ bun run dev:local
 ```
 
 Never add the connection string to `wrangler.jsonc`.
+
+Production configuration and the domain cutover sequence are described in
+[the Cloudflare release runbook](../../docs/deployment/cloudflare-release.md). Types are generated
+without selecting one environment so both `Cloudflare.InternalEnv` and
+`Cloudflare.ProductionEnv` are checked. The production candidate has no public route; its
+configuration is preparation for a verified release, not an already usable production instance.
 
 ## Local Cloudflare auth profile
 
@@ -104,7 +112,9 @@ the Hono API. SPA routes such as `/home` fall back to `index.html`; `/api/*`,
 `/.well-known/*`, `/health`, `/internal/*`, and `/ws/*` run through the Worker first and
 therefore never fall back to HTML.
 
-`bun run build:web:internal` builds the React app with the internal-preview flag. The login page
+Both Cloudflare builds select `VITE_PACA_RUNTIME=cloudflare` for native feature/navigation
+boundaries. `bun run build:web:internal` additionally enables the internal-preview signup flag;
+`build:web:production` explicitly disables it without restoring legacy pages. The internal login page
 then exposes a test-account button accepting any valid email and a password of at least 12
 characters. Authentication uses Better Auth's same-origin HTTP endpoints and secure database
 Session cookie; the preview does not maintain a second frontend auth system.
@@ -123,16 +133,15 @@ their domains move to the Worker.
 
 ## Database environments and migrations
 
-- PlanetScale `paca/main` is the eventual production branch. Because this installation is not
-  live yet, the user explicitly authorized the first internal authentication preview to use it
-  through the original Hyperdrive.
+- PlanetScale `paca/main` is the future production branch. It still needs a clean-slate
+  initialization and complete migration validation before production traffic.
 - PlanetScale `paca/internal` is the isolated development branch for internal testing.
-- The existing main Hyperdrive role inherits broad PlanetScale managed roles. That is a known,
-  temporary preview exception, not the production permission model. Before real user data or
-  production traffic, create a least-privilege runtime role, connect it through a separate
-  Hyperdrive, and replace only the `env.internal` binding ID.
+- The default local configuration no longer references the original main Hyperdrive.
+  `env.production` uses a separate Hyperdrive and a new non-inheriting `paca-worker-production`
+  role. Runtime grants and the database baseline must still be verified; the old broad role and
+  any deployed Worker using it must be retired before production initialization.
 - The runtime role must not inherit `postgres`, `pg_read_all_data`, or `pg_write_all_data`.
-  `scripts/sql/grant-runtime-role.sql` grants explicit CRUD on the 44 application tables while
+  `scripts/sql/grant-runtime-role.sql` grants explicit CRUD on the 58 application tables while
   denying schema creation and access to the schema and attachment-migration ledgers;
   `verify-runtime-role.sql` checks
   that boundary. With PlanetScale, use the database role name before the routing-only
@@ -189,7 +198,7 @@ bun run db:reset:internal
 The command rejects missing/gapped migration files, unsafe identifiers, any branch other than
 `internal`, and a missing or incorrect confirmation before it creates a temporary role. The
 current dedicated Hyperdrive remains backed by `paca/internal`; its non-inheriting
-`paca-worker-internal` role has explicit CRUD grants on 47 runtime tables and no schema-create or
+`paca-worker-internal` role has explicit CRUD grants on 58 runtime tables and no schema-create or
 migration-ledger access. The root/main Hyperdrive remains separate and is rejected by the internal
 deployment guard.
 

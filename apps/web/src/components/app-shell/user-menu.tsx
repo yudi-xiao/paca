@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-
 import { LocaleRadioGroup } from "@/components/LocaleRadioGroup";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -32,12 +31,13 @@ import {
 } from "@/components/ui/sidebar";
 import { useLocale } from "@/hooks/use-locale";
 import { currentUserQueryOptions, logout } from "@/lib/auth-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { useShortcutHelpStore } from "@/lib/shortcuts/help-dialog-store";
 import { getInitials } from "@/lib/utils";
 
 export function UserMenu() {
 	const { t } = useTranslation("appShell");
-	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const isCloudflareRuntime = usesCloudflareRuntime();
 	const { t: tShortcuts } = useTranslation("shortcuts");
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
@@ -133,7 +133,7 @@ export function UserMenu() {
 							<User className="size-4" />
 							{t("userMenu.myProfile")}
 						</DropdownMenuItem>
-						{isInternalPreview ? null : (
+						{isCloudflareRuntime ? null : (
 							<DropdownMenuItem
 								onClick={() => void navigate({ to: "/profile/api-keys" })}
 							>

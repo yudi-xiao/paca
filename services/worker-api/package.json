@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --remote --env internal",
-    "dev:local": "wrangler dev --env internal",
-    "build:web:internal": "cd ../../apps/web && bunx tsc -b && VITE_INTERNAL_PREVIEW=true bunx vite build",
+    "dev": "wrangler dev",
+    "dev:local": "wrangler dev --local",
+    "build:web:internal": "cd ../../apps/web && bunx tsc -b && VITE_PACA_RUNTIME=cloudflare VITE_INTERNAL_PREVIEW=true bunx vite build",
     "deploy:internal": "bun run build:web:internal && bun run deploy:guard && wrangler deploy --env internal",
     "deploy:guard": "bun run scripts/assert-internal-config.ts",
     "deploy:dry-run": "wrangler deploy --dry-run --env internal",
-    "types": "wrangler types worker-configuration.d.ts --env internal",
-    "types:check": "wrangler types worker-configuration.d.ts --env internal --check",
+    "types": "wrangler types worker-configuration.d.ts",
+    "types:check": "wrangler types worker-configuration.d.ts --check",
     "db:migrate:internal": "bun run scripts/apply-internal-migrations.ts",
     "github:app:setup": "bun run scripts/setup-github-app.ts",
     "github:app:verify": "bun run scripts/verify-github-app.ts",
@@ -56,7 +56,12 @@
     "agent:execute": "bun run scripts/execute-agent-actions.ts",
     "agent:tasks": "bun run scripts/discover-agent-tasks.ts",
     "agent:task-lease": "bun run scripts/execute-agent-task-lease.ts",
-    "check": "bun run build:web:internal && bun run types:check && bun run db:check && bun run typecheck && bun run lint && bun run test && bun run test:workers && bun run deploy:dry-run"
+    "check": "bun run build:web:internal && bun run types:check && bun run deploy:guard:production && bun run db:check && bun run typecheck && bun run lint && bun run test && bun run test:workers && bun run deploy:dry-run",
+    "dev:internal": "wrangler dev --remote --env internal",
+    "build:web:production": "cd ../../apps/web && bunx tsc -b && VITE_PACA_RUNTIME=cloudflare VITE_INTERNAL_PREVIEW=false bunx vite build",
+    "deploy:guard:production": "bun run scripts/assert-production-config.ts candidate",
+    "deploy:guard:release": "bun run scripts/assert-production-config.ts release",
+    "deploy:dry-run:production": "bun run deploy:guard:production && wrangler deploy --dry-run --env production"
   },
   "dependencies": {
     "@better-auth/agent-auth": "0.6.2",

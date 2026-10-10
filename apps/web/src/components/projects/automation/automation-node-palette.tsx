@@ -20,6 +20,7 @@ import {
 	pluginNodeTypesQueryOptions,
 	TRIGGER_TYPE_GROUPS,
 } from "@/lib/automation-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 
 interface AutomationNodePaletteProps {
 	projectId: string;
@@ -37,7 +38,7 @@ export function AutomationNodePalette({
 	onAddAction,
 }: AutomationNodePaletteProps) {
 	const { t } = useTranslation("projects");
-	const internalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const internalPreview = usesCloudflareRuntime();
 	const { data: pluginTypes } = useQuery({
 		...pluginNodeTypesQueryOptions(projectId),
 		enabled: !internalPreview,

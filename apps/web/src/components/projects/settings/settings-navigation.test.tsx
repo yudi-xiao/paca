@@ -71,7 +71,8 @@ async function mount() {
 	);
 }
 beforeEach(() => {
-	vi.stubEnv("VITE_INTERNAL_PREVIEW", "true");
+	vi.stubEnv("VITE_PACA_RUNTIME", "cloudflare");
+	vi.stubEnv("VITE_INTERNAL_PREVIEW", "false");
 	mocks.section = "github";
 	mocks.navigate.mockReset();
 	mocks.get.mockReset();
@@ -83,7 +84,7 @@ beforeEach(() => {
 	});
 });
 describe("project settings navigation", () => {
-	it("opens a direct repository link without loading unrelated privileged data", async () => {
+	it("opens production GitHub settings with test signup disabled and unrelated permissions denied", async () => {
 		await mount();
 		expect(
 			screen.getByText("Repository configuration form"),

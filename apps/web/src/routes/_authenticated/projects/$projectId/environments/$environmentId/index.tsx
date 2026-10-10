@@ -1,5 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { EnvironmentDetailView } from "@/components/projects/environments/environment-detail";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import {
 	environmentConfigQueryOptions,
 	environmentFoldersQueryOptions,
@@ -10,7 +11,7 @@ export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/environments/$environmentId/",
 )({
 	beforeLoad: ({ params: { projectId } }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+		if (usesCloudflareRuntime()) {
 			throw redirect({
 				to: "/projects/$projectId",
 				params: { projectId },

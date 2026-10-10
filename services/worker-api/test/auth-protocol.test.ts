@@ -57,6 +57,73 @@ function jsonRequest(body: Record<string, unknown>): RequestInit {
 }
 
 describe("Better Auth protocol", () => {
+  it.each([
+    "production",
+    "preview-typo",
+    undefined,
+  ])("rejects public signup for %s without creating a user or session", async (environment) => {
+    const bindings = testBindings({ ENVIRONMENT: environment });
+    const database = createMemoryDatabase();
+    const auth = betterAuth(createAuthOptions(memoryAdapter(database), bindings));
+    const app = createApp({ authHandler: (request) => auth.handler(request), log: vi.fn() });
+    const response = await app.request(
+      `${BASE_URL}/api/auth/sign-up/email`,
+      jsonRequest({
+        email: "uninvited@paca.test",
+        name: "Uninvited",
+        password: "correct-horse-battery-staple",
+      }),
+      bindings,
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "EMAIL_PASSWORD_SIGN_UP_DISABLED",
+    });
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(database.user).toHaveLength(0);
+    expect(database.account).toHaveLength(0);
+    expect(database.session).toHaveLength(0);
+  });
+
+  it("keeps existing password sign-in and revocable sessions when production signup is closed", async () => {
+    const database = createMemoryDatabase();
+    const provisioner = betterAuth(createAuthOptions(memoryAdapter(database), testBindings()));
+    await provisioner.api.signUpEmail({
+      body: {
+        email: "existing@paca.test",
+        name: "Existing",
+        password: "correct-horse-battery-staple",
+      },
+    });
+    database.session = [];
+    const bindings = testBindings({ ENVIRONMENT: "production" });
+    const auth = betterAuth(createAuthOptions(memoryAdapter(database), bindings));
+    const app = createApp({ authHandler: (request) => auth.handler(request), log: vi.fn() });
+    const response = await app.request(
+      `${BASE_URL}/api/auth/sign-in/email`,
+      jsonRequest({ email: "existing@paca.test", password: "correct-horse-battery-staple" }),
+      bindings,
+    );
+    expect(response.status).toBe(200);
+    const cookie = sessionCookie(response);
+    const session = await app.request(
+      `${BASE_URL}/api/auth/get-session`,
+      { headers: { cookie, origin: BASE_URL } },
+      bindings,
+    );
+    await expect(session.json()).resolves.toMatchObject({ user: { email: "existing@paca.test" } });
+    const revoked = await app.request(
+      `${BASE_URL}/api/auth/sign-out`,
+      {
+        ...jsonRequest({}),
+        headers: { ...jsonRequest({}).headers, cookie },
+      },
+      bindings,
+    );
+    expect(revoked.status).toBe(200);
+    expect(database.session).toHaveLength(0);
+  });
+
   it("serves Agent Auth discovery from the standard well-known route", async () => {
     const bindings = testBindings();
     const database = createMemoryDatabase();

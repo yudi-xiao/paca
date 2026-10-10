@@ -36,11 +36,12 @@ import {
 	createAPIKey,
 	revokeAPIKey,
 } from "@/lib/apikey-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { formatDate as formatDateLocale } from "@/lib/format-date";
 
 export const Route = createFileRoute("/_authenticated/profile/api-keys")({
 	beforeLoad: () => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+		if (usesCloudflareRuntime()) {
 			throw redirect({ to: "/home" });
 		}
 	},

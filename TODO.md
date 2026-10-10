@@ -82,6 +82,23 @@
 5. 完成 Environment、BlockNote、Sprint/Custom Field/View 的真实浏览器验收，以及个人筛选、搜索分页、并发更新和错误恢复体验。
 6. 完成生产资源隔离、部署权限、可观测性、恢复/回滚演练及真实开发任务端到端验收后，才声明正式可用。
 
+### 本轮实施：生产隔离与发布门槛
+
+- 用户已确认正式入口保留 `paca.howlearnwood.com`，internal 入口迁至 `paca-internal.howlearnwood.com`；迁移入口须在候选环境验收后执行。
+- 最小交付物：独立生产 Worker/Gateway、数据库 runtime role 与 Hyperdrive、R2、Queues/DLQ、Workflow/DO、Secrets 和严格同源认证配置；生产注册关闭、首次管理员初始化路径及可重复发布守卫。development 默认配置不得连接生产数据库。
+- 验证命令：配置隔离/错误注入契约、认证协议（关闭注册仍可登录）、Worker/Gateway 类型/lint/回归、types 检查、生产 dry-run、数据库空基线/runtime 权限验收及候选部署健康/同源 smoke；生产切流前补齐完整用户/Agent/交付页面验收。
+- 回滚路径：候选部署失败仅回滚生产候选版本，保持现有 internal 入口及新用户数据；入口切换时记录两个 Worker 版本和域名归属，失败恢复原入口，停止新任务领取，不复用 internal 凭据或恢复 legacy 身份。
+- [x] 生产候选配置与发布守卫：独立 Worker/Gateway、Hyperdrive/R2/Queue/Workflow/DO 命名，候选无公网路由；24 类误配注入契约和候选/切流双阶段检查通过。默认 development 改为本地 Hyperdrive 占位，并以真实本地 Worker `/health` 200 验证，可避免误连生产。
+- [ ] 生产认证与安全初始化契约。
+- [x] 前端 Cloudflare runtime 与内部注册开关分离：两类 Cloudflare 构建明确选择 `VITE_PACA_RUNTIME=cloudflare`，生产禁用测试注册仍保留 GitHub 设置等原生入口；前端 674 项测试及生产构建通过。
+- [ ] 独立数据库/Hyperdrive/R2/Queue/Workflow/DO/Secret 实际验收。
+- 2026-10-10 资源准备：已创建生产文档快照桶及 3 个源队列/3 个 DLQ，复用既有生产附件桶；新建非继承的 `paca-worker-production` 角色和 Hyperdrive `98086061f9064f6c8f815303002c4a88`（连接上限 5、禁用查询缓存、TLS require）。该角色尚未应用 runtime grants，生产 Worker/Gateway/Secrets 尚未部署，不能视为生产验收完成。
+- 生产数据库只读盘点：`main` 当前 39 表、3 个旧账号、4 个 Session，未做删除或迁移；后续先停用旧部署消费者/宽权限角色，再执行独立 clean-slate 初始化，不复制或清空当前 internal 工作区。临时只读角色已删除。
+- 注册边界已覆盖 production/未知/缺失环境拒绝注册且不产生用户/Session，既有账号仍可登录并撤销 Session；首次生产管理员的安全初始化流程仍未完成。
+- 验证：Worker 637 项单元测试、64 项真实 PostgreSQL 契约、40 份 migration 空库重放与回滚/前滚演练通过，33 项 Workers runtime 契约通过；Gateway 33 项测试通过；两个环境 types 检查和生产 dry-run 通过。上述 dry-run 不代表远端资源、Secret 或浏览器验收完成。
+- internal 已部署修复，版本 `4597ee81-0553-4a30-86cc-95d5d8f13a64`；在线 `/health`、首页和 Agent discovery 为 200，匿名 `/api/me` 为 401。内置浏览器仍仅能列出现有 `/home` 标签，正文读取再次超时，未把 HTTP 检查算作真实页面验收。
+- [ ] internal 域名迁移、生产切流与正式上线验收。
+
 ### 优先实施：本地 Agent 接入
 
 - 最小交付物：私有配置与单 Agent 身份校验、可操作的本地连接诊断；Codex/Claude Code Harness 在真实工作目录连接 Agent Auth、受约束 MCP 和任务 lease；心跳、续租、检查点、中断恢复、取消及授权撤销贯穿执行。

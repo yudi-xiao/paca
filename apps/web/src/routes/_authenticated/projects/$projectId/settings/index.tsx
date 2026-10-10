@@ -19,6 +19,7 @@ import { TaskTypesSettings } from "@/components/projects/settings/TaskTypesSetti
 import { usePermissions } from "@/hooks/use-permissions";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { currentUserQueryOptions } from "@/lib/auth-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { RemoteComponent } from "@/lib/plugins/loader";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import {
@@ -41,7 +42,7 @@ export const Route = createFileRoute(
 			: {},
 	loaderDeps: ({ search }) => ({ section: search.section }),
 	loader: async ({ context: { queryClient }, params: { projectId } }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+		if (usesCloudflareRuntime()) {
 			await queryClient.ensureQueryData(projectQueryOptions(projectId));
 			return;
 		}
@@ -94,21 +95,21 @@ function SettingsPage() {
 	const { projectId } = Route.useParams();
 	const { section } = Route.useSearch();
 	const navigate = Route.useNavigate();
-	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const isCloudflareRuntime = usesCloudflareRuntime();
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	const { hasPermission } = usePermissions();
 	const { hasProjectPermission } = useProjectPermissions(projectId);
 	const { data: currentUser } = useQuery({
 		...currentUserQueryOptions,
-		enabled: !isInternalPreview,
+		enabled: !isCloudflareRuntime,
 	});
 	const { data: members = [] } = useQuery({
 		...projectMembersQueryOptions(projectId),
-		enabled: !isInternalPreview,
+		enabled: !isCloudflareRuntime,
 	});
 	const { data: roles = [] } = useQuery({
 		...projectRolesQueryOptions(projectId),
-		enabled: !isInternalPreview,
+		enabled: !isCloudflareRuntime,
 	});
 
 	const myMembership = (members as ProjectMember[]).find(
@@ -132,13 +133,13 @@ function SettingsPage() {
 			"project.roles.write"
 		],
 	);
-	const canDelete = isInternalPreview
+	const canDelete = isCloudflareRuntime
 		? hasProjectPermission("projects.delete")
 		: hasPermission("projects.delete") || hasProjectDelete;
-	const canEditProject = isInternalPreview
+	const canEditProject = isCloudflareRuntime
 		? hasProjectPermission("projects.write")
 		: hasPermission("projects.write") || hasProjectWrite;
-	const canManageRoles = isInternalPreview
+	const canManageRoles = isCloudflareRuntime
 		? hasProjectPermission("project.roles.write")
 		: hasPermission("project.roles.write") || hasProjectRolesWrite;
 	const hasTasksWrite = Boolean(
@@ -146,7 +147,7 @@ function SettingsPage() {
 			"tasks.write"
 		],
 	);
-	const canManageTasks = isInternalPreview
+	const canManageTasks = isCloudflareRuntime
 		? hasProjectPermission("tasks.write")
 		: hasPermission("tasks.write") || hasTasksWrite;
 
@@ -155,7 +156,7 @@ function SettingsPage() {
 		(r) => !r.hidden,
 	);
 
-	const availableNavItems = isInternalPreview
+	const availableNavItems = isCloudflareRuntime
 		? NAV_ITEMS.filter((item) =>
 				["general", "roles", "custom-fields", "github", "danger"].includes(
 					item.id,
@@ -291,7 +292,7 @@ function SettingsPage() {
 						{activeSection === "general" && (
 							<GeneralSettings projectId={projectId} canEdit={canEditProject} />
 						)}
-						{activeSection === "github" && isInternalPreview && (
+						{activeSection === "github" && isCloudflareRuntime && (
 							<GitHubDeliverySettings projectId={projectId} />
 						)}
 						{activeSection === "roles" && (

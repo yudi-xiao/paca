@@ -49,6 +49,7 @@ import {
 	workerTriggerHasNoSprint,
 	workerTriggerHasNoTask,
 } from "@/lib/automation-context";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { sprintsQueryOptions } from "@/lib/interaction-api";
 import {
 	customFieldsQueryOptions,
@@ -107,7 +108,7 @@ function AutomationBuilderPage() {
 	);
 	const { data: pluginTypes } = useQuery({
 		...pluginNodeTypesQueryOptions(projectId),
-		enabled: import.meta.env.VITE_INTERNAL_PREVIEW !== "true",
+		enabled: !usesCloudflareRuntime(),
 	});
 
 	const [tab, setTab] = useState<"graph" | "runs">("graph");
@@ -186,8 +187,7 @@ function AutomationBuilderPage() {
 	// standalone message at the agent instead of assigning a task when
 	// there's none) is off-limits downstream from it.
 	function nodeRequiresTask(node: AutomationNode): boolean {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true")
-			return workerNodeRequiresTask(node);
+		if (usesCloudflareRuntime()) return workerNodeRequiresTask(node);
 		if (node.kind === "condition") return true;
 		if (node.kind === "action") {
 			return node.type !== "call_api" && node.type !== "trigger_ai_agent";
@@ -196,8 +196,7 @@ function AutomationBuilderPage() {
 	}
 
 	function isTaskLessTrigger(node: AutomationNode): boolean {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true")
-			return workerTriggerHasNoTask(node);
+		if (usesCloudflareRuntime()) return workerTriggerHasNoTask(node);
 		if (node.kind !== "trigger") return false;
 		if (!["predecessor_done", "cron", "api_trigger"].includes(node.type)) {
 			return false;
@@ -227,8 +226,7 @@ function AutomationBuilderPage() {
 		for (const trigger of nodes) {
 			const noTask = isTaskLessTrigger(trigger);
 			const noSprint =
-				import.meta.env.VITE_INTERNAL_PREVIEW === "true" &&
-				workerTriggerHasNoSprint(trigger);
+				usesCloudflareRuntime() && workerTriggerHasNoSprint(trigger);
 			if (!noTask && !noSprint) continue;
 			const visited = new Set([trigger.id]);
 			const queue = [...(outgoing.get(trigger.id) ?? [])];
@@ -677,7 +675,7 @@ function AutomationBuilderPage() {
 							) {
 								setErrorMessage(
 									t(
-										import.meta.env.VITE_INTERNAL_PREVIEW === "true"
+										usesCloudflareRuntime()
 											? "automation.builder.contextConnectionError"
 											: "automation.builder.taskLessTriggerConnectionError",
 									),

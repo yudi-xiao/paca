@@ -64,6 +64,7 @@ import {
 	type TriggerConfig,
 } from "@/lib/automation-api";
 import { normalizedAutomationCron } from "@/lib/automation-cron";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import {
 	listAllTasks,
 	sprintsQueryOptions,
@@ -1106,7 +1107,7 @@ function TriggerConfigForm({
 				<div className="space-y-1.5">
 					<Label>
 						{t(
-							import.meta.env.VITE_INTERNAL_PREVIEW === "true"
+							usesCloudflareRuntime()
 								? "automation.nodeConfig.trigger.requiredTargetTaskLabel"
 								: "automation.nodeConfig.trigger.targetTaskLabel",
 						)}
@@ -1119,7 +1120,7 @@ function TriggerConfigForm({
 					/>
 					<p className="text-xs text-muted-foreground">
 						{t(
-							import.meta.env.VITE_INTERNAL_PREVIEW === "true"
+							usesCloudflareRuntime()
 								? "automation.nodeConfig.trigger.predecessorTargetTaskHint"
 								: "automation.nodeConfig.trigger.targetTaskHint",
 						)}
@@ -1128,14 +1129,11 @@ function TriggerConfigForm({
 				<div className="space-y-1.5">
 					<Label>
 						{t("automation.nodeConfig.trigger.watchedTasksLabel")}
-						{import.meta.env.VITE_INTERNAL_PREVIEW === "true" && " (1–50)"}
+						{usesCloudflareRuntime() && " (1–50)"}
 					</Label>
 					{canEdit && (
 						<Select
-							disabled={
-								import.meta.env.VITE_INTERNAL_PREVIEW === "true" &&
-								watchedTaskIds.length >= 50
-							}
+							disabled={usesCloudflareRuntime() && watchedTaskIds.length >= 50}
 							value=""
 							onValueChange={(v) => {
 								if (v) setWatchedTaskIds((prev) => [...prev, v]);
@@ -1186,7 +1184,7 @@ function TriggerConfigForm({
 					<SaveButton
 						saving={saving}
 						disabled={
-							import.meta.env.VITE_INTERNAL_PREVIEW === "true" &&
+							usesCloudflareRuntime() &&
 							(!targetTaskId ||
 								watchedTaskIds.length === 0 ||
 								watchedTaskIds.length > 50)

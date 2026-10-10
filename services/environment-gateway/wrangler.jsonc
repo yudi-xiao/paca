@@ -20,7 +20,7 @@
   },
   "vars": {
     "ENVIRONMENT": "development",
-    "PUBLIC_ORIGIN": "https://paca-env.howlearnwood.com"
+    "PUBLIC_ORIGIN": "http://localhost:8788"
   },
   "containers": [
     {
@@ -32,10 +32,22 @@
   ],
   "durable_objects": {
     "bindings": [
-      { "name": "SANDBOXES", "class_name": "Sandbox" },
-      { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" },
-      { "name": "AGENT_CONNECTIONS", "class_name": "AgentConnectionRegistryDO" },
-      { "name": "USER_CONNECTIONS", "class_name": "UserConnectionRegistryDO" },
+      {
+        "name": "SANDBOXES",
+        "class_name": "Sandbox"
+      },
+      {
+        "name": "CONNECTION_TICKETS",
+        "class_name": "ConnectionTicketDO"
+      },
+      {
+        "name": "AGENT_CONNECTIONS",
+        "class_name": "AgentConnectionRegistryDO"
+      },
+      {
+        "name": "USER_CONNECTIONS",
+        "class_name": "UserConnectionRegistryDO"
+      },
       {
         "name": "ENVIRONMENT_TICKET_BARRIERS",
         "class_name": "EnvironmentTicketBarrierDO"
@@ -84,10 +96,63 @@
       ],
       "durable_objects": {
         "bindings": [
-          { "name": "SANDBOXES", "class_name": "Sandbox" },
-          { "name": "CONNECTION_TICKETS", "class_name": "ConnectionTicketDO" },
-          { "name": "AGENT_CONNECTIONS", "class_name": "AgentConnectionRegistryDO" },
-          { "name": "USER_CONNECTIONS", "class_name": "UserConnectionRegistryDO" },
+          {
+            "name": "SANDBOXES",
+            "class_name": "Sandbox"
+          },
+          {
+            "name": "CONNECTION_TICKETS",
+            "class_name": "ConnectionTicketDO"
+          },
+          {
+            "name": "AGENT_CONNECTIONS",
+            "class_name": "AgentConnectionRegistryDO"
+          },
+          {
+            "name": "USER_CONNECTIONS",
+            "class_name": "UserConnectionRegistryDO"
+          },
+          {
+            "name": "ENVIRONMENT_TICKET_BARRIERS",
+            "class_name": "EnvironmentTicketBarrierDO"
+          }
+        ]
+      }
+    },
+    "production": {
+      "name": "paca-environment-gateway-production",
+      "workers_dev": false,
+      "routes": [],
+      "vars": {
+        "ENVIRONMENT": "production",
+        "PUBLIC_ORIGIN": "https://paca-env.howlearnwood.com"
+      },
+      "containers": [
+        {
+          "class_name": "Sandbox",
+          "image": "docker.io/cloudflare/sandbox@sha256:4a56a37a3cfd9b38d65bb4b5d0b341e6490a3a4c0226274ae4c1cca4948e85fe",
+          "instance_type": "lite",
+          "max_instances": 5
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "SANDBOXES",
+            "class_name": "Sandbox"
+          },
+          {
+            "name": "CONNECTION_TICKETS",
+            "class_name": "ConnectionTicketDO"
+          },
+          {
+            "name": "AGENT_CONNECTIONS",
+            "class_name": "AgentConnectionRegistryDO"
+          },
+          {
+            "name": "USER_CONNECTIONS",
+            "class_name": "UserConnectionRegistryDO"
+          },
           {
             "name": "ENVIRONMENT_TICKET_BARRIERS",
             "class_name": "EnvironmentTicketBarrierDO"
@@ -95,5 +160,6 @@
         ]
       }
     }
-  }
+  },
+  "routes": []
 }

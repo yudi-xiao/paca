@@ -45,7 +45,6 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-
 import { ProjectSearch } from "@/components/projects/project-search";
 import { EntityAvatarContent } from "@/components/shared/entity-avatar";
 import { Badge } from "@/components/ui/badge";
@@ -80,6 +79,7 @@ import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import type { ThemeMode } from "@/hooks/use-theme-mode";
 import { useThemeMode } from "@/hooks/use-theme-mode";
 import { currentUserQueryOptions } from "@/lib/auth-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import {
 	createDocument,
 	createFolder,
@@ -1484,14 +1484,14 @@ function ThemeSwitcher() {
 // ── App Sidebar ────────────────────────────────────────────────────────────────
 export function AppSidebar() {
 	const { t } = useTranslation("appShell");
-	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const isCloudflareRuntime = usesCloudflareRuntime();
 	const { hasPermission } = usePermissions();
 	const { resolvedMode } = useThemeMode();
 	const { projectId } = useParams({ strict: false });
 	const { data: user } = useQuery(currentUserQueryOptions);
 	const organizationRolesQuery = useQuery({
 		...organizationRolesQueryOptions,
-		enabled: Boolean(user) && isInternalPreview,
+		enabled: Boolean(user) && isCloudflareRuntime,
 	});
 	const { getNavItems } = usePluginRegistry();
 	const branding = useBranding();
@@ -1513,7 +1513,7 @@ export function AppSidebar() {
 
 	const canCreateProject = hasPermission("projects.create");
 	const canAccessOrganization =
-		isInternalPreview && organizationRolesQuery.isSuccess;
+		isCloudflareRuntime && organizationRolesQuery.isSuccess;
 
 	// Plugin admin nav items are gated by their own declared
 	// `requiredPermission` (falling back to open access if the plugin didn't
@@ -1529,7 +1529,7 @@ export function AppSidebar() {
 		canAccessGlobalRoles ||
 		canAccessOrganization ||
 		canAccessGlobalAgents ||
-		(!isInternalPreview &&
+		(!isCloudflareRuntime &&
 			(canAccessUsers ||
 				canAccessPlugins ||
 				canAccessSettings ||
@@ -1538,7 +1538,7 @@ export function AppSidebar() {
 	// from core workspace administration — the "Plugins" management link
 	// itself (canAccessPlugins) stays in Administration.
 	const showPluginsSection =
-		!isInternalPreview && adminPluginNavItems.length > 0;
+		!isCloudflareRuntime && adminPluginNavItems.length > 0;
 	const isProjectContext = !!projectId;
 	const isAnonymous = !user;
 
@@ -1589,7 +1589,7 @@ export function AppSidebar() {
 			{/* Navigation — switches between workspace and project context */}
 			<SidebarContent>
 				{isProjectContext ? (
-					isInternalPreview ? (
+					isCloudflareRuntime ? (
 						<>
 							{user && <ProjectNav />}
 							{user && <SidebarSeparator />}
@@ -1670,7 +1670,7 @@ export function AppSidebar() {
 								<SidebarGroupContent>
 									<SidebarMenu>
 										<NavItem to="/home" icon={Home} label={t("nav.home")} />
-										{isInternalPreview ? null : (
+										{isCloudflareRuntime ? null : (
 											<NavItem
 												to="/conversations"
 												icon={MessageSquare}
@@ -1707,7 +1707,7 @@ export function AppSidebar() {
 													label={t("nav.organizationAccess")}
 												/>
 											) : null}
-											{!isInternalPreview && canAccessUsers ? (
+											{!isCloudflareRuntime && canAccessUsers ? (
 												<NavItem
 													to="/admin/users"
 													icon={Users}
@@ -1721,7 +1721,7 @@ export function AppSidebar() {
 													label={t("nav.agents")}
 												/>
 											) : null}
-											{!isInternalPreview && canAccessPlugins ? (
+											{!isCloudflareRuntime && canAccessPlugins ? (
 												<NavItem
 													to="/admin/plugins"
 													icon={Puzzle}
@@ -1729,14 +1729,14 @@ export function AppSidebar() {
 													exact
 												/>
 											) : null}
-											{!isInternalPreview && canAccessSettings ? (
+											{!isCloudflareRuntime && canAccessSettings ? (
 												<NavItem
 													to="/admin/settings"
 													icon={Settings}
 													label={t("nav.settings")}
 												/>
 											) : null}
-											{!isInternalPreview ? (
+											{!isCloudflareRuntime ? (
 												<NavItem
 													to="/admin/changelog"
 													icon={Sparkles}

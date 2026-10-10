@@ -3,7 +3,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Bot, Plus } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-
 import { AgentCard } from "@/components/projects/agents/agent-card";
 import {
 	AcpSetupDialog,
@@ -19,6 +18,7 @@ import {
 	llmModelsQueryOptions,
 	projectScopedAgentsQueryOptions,
 } from "@/lib/agent-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import {
 	projectQueryOptions,
 	projectRolesQueryOptions,
@@ -31,7 +31,7 @@ export const Route = createFileRoute(
 		create: search.create === true || search.create === "true",
 	}),
 	loader: async ({ context: { queryClient }, params: { projectId } }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+		if (usesCloudflareRuntime()) {
 			const { projectAgentDirectoryQueryOptions } = await import(
 				"@/lib/agent-auth-api"
 			);
@@ -51,7 +51,7 @@ export const Route = createFileRoute(
 
 function ProjectAgentsRoute() {
 	const { projectId } = Route.useParams();
-	return import.meta.env.VITE_INTERNAL_PREVIEW === "true" ? (
+	return usesCloudflareRuntime() ? (
 		<ProjectAgentDirectory projectId={projectId} />
 	) : (
 		<AgentsPage />

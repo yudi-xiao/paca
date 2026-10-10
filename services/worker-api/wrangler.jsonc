@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-27",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
+  "workers_dev": false,
   "observability": {
     "enabled": true,
     "logs": {
@@ -30,7 +30,7 @@
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "f2c6d6944f65417785dd49964e0c3238"
+      "id": "00000000000000000000000000000000"
     }
   ],
   "r2_buckets": [
@@ -246,6 +246,117 @@
           "class_name": "AutomationWorkflow"
         }
       ]
+    },
+    "production": {
+      "name": "paca-worker-api-production",
+      "workers_dev": false,
+      "routes": [],
+      "vars": {
+        "ATTACHMENT_CLEANUP_ENABLED": "true",
+        "BETTER_AUTH_URL": "https://paca.howlearnwood.com",
+        "ENVIRONMENT": "production",
+        "TRUSTED_ORIGINS": "https://paca.howlearnwood.com"
+      },
+      "triggers": {
+        "crons": ["* * * * *", "15 10 * * *"]
+      },
+      "hyperdrive": [
+        {
+          "binding": "HYPERDRIVE",
+          "id": "98086061f9064f6c8f815303002c4a88"
+        }
+      ],
+      "services": [
+        {
+          "binding": "ENVIRONMENT_GATEWAY",
+          "service": "paca-environment-gateway-production"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "TASK_ATTACHMENTS",
+          "bucket_name": "paca-attachments-production"
+        },
+        {
+          "binding": "DOCUMENT_SNAPSHOTS",
+          "bucket_name": "paca-document-snapshots-production"
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "REALTIME_EVENTS",
+            "queue": "paca-realtime-events-production"
+          },
+          {
+            "binding": "DOCUMENT_MATERIALIZATION",
+            "queue": "paca-document-materialization-production"
+          },
+          {
+            "binding": "AUTOMATION_EVENTS",
+            "queue": "paca-automation-events-production"
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "paca-realtime-events-production",
+            "max_batch_size": 10,
+            "max_batch_timeout": 1,
+            "max_retries": 5,
+            "retry_delay": 5,
+            "dead_letter_queue": "paca-realtime-events-production-dlq"
+          },
+          {
+            "queue": "paca-document-materialization-production",
+            "max_batch_size": 5,
+            "max_batch_timeout": 2,
+            "max_retries": 5,
+            "retry_delay": 5,
+            "dead_letter_queue": "paca-document-materialization-production-dlq"
+          },
+          {
+            "queue": "paca-automation-events-production",
+            "max_batch_size": 10,
+            "max_batch_timeout": 2,
+            "max_retries": 5,
+            "retry_delay": 5,
+            "dead_letter_queue": "paca-automation-events-production-dlq"
+          }
+        ]
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "ProjectParty",
+            "class_name": "ProjectParty"
+          },
+          {
+            "name": "UserParty",
+            "class_name": "UserParty"
+          },
+          {
+            "name": "DocumentParty",
+            "class_name": "DocumentParty"
+          },
+          {
+            "name": "AgentCoordinator",
+            "class_name": "AgentCoordinator"
+          }
+        ]
+      },
+      "workflows": [
+        {
+          "binding": "DOCUMENT_AGENT_WORKFLOW",
+          "name": "paca-document-agent-production",
+          "class_name": "DocumentAgentWorkflow"
+        },
+        {
+          "binding": "AUTOMATION_WORKFLOW",
+          "name": "paca-automation-production",
+          "class_name": "AutomationWorkflow"
+        }
+      ]
     }
-  }
+  },
+  "routes": []
 }

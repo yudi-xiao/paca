@@ -6,6 +6,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 
 // Upper bound for manual-sort positions.  All computed positions stay strictly
 // inside (0, POSITION_MAX) by always taking midpoints toward the boundaries, so
@@ -323,7 +324,7 @@ export function InteractionLayout({
 	const { t } = useTranslation("projects");
 	const qc = useQueryClient();
 	const navigate = useNavigate();
-	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const isCloudflareRuntime = usesCloudflareRuntime();
 
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	const taskIdPrefix = project?.task_id_prefix ?? "";
@@ -1307,7 +1308,7 @@ export function InteractionLayout({
 	}, [selectedTaskId, selectedTaskConfirmedMissing, tasks]);
 
 	const handleTaskClick = (task: Task) => {
-		if (isInternalPreview) {
+		if (isCloudflareRuntime) {
 			onTaskClick?.(task);
 			void navigate({
 				to: "/projects/$projectId/tasks/$taskId",
@@ -2053,7 +2054,7 @@ export function InteractionLayout({
 				isPending={renameViewMutation.isPending}
 			/>
 
-			{isInternalPreview ? null : (
+			{isCloudflareRuntime ? null : (
 				<TaskDetailModal
 					task={selectedTask}
 					open={!!selectedTask}
