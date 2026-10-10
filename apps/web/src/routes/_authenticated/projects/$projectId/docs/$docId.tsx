@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { currentUserQueryOptions } from "@/lib/auth-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { docFoldersQueryOptions, docQueryOptions } from "@/lib/doc-api";
 import { cn } from "@/lib/utils";
 
@@ -43,13 +44,13 @@ function DocEditorPage() {
 	const { projectId, docId } = Route.useParams();
 	const { hasProjectPermission } = useProjectPermissions(projectId);
 	const canWrite = hasProjectPermission("docs.write");
-	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const isCloudflareRuntime = usesCloudflareRuntime();
 
 	const { data: currentUser } = useQuery(currentUserQueryOptions);
 	const { data: doc, isError } = useQuery(docQueryOptions(projectId, docId));
 	const { data: allFolders = [] } = useQuery({
 		...docFoldersQueryOptions(projectId),
-		enabled: !isInternalPreview,
+		enabled: !isCloudflareRuntime,
 	});
 
 	const [rightPanel, setRightPanel] = useState<RightPanel>(null);
@@ -135,7 +136,7 @@ function DocEditorPage() {
 						</span>
 					)}
 
-					{!isInternalPreview && (
+					{!isCloudflareRuntime && (
 						<Button
 							variant="ghost"
 							size="icon"
@@ -201,7 +202,7 @@ function DocEditorPage() {
 				</div>
 
 				{/* Right panel: activity */}
-				{!isInternalPreview && rightPanel === "activity" && doc && (
+				{!isCloudflareRuntime && rightPanel === "activity" && doc && (
 					<div className="w-80 shrink-0 h-full overflow-hidden">
 						<DocActivityPane
 							projectId={projectId}

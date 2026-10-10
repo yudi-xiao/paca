@@ -1,5 +1,10 @@
 # MCP Server Setup Guide
 
+For the Cloudflare Worker and local Codex/Claude Code path, use the
+[Agent Auth setup and diagnostics](../../apps/mcp/README.md#agent-auth-harness-mode).
+The API-key instructions and full Go tool catalog below describe a separate legacy
+deployment. They do not authenticate Agents to the Worker or provide its GitHub delivery gate.
+
 This guide walks you through setting up the Paca MCP (Model Context Protocol) server to integrate with your AI agents, enabling them to interact with Paca projects, tasks, sprints, and documents.
 
 ## Prerequisites

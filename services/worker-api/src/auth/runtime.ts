@@ -160,6 +160,10 @@ export function createAuthOptions(
     },
     emailAndPassword: {
       enabled: true,
+      // Public signup is a preview facility, not a production bootstrap path.
+      // Unknown/missing deployment labels also fail closed. Existing users can
+      // still sign in; production onboarding needs an explicit admin flow.
+      disableSignUp: !["development", "test"].includes(env.ENVIRONMENT ?? ""),
       minPasswordLength: 12,
     },
     plugins: [

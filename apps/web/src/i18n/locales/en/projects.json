@@ -1,4 +1,24 @@
 {
+	"search": {
+		"title": "Search this project",
+		"description": "Search task and document titles and body text in this project.",
+		"queryLabel": "Search text",
+		"kindLabel": "Search type",
+		"placeholder": "Keyword or task number, e.g. #42",
+		"tasks": "Tasks",
+		"docs": "Documents",
+		"submit": "Search",
+		"prompt": "Enter a keyword to search.",
+		"loading": "Searching…",
+		"empty": "No matches. Try another keyword or search type.",
+		"resultCount": "{{count}} results loaded",
+		"error": "Search failed. Check your connection and project access, then retry.",
+		"retry": "Retry",
+		"resultsLabel": "Search results",
+		"bodyMatch": "Body",
+		"titleMatch": "Title / number",
+		"more": "Load more"
+	},
 	"project": {
 		"notFound": "Project not found or access denied.",
 		"settingsPage": {
@@ -1620,7 +1640,8 @@
 			"expandSidebar": "Expand panel",
 			"tabGraph": "Graph",
 			"tabRuns": "Run history",
-			"tabDependencyMap": "Dependency map"
+			"tabDependencyMap": "Dependency map",
+			"contextConnectionError": "This connection lacks the task or Sprint context required by the action."
 		},
 		"palette": {
 			"title": "Add node",
@@ -1682,7 +1703,7 @@
 				"tagLabel": "Tag",
 				"anyTag": "Any tag",
 				"dueDateOffsetLabel": "Offset (minutes)",
-				"dueDateOffsetHint": "0 = at due date, negative = before, positive = after",
+				"dueDateOffsetHint": "UTC midnight on the due date + offset (whole minutes, ±525600). Negative = before, positive = after. Overdue tasks are caught up once.",
 				"watchedTasksLabel": "Watched tasks",
 				"watchedTasksHint": "Fires once ALL of these tasks are in a \"done\" status",
 				"addWatchedTaskPlaceholder": "Add a task to watch…",
@@ -1694,10 +1715,19 @@
 				"noTasksYet": "No tasks in this project yet",
 				"loadingMore": "Loading…",
 				"clearTargetTask": "Clear target task",
+				"sprintFilterLabel": "Sprint filter (optional)",
+				"anySprint": "Any Sprint in this project",
+				"sprintFilterHint": "Only fire for the selected Sprint. Clear the filter to include future Sprints.",
+				"cronInvalid": "Enter a valid five-field schedule with a possible calendar date.",
+				"sprintMissing": "This Sprint was deleted. Select another Sprint or clear the filter.",
+				"sprintsLoadFailed": "Could not load Sprints. Retry to edit this filter.",
+				"retryLoad": "Retry",
+				"requiredTargetTaskLabel": "Target task (required)",
+				"predecessorTargetTaskHint": "Choose the task to run against after all watched tasks are done. Its current state is checked during execution.",
 				"cronExpressionLabel": "Cron expression",
 				"cronExpressionPlaceholder": "*/15 * * * *",
-				"cronExpressionHint": "Standard 5-field cron (minute hour day-of-month month day-of-week), evaluated in UTC",
-				"cronTargetTaskHint": "The task this automation runs against on every scheduled fire. Leave unset if this should only reach a Call API or Trigger AI agent action, which don't need a task.",
+				"cronExpressionHint": "Five fields in UTC: minute hour day-of-month month day-of-week. Seconds and macros are unsupported. Missed times are combined into one catch-up run.",
+				"cronTargetTaskHint": "Optional task context for each scheduled run. Without it, use Wait, Sprint conditions, or an explicit target task.",
 				"apiTriggerTargetTaskHint": "The task this automation runs against whenever the webhook below is called. Leave unset if this should only reach a Call API or Trigger AI agent action, which don't need a task.",
 				"webhookUrlLabel": "Webhook URL",
 				"webhookTokenLabel": "Webhook token",
@@ -1797,7 +1827,12 @@
 				"pluginConditionLabel": "Plugin condition",
 				"pluginConditionHint": "Delegates this branch's match to a plugin-contributed condition instead of comparing a task field.",
 				"selectPluginPlaceholder": "Select a plugin condition…",
-				"addCustomField": "Add custom field…"
+				"addCustomField": "Add custom field…",
+				"sprintContextHint": "Updates enabled fields on the triggering Sprint or the triggering task’s Sprint.",
+				"clearSprintField": "Clear {{field}}",
+				"sprintStatusOnlyHint": "Changing status does not move tasks. Use Complete sprint to move unfinished tasks.",
+				"sprintUpdateInvalid": "Check the name (1–200 characters), goal (up to 10,000 characters), status and date range.",
+				"sprintDestinationMissing": "This destination is missing or completed. Choose another Sprint or Backlog."
 			},
 			"target": {
 				"label": "Applies to",
@@ -1856,5 +1891,68 @@
 			"empty": "No predecessor dependencies configured yet",
 			"watchedTasks": "Waiting on {{count}} task(s)"
 		}
+	},
+	"delivery": {
+		"title": "GitHub delivery",
+		"hint": "Select a completed Agent run and pin its PR and commit. CI evidence and human acceptance are separate steps.",
+		"noRepository": "An administrator must bind this project to a GitHub repository first.",
+		"revoked": "Repository access was revoked. An administrator must reconnect it.",
+		"noRuns": "No completed Agent runs are available for this task.",
+		"run": "Completed Agent run",
+		"chooseRun": "Select a run",
+		"pr": "Pull request number",
+		"sha": "Commit SHA (40 characters)",
+		"submit": "Submit delivery",
+		"refresh": "Refresh evidence",
+		"accept": "Accept this commit",
+		"requestChanges": "Request changes",
+		"note": "Acceptance or change notes",
+		"error": "Could not complete the operation. Check access and retry.",
+		"conflict": "Delivery changed. Review the latest evidence before acting again.",
+		"notReady": "Evidence is not ready for acceptance. Review the current checks.",
+		"draft": "This PR is a draft. Publish it for review before acceptance.",
+		"headChanged": "The PR head changed. Submit the new commit for acceptance.",
+		"reviews": "Current commit approvals: {{count}} / {{required}}",
+		"observed": "Evidence checked: {{time}}",
+		"previousAcceptance": "Previously accepted at {{time}}; current evidence needs review.",
+		"state": {
+			"awaiting_acceptance": "Awaiting acceptance",
+			"waiting": "Waiting for checks or review",
+			"needs_changes": "Changes required",
+			"stale": "Evidence needs refresh",
+			"unavailable": "Evidence unavailable",
+			"accepted": "Commit accepted"
+		},
+		"check": {
+			"passed": "Passed",
+			"pending": "Pending",
+			"failed": "Failed",
+			"missing": "Missing",
+			"stale": "Expired"
+		}
+	},
+	"repositorySettings": {
+		"title": "GitHub delivery settings",
+		"hint": "Connect the read-only GitHub App before discovery. Every delivery requires human acceptance.",
+		"connected": "Repository connected",
+		"publisher": "Publisher #{{id}}",
+		"reviewPolicy": "Required approvals: {{count}}; trusted reviewers: {{reviewers}}",
+		"readOnly": "Changing this policy requires project edit and instance settings permissions.",
+		"repository": "Repository (owner/name)",
+		"samplePr": "Example PR number",
+		"sampleHint": "Use a PR with CI runs to select the checks required for this project.",
+		"reviewers": "Trusted reviewer usernames (comma separated)",
+		"keepReviewers": "Keep the currently configured reviewers",
+		"discover": "Discover repository checks",
+		"discoveryError": "Could not verify the installed App, repository, PR or reviewer accounts. Check them and retry.",
+		"checks": "Required CI checks (select 1–20)",
+		"noChecks": "This PR has no CI checks. Run CI, then discover again.",
+		"verifiedReviewers": "Verified reviewers: {{names}}",
+		"approvals": "Required GitHub approvals (0–5)",
+		"age": "Maximum CI age (minutes, up to 7 days)",
+		"saveHint": "Saving a policy invalidates previous delivery evidence and acceptance.",
+		"save": "Save delivery policy",
+		"saved": "Delivery policy saved. Tasks must refresh their evidence.",
+		"invalidPolicy": "Choose 1–20 checks, an approval count within the verified reviewers, and a CI age of 1–10080 minutes."
 	}
 }

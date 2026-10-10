@@ -5,7 +5,7 @@ import type { TFunction } from "i18next";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
-import { login, registerInternalPreview } from "@/lib/auth-api";
+import { login, registerCloudflare } from "@/lib/auth-api";
 
 function loginErrorMessage(
 	code: ApiErrorCode | null,
@@ -53,14 +53,11 @@ export function useLoginForm(returnTo?: string | null) {
 		},
 	});
 
-	const createInternalPreviewAccount = async (
-		email: string,
-		password: string,
-	) => {
+	const createCloudflareAccount = async (email: string, password: string) => {
 		setServerError(null);
 		setIsRegistering(true);
 		try {
-			await registerInternalPreview(email, password);
+			await registerCloudflare(email, password);
 			await completeAuthentication();
 		} catch (err: unknown) {
 			const code = getApiErrorCode(err);
@@ -70,5 +67,5 @@ export function useLoginForm(returnTo?: string | null) {
 		}
 	};
 
-	return { form, serverError, isRegistering, createInternalPreviewAccount };
+	return { form, serverError, isRegistering, createCloudflareAccount };
 }

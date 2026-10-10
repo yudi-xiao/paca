@@ -9,6 +9,7 @@ import {
 	loadAgentAuthConfig,
 	loadCapabilityBrokerConfig,
 } from "./agent-auth/client.js";
+import { diagnoseLocalAgent } from "./agent-auth/doctor.js";
 import { createAgentCapabilityServer } from "./agent-auth/server.js";
 import { applyPacaEnvironmentPrefix } from "./runtime-env.js";
 import type { PacaConfig } from "./types/index.js";
@@ -28,6 +29,13 @@ async function main() {
 	}
 
 	applyPacaEnvironmentPrefix(process.argv, process.env);
+
+	if (process.argv.includes("--doctor")) {
+		const report = await diagnoseLocalAgent(process.env);
+		console.log(JSON.stringify(report, null, 2));
+		process.exitCode = report.status === "connected" ? 0 : 1;
+		return;
+	}
 
 	// Get configuration from environment variables
 	const apiKey = process.env.PACA_API_KEY;

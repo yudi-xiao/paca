@@ -14,6 +14,7 @@ import {
 } from "./condition";
 import { AutomationExecutionError } from "./errors";
 import type { SnapshotNode } from "./execution-plan";
+import type { AutomationSprintSnapshot } from "./run-protocol";
 
 type TaskRow = typeof pacaTasks.$inferSelect;
 const MAX_TARGET_TASKS = 100;
@@ -22,21 +23,31 @@ const MAX_TARGET_TASKS = 100;
 export class PostgresAutomationConditionReader {
   constructor(private readonly database: PacaDatabase) {}
 
-  async selectHandle(projectId: string, taskId: string, node: SnapshotNode): Promise<string> {
+  async selectHandle(
+    projectId: string,
+    taskId: string | null,
+    node: SnapshotNode,
+    sprintContext?: AutomationSprintSnapshot,
+    deletedSprint = false,
+  ): Promise<string> {
+    if (sprintContext && sprintContext.projectId !== projectId)
+      throw new AutomationExecutionError("AUTOMATION_SPRINT_NOT_FOUND");
     const config = conditionConfigFromNode(node);
     return this.database.transaction(
       async (tx) => {
-        const [baseRow] = await tx
-          .select()
-          .from(pacaTasks)
-          .where(
-            and(
-              eq(pacaTasks.id, taskId),
-              eq(pacaTasks.projectId, projectId),
-              isNull(pacaTasks.deletedAt),
-            ),
-          );
-        if (!baseRow) throw new AutomationExecutionError("AUTOMATION_TASK_NOT_FOUND");
+        const [baseRow] = taskId
+          ? await tx
+              .select()
+              .from(pacaTasks)
+              .where(
+                and(
+                  eq(pacaTasks.id, taskId),
+                  eq(pacaTasks.projectId, projectId),
+                  isNull(pacaTasks.deletedAt),
+                ),
+              )
+          : [];
+        if (taskId && !baseRow) throw new AutomationExecutionError("AUTOMATION_TASK_NOT_FOUND");
 
         const loadTasks = async (rows: TaskRow[]): Promise<Task[]> => {
           if (rows.length === 0) return [];
@@ -78,12 +89,13 @@ export class PostgresAutomationConditionReader {
 
         const resolveTargets = async (target: ConditionTarget | undefined): Promise<Task[]> => {
           const kind = target?.kind ?? "self";
+          if (kind === "other") {
+            return loadTasks(await rowsByIds(target?.other_task_id ? [target.other_task_id] : []));
+          }
+          if (!baseRow) return [];
           if (kind === "self") return loadTasks([baseRow]);
           if (kind === "parent") {
             return loadTasks(await rowsByIds(baseRow.parentTaskId ? [baseRow.parentTaskId] : []));
-          }
-          if (kind === "other") {
-            return loadTasks(await rowsByIds(target?.other_task_id ? [target.other_task_id] : []));
           }
           if (kind === "children") {
             const rows = await tx
@@ -92,7 +104,7 @@ export class PostgresAutomationConditionReader {
               .where(
                 and(
                   eq(pacaTasks.projectId, projectId),
-                  eq(pacaTasks.parentTaskId, taskId),
+                  eq(pacaTasks.parentTaskId, baseRow.id),
                   isNull(pacaTasks.deletedAt),
                 ),
               )
@@ -111,10 +123,13 @@ export class PostgresAutomationConditionReader {
                 : "duplicates";
           const perspective =
             kind === "relates_to"
-              ? or(eq(pacaTaskLinks.sourceTaskId, taskId), eq(pacaTaskLinks.targetTaskId, taskId))
+              ? or(
+                  eq(pacaTaskLinks.sourceTaskId, baseRow.id),
+                  eq(pacaTaskLinks.targetTaskId, baseRow.id),
+                )
               : kind === "blocks" || kind === "duplicates"
-                ? eq(pacaTaskLinks.sourceTaskId, taskId)
-                : eq(pacaTaskLinks.targetTaskId, taskId);
+                ? eq(pacaTaskLinks.sourceTaskId, baseRow.id)
+                : eq(pacaTaskLinks.targetTaskId, baseRow.id);
           const links = await tx
             .select({
               sourceTaskId: pacaTaskLinks.sourceTaskId,
@@ -138,12 +153,16 @@ export class PostgresAutomationConditionReader {
           return loadTasks(await rowsByIds(ids));
         };
 
-        const [baseTask] = await loadTasks([baseRow]);
-        if (!baseTask) throw new AutomationExecutionError("AUTOMATION_TASK_NOT_FOUND");
+        const [baseTask] = await loadTasks(baseRow ? [baseRow] : []);
         let sprint: ConditionSprint | null | undefined;
         const loadSprint = async (): Promise<ConditionSprint | null> => {
           if (sprint !== undefined) return sprint;
-          if (!baseTask.sprintId) {
+          if (deletedSprint && sprintContext) {
+            sprint = sprintContext;
+            return sprint;
+          }
+          const sprintId = sprintContext?.id ?? baseTask?.sprintId;
+          if (!sprintId) {
             sprint = null;
             return sprint;
           }
@@ -156,9 +175,7 @@ export class PostgresAutomationConditionReader {
               endDate: pacaSprints.endDate,
             })
             .from(pacaSprints)
-            .where(
-              and(eq(pacaSprints.id, baseTask.sprintId), eq(pacaSprints.projectId, projectId)),
-            );
+            .where(and(eq(pacaSprints.id, sprintId), eq(pacaSprints.projectId, projectId)));
           sprint = row ?? null;
           return sprint;
         };

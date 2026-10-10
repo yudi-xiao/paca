@@ -7,10 +7,10 @@ import {
 } from "@tanstack/react-router";
 import { AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
 import { AIChatFloat } from "@/components/projects/ai-chat-float";
 import { useProjectRealtime } from "@/hooks/use-project-realtime";
 import { currentUserQueryOptions } from "@/lib/auth-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { projectQueryOptions } from "@/lib/project-api";
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId")({
@@ -27,13 +27,13 @@ export const Route = createFileRoute("/_authenticated/projects/$projectId")({
 
 function ProjectLayout() {
 	const { t } = useTranslation("projects");
-	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const isCloudflareRuntime = usesCloudflareRuntime();
 	const { projectId } = Route.useParams();
 	const { data: project, isError } = useQuery(projectQueryOptions(projectId));
 
 	// Join realtime rooms for this project.  The hook subscribes on mount and
 	// leaves / cleans up on unmount (i.e. when navigating away from the project).
-	useProjectRealtime(isInternalPreview ? undefined : projectId);
+	useProjectRealtime(isCloudflareRuntime ? undefined : projectId);
 
 	// The Conversations page has its own dedicated "New conversation" entry
 	// point in its header, so the floating chat launcher would just be a
@@ -57,7 +57,7 @@ function ProjectLayout() {
 	return (
 		<>
 			<Outlet />
-			{!isInternalPreview && !onConversationsPage && (
+			{!isCloudflareRuntime && !onConversationsPage && (
 				<AIChatFloat projectId={projectId} />
 			)}
 		</>

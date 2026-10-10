@@ -3,7 +3,6 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Bot, Plus } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-
 import { AgentAuthPage } from "@/components/admin/agents/agent-auth-page";
 import { AgentCard } from "@/components/projects/agents/agent-card";
 import {
@@ -20,6 +19,7 @@ import {
 	globalAgentsQueryOptions,
 	llmModelsQueryOptions,
 } from "@/lib/agent-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { hasPermission } from "@/lib/permissions";
 
 export const Route = createFileRoute("/_authenticated/admin/agents/")({
@@ -40,7 +40,7 @@ export const Route = createFileRoute("/_authenticated/admin/agents/")({
 		}
 	},
 	loader: async ({ context: { queryClient } }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+		if (usesCloudflareRuntime()) {
 			const { agentAuthAgentsQueryOptions } = await import(
 				"@/lib/agent-auth-api"
 			);
@@ -53,11 +53,7 @@ export const Route = createFileRoute("/_authenticated/admin/agents/")({
 		]);
 	},
 	component: () =>
-		import.meta.env.VITE_INTERNAL_PREVIEW === "true" ? (
-			<AgentAuthPage />
-		) : (
-			<GlobalAgentsPage />
-		),
+		usesCloudflareRuntime() ? <AgentAuthPage /> : <GlobalAgentsPage />,
 });
 
 // ── Page ───────────────────────────────────────────────────────────────────────

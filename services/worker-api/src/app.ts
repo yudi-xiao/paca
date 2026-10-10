@@ -2,7 +2,6 @@ import { Buffer } from "node:buffer";
 import type { AgentSession } from "@better-auth/agent-auth";
 import { type Context, Hono, type Next } from "hono";
 import * as z from "zod";
-
 import { exactConstraintString } from "./agent-auth/capabilities";
 import { readPostgresProjectAsAgent } from "./agent-auth/execution";
 import {
@@ -81,6 +80,9 @@ import {
   environmentConnectionErrorCodes,
   environmentResourceErrorCodes,
 } from "./environment/service";
+import { createGitHubDeliveryRoutes } from "./github-delivery/http";
+import { type GitHubDeliveryRuntime, githubDeliveryRuntime } from "./github-delivery/runtime";
+import { handleGitHubWebhook } from "./github-delivery/webhook-runtime";
 import { type IterationRuntime, iterationRuntime } from "./iteration/runtime";
 import {
   IterationError,
@@ -138,6 +140,8 @@ import {
 } from "./project/access-service";
 import { type ProjectRuntime, projectRuntime } from "./project/runtime";
 import { type Project, ProjectError, projectErrorCodes } from "./project/service";
+import { createProjectSearchRoutes } from "./search/http";
+import { type ProjectSearchRuntime, projectSearchRuntime } from "./search/runtime";
 import { constantTimeEqual, readBearerToken } from "./security";
 import { type TaskActivityRuntime, taskActivityRuntime } from "./task/activity-runtime";
 import {
@@ -171,6 +175,8 @@ type LogEvent = {
 };
 
 type AppDependencies = {
+  githubDelivery: GitHubDeliveryRuntime;
+  search: ProjectSearchRuntime;
   attachments: AttachmentRuntime;
   automations: AutomationRuntime;
   branding: BrandingRuntime;
@@ -1414,6 +1420,8 @@ function agentTaskControlFailure(context: AppContext, error: unknown) {
 }
 
 const defaultDependencies: AppDependencies = {
+  githubDelivery: githubDeliveryRuntime,
+  search: projectSearchRuntime,
   attachments: attachmentRuntime,
   automations: automationRuntime,
   branding: brandingRuntime,
@@ -1491,6 +1499,9 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
   );
 
   app.use("/api/auth/*", protectAuthOrigin);
+  app.post("/api/integrations/github/webhook", (context) =>
+    handleGitHubWebhook(context.req.raw, context.env),
+  );
   app.on(["GET", "POST"], "/api/auth/*", (context) =>
     dependencies.authHandler(context.req.raw, context.env),
   );
@@ -1499,6 +1510,24 @@ export function createApp(overrides: Partial<AppDependencies> = {}) {
   app.route(
     "/api/v1/projects/:projectId/automations",
     createAutomationRoutes(dependencies.automations, dependencies.authorizeProjectPermission),
+  );
+
+  app.route(
+    "/",
+    createGitHubDeliveryRoutes(
+      dependencies.githubDelivery,
+      dependencies.authorizeProjectPermission,
+      dependencies.authorizeSystemPermission,
+    ),
+  );
+
+  app.route(
+    "/",
+    createProjectSearchRoutes(
+      dependencies.search,
+      dependencies.authorizeProjectPermission,
+      dependencies.currentAgentSession,
+    ),
   );
 
   app.get("/.well-known/agent-configuration", (context) =>

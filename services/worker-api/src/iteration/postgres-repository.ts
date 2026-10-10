@@ -1,5 +1,4 @@
-import { and, asc, eq, inArray, isNull, max, ne, sql } from "drizzle-orm";
-
+import { and, asc, eq, inArray, isNull, max, sql } from "drizzle-orm";
 import type { PacaDatabase } from "../database";
 import {
   pacaProjects,
@@ -10,10 +9,12 @@ import {
   pacaTaskViews,
   pacaViewTaskPositions,
 } from "../db/schema";
+import type { TaskActor } from "../task/service";
 import {
   IterationError,
   type IterationRepository,
   iterationErrorCodes,
+  normalizeSprintUpdate,
   type PersistedSprintCreate,
   type PersistedViewCreate,
   type Sprint,
@@ -27,7 +28,7 @@ import {
   type ViewUpdateInput,
 } from "./service";
 
-function sprintFromRow(row: typeof pacaSprints.$inferSelect): Sprint {
+export function sprintFromRow(row: typeof pacaSprints.$inferSelect): Sprint {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -127,13 +128,26 @@ export class PostgresIterationRepository implements IterationRepository {
     sprintId: string,
     input: SprintUpdateInput,
   ): Promise<Sprint> {
-    const [row] = await this.database
-      .update(pacaSprints)
-      .set({ ...input, updatedAt: new Date() })
-      .where(and(eq(pacaSprints.id, sprintId), eq(pacaSprints.projectId, projectId)))
-      .returning();
-    if (!row) throw new IterationError(iterationErrorCodes.sprintNotFound);
-    return sprintFromRow(row);
+    return this.database.transaction(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(pacaSprints)
+        .where(and(eq(pacaSprints.id, sprintId), eq(pacaSprints.projectId, projectId)))
+        .for("update");
+      if (!current) throw new IterationError(iterationErrorCodes.sprintNotFound);
+      const normalized = normalizeSprintUpdate(sprintFromRow(current), input);
+      const changed = Object.entries(normalized).some(
+        ([key, value]) => current[key as keyof typeof normalized] !== value,
+      );
+      if (!changed) return sprintFromRow(current);
+      const [row] = await tx
+        .update(pacaSprints)
+        .set({ ...normalized, updatedAt: new Date() })
+        .where(eq(pacaSprints.id, sprintId))
+        .returning();
+      if (!row) throw new IterationError(iterationErrorCodes.sprintNotFound);
+      return sprintFromRow(row);
+    });
   }
 
   async deleteSprint(projectId: string, sprintId: string, actorUserId: string): Promise<void> {
@@ -178,70 +192,14 @@ export class PostgresIterationRepository implements IterationRepository {
     actorUserId: string,
   ): Promise<Sprint> {
     return this.database.transaction(async (transaction) => {
-      const [sprint] = await transaction
-        .select()
-        .from(pacaSprints)
-        .where(and(eq(pacaSprints.id, sprintId), eq(pacaSprints.projectId, projectId)))
-        .for("update")
-        .limit(1);
-      if (!sprint) throw new IterationError(iterationErrorCodes.sprintNotFound);
-      if (sprint.status === "completed") {
-        throw new IterationError(iterationErrorCodes.sprintAlreadyCompleted);
-      }
-      if (destinationSprintId !== null) {
-        const [destination] = await transaction
-          .select({ id: pacaSprints.id })
-          .from(pacaSprints)
-          .where(
-            and(
-              eq(pacaSprints.id, destinationSprintId),
-              eq(pacaSprints.projectId, projectId),
-              ne(pacaSprints.status, "completed"),
-            ),
-          )
-          .limit(1);
-        if (!destination) throw new IterationError(iterationErrorCodes.destinationInvalid);
-      }
-      const movedTasks = await transaction
-        .update(pacaTasks)
-        .set({ sprintId: destinationSprintId, updatedAt: new Date() })
-        .where(
-          and(
-            eq(pacaTasks.projectId, projectId),
-            eq(pacaTasks.sprintId, sprintId),
-            isNull(pacaTasks.deletedAt),
-            sql`not exists (
-              select 1 from ${pacaTaskStatuses}
-              where ${pacaTaskStatuses.id} = ${pacaTasks.statusId}
-                and ${pacaTaskStatuses.category} = 'done'
-            )`,
-          ),
-        )
-        .returning({ id: pacaTasks.id });
-      if (movedTasks.length > 0) {
-        await transaction.insert(pacaTaskActivities).values(
-          movedTasks.map((task) => ({
-            id: crypto.randomUUID(),
-            taskId: task.id,
-            projectId,
-            actorType: "user",
-            actorId: actorUserId,
-            actorUserId,
-            actorAgentId: null,
-            activityType: "task.updated",
-            content: {
-              changes: [{ field: "sprint", old: sprintId, new: destinationSprintId }],
-            },
-          })),
-        );
-      }
-      const [updated] = await transaction
-        .update(pacaSprints)
-        .set({ status: "completed", updatedAt: new Date() })
-        .where(and(eq(pacaSprints.id, sprintId), eq(pacaSprints.projectId, projectId)))
-        .returning();
-      if (!updated) throw new IterationError(iterationErrorCodes.sprintNotFound);
-      return sprintFromRow(updated);
+      const result = await completeSprintInTransaction(
+        transaction,
+        projectId,
+        sprintId,
+        destinationSprintId,
+        { type: "user", id: actorUserId },
+      );
+      return result.updated;
     });
   }
 
@@ -471,4 +429,103 @@ export class PostgresIterationRepository implements IterationRepository {
         });
     });
   }
+}
+
+export type SprintWriteDatabase = Pick<
+  PacaDatabase,
+  "select" | "update" | "insert" | "$with" | "with"
+>;
+export async function completeSprintInTransaction(
+  transaction: SprintWriteDatabase,
+  projectId: string,
+  sprintId: string,
+  destinationSprintId: string | null,
+  actor: TaskActor,
+  allowCompleted = false,
+): Promise<{ before: Sprint; updated: Sprint; movedTasks: number; applied: boolean }> {
+  if (destinationSprintId === sprintId)
+    throw new IterationError(iterationErrorCodes.destinationInvalid);
+  const rows = await transaction
+    .select()
+    .from(pacaSprints)
+    .where(
+      and(
+        eq(pacaSprints.projectId, projectId),
+        inArray(pacaSprints.id, destinationSprintId ? [sprintId, destinationSprintId] : [sprintId]),
+      ),
+    )
+    .orderBy(asc(pacaSprints.id))
+    .for("update");
+  const source = rows.find((row) => row.id === sprintId);
+  if (!source) throw new IterationError(iterationErrorCodes.sprintNotFound);
+  const before = sprintFromRow(source);
+  if (source.status === "completed") {
+    if (!allowCompleted) throw new IterationError(iterationErrorCodes.sprintAlreadyCompleted);
+    return { before, updated: before, movedTasks: 0, applied: false };
+  }
+  if (
+    destinationSprintId &&
+    !rows.some((row) => row.id === destinationSprintId && row.status !== "completed")
+  )
+    throw new IterationError(iterationErrorCodes.destinationInvalid);
+  // A data-modifying CTE keeps the bulk move and per-task audit on the database,
+  // instead of bringing an unbounded task ID list into Worker memory.
+  const moved = transaction.$with("moved_sprint_tasks").as(
+    transaction
+      .update(pacaTasks)
+      .set({ sprintId: destinationSprintId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(pacaTasks.projectId, projectId),
+          eq(pacaTasks.sprintId, sprintId),
+          isNull(pacaTasks.deletedAt),
+          sql`not exists (select 1 from ${pacaTaskStatuses} where ${pacaTaskStatuses.id} = ${pacaTasks.statusId} and ${pacaTaskStatuses.projectId} = ${projectId} and ${pacaTaskStatuses.category} = 'done')`,
+        ),
+      )
+      .returning({ id: pacaTasks.id }),
+  );
+  const content: Record<string, unknown> = {
+    changes: [{ field: "sprint", old: sprintId, new: destinationSprintId }],
+    ...(actor.type === "system" ? { automation_run_id: actor.runId } : {}),
+  };
+  const result = await transaction
+    .with(moved)
+    .insert(pacaTaskActivities)
+    .select(
+      transaction
+        .select({
+          id: sql<string>`gen_random_uuid()`.as("id"),
+          taskId: moved.id,
+          projectId: sql<string>`${projectId}::uuid`.as("projectId"),
+          actorType: sql<string>`${actor.type}`.as("actorType"),
+          actorId: sql<string>`${actor.id}`.as("actorId"),
+          actorUserId: sql<string | null>`${actor.type === "user" ? actor.id : null}`.as(
+            "actorUserId",
+          ),
+          actorAgentId: sql<string | null>`${actor.type === "agent" ? actor.id : null}`.as(
+            "actorAgentId",
+          ),
+          actorMemberId: sql<string | null>`null::uuid`.as("actorMemberId"),
+          activityType: sql<string>`'task.updated'`.as("activityType"),
+          content: sql<Record<string, unknown>>`${JSON.stringify(content)}::jsonb`.as("content"),
+          // Drizzle insert-select requires every table column in schema order,
+          // including columns that would have defaults in a values insert.
+          createdAt: sql<Date>`now()`.as("createdAt"),
+          updatedAt: sql<Date>`now()`.as("updatedAt"),
+          deletedAt: sql<Date | null>`null::timestamptz`.as("deletedAt"),
+        })
+        .from(moved),
+    );
+  const [updated] = await transaction
+    .update(pacaSprints)
+    .set({ status: "completed", updatedAt: new Date() })
+    .where(eq(pacaSprints.id, sprintId))
+    .returning();
+  if (!updated) throw new IterationError(iterationErrorCodes.sprintNotFound);
+  return {
+    before,
+    updated: sprintFromRow(updated),
+    movedTasks: result.rowCount ?? 0,
+    applied: true,
+  };
 }

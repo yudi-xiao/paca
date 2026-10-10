@@ -2,9 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { CloudflareEnvironmentTerminalPage } from "@/components/projects/environments/cloudflare-environment-terminal-page";
 import { EnvironmentTerminalPage } from "@/components/projects/environments/environment-terminal-page";
 import { cloudflareEnvironmentQueryOptions } from "@/lib/cloudflare-environment-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { environmentQueryOptions } from "@/lib/environment-api";
 
-const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+const isCloudflareRuntime = usesCloudflareRuntime();
 
 // Opened in a new browser tab from the Connect page's "web app" tab — see
 // environment-terminal-page.tsx's own doc comment for why this renders as
@@ -17,7 +18,7 @@ export const Route = createFileRoute(
 		context: { queryClient },
 		params: { projectId, environmentId },
 	}) => {
-		if (isInternalPreview) {
+		if (isCloudflareRuntime) {
 			await queryClient.ensureQueryData(
 				cloudflareEnvironmentQueryOptions(projectId, environmentId),
 			);
@@ -32,7 +33,7 @@ export const Route = createFileRoute(
 
 function ProjectEnvironmentTerminalPage() {
 	const { projectId, environmentId } = Route.useParams();
-	if (isInternalPreview) {
+	if (isCloudflareRuntime) {
 		return (
 			<CloudflareEnvironmentTerminalPage
 				projectId={projectId}

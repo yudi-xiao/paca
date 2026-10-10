@@ -1,7 +1,15 @@
 import * as z from "zod";
 
+import { sprintActionFromNode } from "../iteration/automation-config";
 import type { TaskUpdateInput } from "../task/service";
-import { type ConditionTarget, conditionConfigFromNode, targetSchema } from "./condition";
+import {
+  type ConditionTarget,
+  conditionConfigFromNode,
+  isSprintConditionField,
+  targetSchema,
+} from "./condition";
+import { cronTriggerConfig } from "./cron";
+import { automationDateSchema } from "./date-config";
 import { AutomationExecutionError } from "./errors";
 import {
   type GraphEdge,
@@ -12,6 +20,17 @@ import {
 import type { AutomationRunSnapshot } from "./run-protocol";
 
 export type SnapshotNode = AutomationRunSnapshot["nodes"][number];
+
+export const sprintTriggerTypes = [
+  "sprint_created",
+  "sprint_started",
+  "sprint_completed",
+  "sprint_deleted",
+] as const;
+export function isSprintTrigger(type: string): boolean {
+  return sprintTriggerTypes.some((value) => value === type);
+}
+export const sprintTriggerConfigSchema = z.object({ sprint_id: z.uuid().optional() }).strict();
 
 const statusTriggerConfigSchema = z.object({ status_id: z.uuid().nullable().optional() }).strict();
 const tagAddedTriggerConfigSchema = z
@@ -24,20 +43,30 @@ const predecessorDoneTriggerConfigSchema = z
   })
   .strict()
   .refine((config) => new Set(config.watched_task_ids).size === config.watched_task_ids.length);
-const taskDateSchema = z
-  .string()
-  .refine((value) => {
-    if (!/^\d{4}-\d{2}-\d{2}(?:T00:00:00(?:\.000)?Z)?$/u.test(value)) return false;
-    const date = value.slice(0, 10);
-    const [year, month, day] = date.split("-").map(Number);
-    const parsed = new Date(Date.UTC(year as number, (month as number) - 1, day));
-    return (
-      parsed.getUTCFullYear() === year &&
-      parsed.getUTCMonth() === (month as number) - 1 &&
-      parsed.getUTCDate() === day
-    );
+const dueDateTriggerConfigSchema = z
+  .object({ due_date_offset_minutes: z.number().int().min(-525_600).max(525_600).default(0) })
+  .strict();
+
+export function dueDateTriggerConfigFromNode(
+  node: Pick<GraphNode, "type" | "config">,
+): z.infer<typeof dueDateTriggerConfigSchema> {
+  const parsed = dueDateTriggerConfigSchema.safeParse(node.config);
+  if (node.type !== "due_date_reached" || !parsed.success) {
+    throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
+  }
+  return parsed.data;
+}
+
+export const dueDateEventPayloadSchema = z
+  .object({
+    trigger_node_id: z.uuid(),
+    graph_version: z.number().int().positive(),
+    due_date: automationDateSchema,
+    due_date_offset_minutes: z.number().int().min(-525_600).max(525_600),
+    scheduled_for: z.iso.datetime(),
   })
-  .transform((value) => value.slice(0, 10));
+  .strict();
+
 const taskUpdateConfigSchema = z
   .object({
     update: z
@@ -67,8 +96,8 @@ const taskUpdateConfigSchema = z
             (value) => Object.keys(value).length > 0 && JSON.stringify(value).length <= 64_000,
           )
           .optional(),
-        start_date: taskDateSchema.optional(),
-        due_date: taskDateSchema.optional(),
+        start_date: automationDateSchema.optional(),
+        due_date: automationDateSchema.optional(),
         tags: z.array(z.string().max(100)).max(50).optional(),
       })
       .strict()
@@ -105,6 +134,16 @@ export function validateRunnableAutomationGraph(
       if (node.type === "tag_added" && tagAddedTriggerConfigSchema.safeParse(node.config).success) {
         continue;
       }
+      if (node.type === "cron") {
+        cronTriggerConfig(node.config);
+        continue;
+      }
+      if (isSprintTrigger(node.type) && sprintTriggerConfigSchema.safeParse(node.config).success)
+        continue;
+      if (node.type === "due_date_reached") {
+        dueDateTriggerConfigFromNode(node);
+        continue;
+      }
       if (node.type === "predecessor_done") {
         predecessorDoneTriggerConfigFromNode(node);
         continue;
@@ -122,10 +161,62 @@ export function validateRunnableAutomationGraph(
       waitMinutes(node);
     } else if (node.type === "update_task") {
       taskUpdateFromNode(node);
+    } else if (node.type === "update_sprint" || node.type === "complete_sprint") {
+      sprintActionFromNode(node);
     } else {
       throw new AutomationExecutionError("AUTOMATION_ACTION_UNSUPPORTED");
     }
   }
+  for (const trigger of nodes.filter((node) => node.kind === "trigger")) {
+    const noTask =
+      isSprintTrigger(trigger.type) ||
+      (trigger.type === "cron" && !cronTriggerConfig(trigger.config).target_task_id);
+    const noSprint =
+      trigger.type === "sprint_deleted" ||
+      (trigger.type === "cron" && !cronTriggerConfig(trigger.config).target_task_id);
+    if (!noTask && !noSprint) continue;
+    const pending = [trigger.id];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const id = pending.pop();
+      if (!id || visited.has(id)) continue;
+      visited.add(id);
+      const node = nodes.find((candidate) => candidate.id === id);
+      if (!node) continue;
+      if (
+        noSprint &&
+        node.kind === "action" &&
+        (node.type === "update_sprint" || node.type === "complete_sprint")
+      ) {
+        throw new AutomationExecutionError("AUTOMATION_EDGE_REQUIRES_TARGET_SPRINT");
+      }
+      if (
+        noTask &&
+        node.kind === "action" &&
+        node.type === "update_task" &&
+        taskUpdateActionFromNode(node).target?.kind !== "other"
+      ) {
+        throw new AutomationExecutionError("AUTOMATION_EDGE_REQUIRES_TARGET_TASK");
+      }
+      if (noTask && node.kind === "condition") {
+        const config = conditionConfigFromNode(node);
+        if (
+          config.branches.some(
+            (branch) =>
+              branch.tree &&
+              !isSprintConditionField(branch.tree.field) &&
+              branch.tree.target?.kind !== "other",
+          )
+        ) {
+          throw new AutomationExecutionError("AUTOMATION_EDGE_REQUIRES_TARGET_TASK");
+        }
+      }
+      pending.push(
+        ...edges.filter((edge) => edge.sourceNodeId === id).map((edge) => edge.targetNodeId),
+      );
+    }
+  }
+
   const triggerIds = nodes.filter((node) => node.kind === "trigger").map((node) => node.id);
   const reachable = new Set<string>();
   const pending = [...triggerIds];
@@ -175,6 +266,22 @@ export function matchesTaskTrigger(
       throw new AutomationExecutionError("AUTOMATION_EVENT_PAYLOAD_INVALID");
     }
     return !parsed.data.tag || added.includes(parsed.data.tag);
+  }
+  if (eventType === "cron") {
+    const config = cronTriggerConfig(node.config);
+    return payload.cron_expression === config.cron_expression;
+  }
+  if (isSprintTrigger(eventType)) {
+    const parsed = sprintTriggerConfigSchema.safeParse(node.config);
+    if (!parsed.success)
+      throw new AutomationExecutionError("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
+    return !parsed.data.sprint_id || parsed.data.sprint_id === payload.sprint_id;
+  }
+  if (eventType === "due_date_reached") {
+    const config = dueDateTriggerConfigFromNode(node);
+    const parsed = dueDateEventPayloadSchema.safeParse(payload);
+    if (!parsed.success) throw new AutomationExecutionError("AUTOMATION_EVENT_PAYLOAD_INVALID");
+    return config.due_date_offset_minutes === parsed.data.due_date_offset_minutes;
   }
   if (eventType === "predecessor_done") {
     const config = predecessorDoneTriggerConfigFromNode(node);

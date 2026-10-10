@@ -24,6 +24,7 @@ import type { SuccessEnvelope } from "@/lib/api-error";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
 import type { User as UserType } from "@/lib/auth-api";
 import { currentUserQueryOptions } from "@/lib/auth-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { formatDate } from "@/lib/format-date";
 import { ExtensionPoint } from "@/lib/plugins/extension-point";
 
@@ -60,7 +61,7 @@ function getInitials(name: string): string {
 
 function ProfilePage() {
 	const { t } = useTranslation("profile");
-	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const isCloudflareRuntime = usesCloudflareRuntime();
 	const queryClient = useQueryClient();
 	const { data: user } = useQuery(currentUserQueryOptions);
 
@@ -195,7 +196,7 @@ function ProfilePage() {
 			<Card>
 				<CardHeader>
 					<div className="flex items-center gap-4">
-						{isInternalPreview ? (
+						{isCloudflareRuntime ? (
 							<div className="flex size-14 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
 								{initials}
 							</div>
@@ -311,7 +312,7 @@ function ProfilePage() {
 					</div>
 				</CardContent>
 
-				{isInternalPreview ? null : (
+				{isCloudflareRuntime ? null : (
 					<CardFooter className="border-t pt-4">
 						{editing ? (
 							<div className="flex gap-2">

@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiErrorCode } from "@/lib/api-error";
-import { login, registerInternalPreview } from "@/lib/auth-api";
+import { login, registerCloudflare } from "@/lib/auth-api";
 import { useLoginForm } from "./use-login-form";
 
 type SubmitPayload = {
@@ -50,7 +50,7 @@ vi.mock("@/lib/auth-api", async () => {
 	return {
 		...actual,
 		login: vi.fn(),
-		registerInternalPreview: vi.fn(),
+		registerCloudflare: vi.fn(),
 	};
 });
 
@@ -71,7 +71,7 @@ describe("useLoginForm", () => {
 		mocks.getApiErrorCodeMock.mockReset();
 		mocks.handleSubmitMock.mockReset();
 		vi.mocked(login).mockReset();
-		vi.mocked(registerInternalPreview).mockReset();
+		vi.mocked(registerCloudflare).mockReset();
 	});
 
 	it("submits login and redirects on success", async () => {
@@ -108,21 +108,21 @@ describe("useLoginForm", () => {
 		});
 	});
 
-	it("creates an internal preview account and redirects", async () => {
-		vi.mocked(registerInternalPreview).mockResolvedValue(undefined);
+	it("creates an test account and redirects", async () => {
+		vi.mocked(registerCloudflare).mockResolvedValue(undefined);
 		mocks.invalidateQueriesMock.mockResolvedValue(undefined);
 		mocks.navigateMock.mockResolvedValue(undefined);
 
 		const { result } = renderHook(() => useLoginForm());
 
 		await act(async () => {
-			await result.current.createInternalPreviewAccount(
+			await result.current.createCloudflareAccount(
 				"new@example.com",
 				"password1234",
 			);
 		});
 
-		expect(registerInternalPreview).toHaveBeenCalledWith(
+		expect(registerCloudflare).toHaveBeenCalledWith(
 			"new@example.com",
 			"password1234",
 		);

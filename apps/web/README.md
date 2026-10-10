@@ -1,17 +1,14 @@
 # Paca Web App
 
 This package contains the Paca React SPA built with Vite, TanStack Router/Query/Form,
-and ShadCN UI components. The Cloudflare internal preview is built with
-`VITE_INTERNAL_PREVIEW=true` and served as Static Assets by `services/worker-api`,
-so the browser and Better Auth API share one origin.
+and ShadCN UI components. The single prod deployment builds with
+`VITE_PACA_RUNTIME=cloudflare` and serves Static Assets through `services/worker-api`,
+so the browser and Better Auth API share one origin. Public signup is disabled.
 
-The internal preview exposes an explicit capability allowlist. Its current migrated surfaces are
-home/project CRUD, project Task list/create/search/detail/edit/archive/activity/comments,
-Sprint/views/custom fields, project Team and safe Settings, global roles, Organization
-role/member access, Better Auth Agent Auth management/device approval, read-only profile, and
-password change. Task attachments/links, documents, environments, conversations, automation,
-and other legacy-backed routes remain hidden or redirect to `/home` until their Worker contracts
-exist, preventing navigation into guaranteed API 404s.
+The Cloudflare runtime exposes routes backed by migrated Worker APIs, including
+projects, tasks and documents, body search, sprints, members and roles, Agent Auth,
+environments, automation and GitHub delivery settings. Unsupported legacy pages
+redirect to `/home`. This capability boundary does not create a separate deployment.
 
 ## Run Locally
 
@@ -26,13 +23,15 @@ bun --bun run dev
 bun --bun run build
 ```
 
-For the Cloudflare internal preview:
+For the single Cloudflare prod deployment:
 
 ```bash
-VITE_INTERNAL_PREVIEW=true bun run build
 cd ../../services/worker-api
-PACA_ALLOW_MAIN_DATABASE_FOR_INTERNAL_PREVIEW=true bun run deploy:internal
+bun run deploy:prod
 ```
+
+Deployment resources and credential reuse are documented in
+[the release runbook](../../docs/deployment/cloudflare-release.md).
 
 ## Test
 

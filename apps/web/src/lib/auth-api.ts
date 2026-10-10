@@ -142,7 +142,7 @@ export async function login(
 	});
 }
 
-export async function registerInternalPreview(
+export async function registerCloudflare(
 	email: string,
 	password: string,
 ): Promise<void> {

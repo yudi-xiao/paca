@@ -246,6 +246,41 @@
       "when": 1790589301399,
       "tag": "0034_cute_payback",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1790955921688,
+      "tag": "0035_cold_steve_rogers",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1790974852821,
+      "tag": "0036_majestic_white_queen",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791613233058,
+      "tag": "0037_common_skin",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791616464083,
+      "tag": "0038_clammy_yellowjacket",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1791617293928,
+      "tag": "0039_jittery_lionheart",
+      "breakpoints": true
     }
   ]
 }

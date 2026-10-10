@@ -8,7 +8,7 @@ import {
 	Trash2,
 	X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	getImportanceBucket,
@@ -63,6 +63,8 @@ import {
 	TRIGGER_TYPES,
 	type TriggerConfig,
 } from "@/lib/automation-api";
+import { normalizedAutomationCron } from "@/lib/automation-cron";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import {
 	listAllTasks,
 	sprintsQueryOptions,
@@ -77,6 +79,8 @@ import type {
 	TaskType,
 } from "@/lib/project-api";
 import { createLoadMoreScrollHandler } from "@/lib/scroll-pagination";
+
+import { SprintActionConfig } from "./sprint-action-config";
 
 interface AutomationNodeConfigPanelProps {
 	node: AutomationNode;
@@ -957,6 +961,7 @@ function TriggerConfigForm({
 	saving?: boolean;
 }) {
 	const { t } = useTranslation("projects");
+	const inputId = useId();
 	const [statusId, setStatusId] = useState(config.status_id ?? "");
 	const [tag, setTag] = useState(config.tag ?? "");
 	const [offset, setOffset] = useState(
@@ -968,6 +973,21 @@ function TriggerConfigForm({
 	const [targetTaskId, setTargetTaskId] = useState(config.target_task_id ?? "");
 	const [cronExpression, setCronExpression] = useState(
 		config.cron_expression ?? "",
+	);
+	const [sprintId, setSprintId] = useState(config.sprint_id ?? "");
+	const {
+		data: sprints = [],
+		isPending: sprintsPending,
+		isError: sprintsFailed,
+		isFetching: sprintsFetching,
+		refetch: refetchSprints,
+	} = useQuery({
+		...sprintsQueryOptions(projectId),
+		enabled: type.startsWith("sprint_"),
+	});
+	const normalizedCron = useMemo(
+		() => normalizedAutomationCron(cronExpression),
+		[cronExpression],
 	);
 	// Only predecessor_done still needs the full task list — for its watched-
 	// tasks multi-select. TargetTaskPicker (shared by predecessor_done, cron,
@@ -1040,6 +1060,11 @@ function TriggerConfigForm({
 	}
 
 	if (type === "due_date_reached") {
+		const parsedOffset = Number(offset);
+		const offsetValid =
+			offset.trim() !== "" &&
+			Number.isInteger(parsedOffset) &&
+			Math.abs(parsedOffset) <= 525600;
 		return (
 			<div className="space-y-3">
 				<div className="space-y-1.5">
@@ -1047,6 +1072,10 @@ function TriggerConfigForm({
 					<Input
 						type="number"
 						value={offset}
+						min={-525600}
+						max={525600}
+						step={1}
+						aria-invalid={!offsetValid}
 						onChange={(e) => setOffset(e.target.value)}
 						disabled={!canEdit}
 					/>
@@ -1057,9 +1086,8 @@ function TriggerConfigForm({
 				{canEdit && (
 					<SaveButton
 						saving={saving}
-						onClick={() =>
-							onSave({ due_date_offset_minutes: Number(offset) || 0 })
-						}
+						disabled={!offsetValid}
+						onClick={() => onSave({ due_date_offset_minutes: parsedOffset })}
 					/>
 				)}
 			</div>
@@ -1067,16 +1095,23 @@ function TriggerConfigForm({
 	}
 
 	if (type === "predecessor_done") {
-		const watchedTasks = watchedTaskIds
-			.map((id) => tasks.find((t) => t.id === id))
-			.filter((t): t is Task => t != null);
+		const watchedTasks = watchedTaskIds.map((id) => ({
+			id,
+			task: tasks.find((task) => task.id === id),
+		}));
 		const availableToWatch = tasks.filter(
 			(t) => !watchedTaskIds.includes(t.id),
 		);
 		return (
 			<div className="space-y-3">
 				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.trigger.targetTaskLabel")}</Label>
+					<Label>
+						{t(
+							usesCloudflareRuntime()
+								? "automation.nodeConfig.trigger.requiredTargetTaskLabel"
+								: "automation.nodeConfig.trigger.targetTaskLabel",
+						)}
+					</Label>
 					<TargetTaskPicker
 						projectId={projectId}
 						value={targetTaskId}
@@ -1084,13 +1119,21 @@ function TriggerConfigForm({
 						canEdit={canEdit}
 					/>
 					<p className="text-xs text-muted-foreground">
-						{t("automation.nodeConfig.trigger.targetTaskHint")}
+						{t(
+							usesCloudflareRuntime()
+								? "automation.nodeConfig.trigger.predecessorTargetTaskHint"
+								: "automation.nodeConfig.trigger.targetTaskHint",
+						)}
 					</p>
 				</div>
 				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.trigger.watchedTasksLabel")}</Label>
+					<Label>
+						{t("automation.nodeConfig.trigger.watchedTasksLabel")}
+						{usesCloudflareRuntime() && " (1–50)"}
+					</Label>
 					{canEdit && (
 						<Select
+							disabled={usesCloudflareRuntime() && watchedTaskIds.length >= 50}
 							value=""
 							onValueChange={(v) => {
 								if (v) setWatchedTaskIds((prev) => [...prev, v]);
@@ -1116,7 +1159,7 @@ function TriggerConfigForm({
 						<div className="flex flex-wrap gap-1.5 pt-1">
 							{watchedTasks.map((t) => (
 								<Badge key={t.id} variant="secondary" className="gap-1">
-									{taskLabel(t)}
+									{t.task ? taskLabel(t.task) : t.id}
 									{canEdit && (
 										<button
 											type="button"
@@ -1140,6 +1183,12 @@ function TriggerConfigForm({
 				{canEdit && (
 					<SaveButton
 						saving={saving}
+						disabled={
+							usesCloudflareRuntime() &&
+							(!targetTaskId ||
+								watchedTaskIds.length === 0 ||
+								watchedTaskIds.length > 50)
+						}
 						onClick={() =>
 							onSave({
 								target_task_id: targetTaskId.trim() || undefined,
@@ -1156,20 +1205,30 @@ function TriggerConfigForm({
 		return (
 			<div className="space-y-3">
 				<div className="space-y-1.5">
-					<Label>
+					<Label htmlFor={inputId}>
 						{t("automation.nodeConfig.trigger.cronExpressionLabel")}
 					</Label>
 					<Input
+						id={inputId}
 						value={cronExpression}
+						aria-describedby={`${inputId}-hint`}
+						aria-invalid={
+							Boolean(cronExpression.trim()) && normalizedCron === null
+						}
 						onChange={(e) => setCronExpression(e.target.value)}
 						placeholder={t(
 							"automation.nodeConfig.trigger.cronExpressionPlaceholder",
 						)}
 						disabled={!canEdit}
 					/>
-					<p className="text-xs text-muted-foreground">
+					<p id={`${inputId}-hint`} className="text-xs text-muted-foreground">
 						{t("automation.nodeConfig.trigger.cronExpressionHint")}
 					</p>
+					{cronExpression.trim() && normalizedCron === null && (
+						<p role="alert" className="text-xs text-destructive">
+							{t("automation.nodeConfig.trigger.cronInvalid")}
+						</p>
+					)}
 				</div>
 				<div className="space-y-1.5">
 					<Label>{t("automation.nodeConfig.trigger.targetTaskLabel")}</Label>
@@ -1186,10 +1245,10 @@ function TriggerConfigForm({
 				{canEdit && (
 					<SaveButton
 						saving={saving}
-						disabled={!cronExpression.trim()}
+						disabled={normalizedCron === null}
 						onClick={() =>
 							onSave({
-								cron_expression: cronExpression.trim(),
+								cron_expression: normalizedCron ?? "",
 								target_task_id: targetTaskId.trim() || undefined,
 							})
 						}
@@ -1232,11 +1291,88 @@ function TriggerConfigForm({
 		);
 	}
 
-	// task_created, assignee_changed, priority_changed, and the four
-	// sprint_* triggers — no config fields. (The backend supports narrowing
-	// a sprint_* trigger to one sprint via TriggerConfig.SprintID, but
-	// there's no picker for it here yet — every sprint_* trigger fires
-	// project-wide for now.)
+	if (type.startsWith("sprint_")) {
+		const missingSprint = Boolean(
+			sprintId &&
+				!sprintsPending &&
+				!sprintsFailed &&
+				!sprints.some((sprint) => sprint.id === sprintId),
+		);
+		return (
+			<div className="space-y-3">
+				<Label htmlFor={inputId}>
+					{t("automation.nodeConfig.trigger.sprintFilterLabel")}
+				</Label>
+				<Select
+					value={sprintId || "__any__"}
+					onValueChange={(value) =>
+						setSprintId(!value || value === "__any__" ? "" : value)
+					}
+					disabled={!canEdit || sprintsPending || sprintsFailed}
+				>
+					<SelectTrigger
+						id={inputId}
+						className="w-full"
+						aria-invalid={missingSprint}
+					>
+						<SelectValue>
+							{sprintId
+								? (sprints.find((sprint) => sprint.id === sprintId)?.name ??
+									sprintId)
+								: t("automation.nodeConfig.trigger.anySprint")}
+						</SelectValue>
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="__any__">
+							{t("automation.nodeConfig.trigger.anySprint")}
+						</SelectItem>
+						{sprints.map((sprint) => (
+							<SelectItem key={sprint.id} value={sprint.id}>
+								{sprint.name}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+				<p className="text-xs text-muted-foreground">
+					{t("automation.nodeConfig.trigger.sprintFilterHint")}
+				</p>
+				{sprintsPending && (
+					<p role="status" className="text-xs text-muted-foreground">
+						{t("automation.nodeConfig.trigger.loadingMore")}
+					</p>
+				)}
+				{missingSprint && (
+					<p role="alert" className="text-xs text-destructive">
+						{t("automation.nodeConfig.trigger.sprintMissing")}
+					</p>
+				)}
+				{sprintsFailed && (
+					<div role="alert" className="space-y-2">
+						<p className="text-xs text-destructive">
+							{t("automation.nodeConfig.trigger.sprintsLoadFailed")}
+						</p>
+						<Button
+							variant="outline"
+							size="sm"
+							disabled={sprintsFetching}
+							onClick={() => void refetchSprints()}
+						>
+							{t("automation.nodeConfig.trigger.retryLoad")}
+						</Button>
+					</div>
+				)}
+				{canEdit && (
+					<SaveButton
+						saving={saving}
+						disabled={sprintsPending || sprintsFailed || missingSprint}
+						onClick={() => onSave({ sprint_id: sprintId || undefined })}
+					/>
+				)}
+			</div>
+		);
+	}
+
+	// Task creation, assignee and priority changes have no configuration fields.
 	return (
 		<p className="text-xs text-muted-foreground">
 			{t("automation.nodeConfig.trigger.noConfigNeeded")}
@@ -2073,24 +2209,6 @@ function ActionConfigForm({
 	const [waitMinutes, setWaitMinutes] = useState(
 		config.wait_minutes?.toString() ?? "",
 	);
-	const [sprintName, setSprintName] = useState(
-		config.sprint_update?.name ?? "",
-	);
-	const [sprintStartDate, setSprintStartDate] = useState(
-		config.sprint_update?.start_date ?? "",
-	);
-	const [sprintEndDate, setSprintEndDate] = useState(
-		config.sprint_update?.end_date ?? "",
-	);
-	const [sprintGoal, setSprintGoal] = useState(
-		config.sprint_update?.goal ?? "",
-	);
-	const [sprintStatus, setSprintStatus] = useState(
-		config.sprint_update?.status ?? "",
-	);
-	const [moveToSprintId, setMoveToSprintId] = useState(
-		config.move_to_sprint_id ?? "",
-	);
 
 	// update_task's fields, each independently enabled — an unset field is
 	// left untouched on the task; only enabled fields are sent.
@@ -2102,7 +2220,7 @@ function ActionConfigForm({
 	const [fields, setFields] = useState<TaskFieldUpdate>(initialFields);
 	const { data: sprints } = useQuery({
 		...sprintsQueryOptions(projectId),
-		enabled: !!projectId,
+		enabled: !!projectId && type === "update_task",
 	});
 
 	function toggleField(key: keyof TaskFieldUpdate, on: boolean) {
@@ -2215,174 +2333,16 @@ function ActionConfigForm({
 		);
 	}
 
-	if (type === "update_sprint") {
-		const hasAnyField =
-			sprintName.trim() !== "" ||
-			sprintStartDate !== "" ||
-			sprintEndDate !== "" ||
-			sprintGoal.trim() !== "" ||
-			sprintStatus !== "";
+	if (type === "update_sprint" || type === "complete_sprint") {
 		return (
-			<div className="space-y-3">
-				<p className="text-xs text-muted-foreground">
-					{t("automation.nodeConfig.action.updateSprintHint")}{" "}
-					{t("automation.nodeConfig.action.variablesHint")}
-				</p>
-				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.action.sprintNameLabel")}</Label>
-					<Input
-						value={sprintName}
-						onChange={(e) => setSprintName(e.target.value)}
-						disabled={!canEdit}
-					/>
-				</div>
-				<div className="space-y-1.5">
-					<Label>
-						{t("automation.nodeConfig.action.sprintStartDateLabel")}
-					</Label>
-					<Input
-						type="date"
-						value={toDateInputValue(sprintStartDate)}
-						onChange={(e) =>
-							setSprintStartDate(fromDateInputValue(e.target.value))
-						}
-						disabled={!canEdit}
-					/>
-				</div>
-				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.action.sprintEndDateLabel")}</Label>
-					<Input
-						type="date"
-						value={toDateInputValue(sprintEndDate)}
-						onChange={(e) =>
-							setSprintEndDate(fromDateInputValue(e.target.value))
-						}
-						disabled={!canEdit}
-					/>
-				</div>
-				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.action.sprintGoalLabel")}</Label>
-					<Textarea
-						value={sprintGoal}
-						onChange={(e) => setSprintGoal(e.target.value)}
-						rows={3}
-						disabled={!canEdit}
-					/>
-				</div>
-				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.action.sprintStatusLabel")}</Label>
-					<Select
-						value={sprintStatus || "__unchanged__"}
-						onValueChange={(v) =>
-							setSprintStatus(
-								!v || v === "__unchanged__"
-									? ""
-									: (v as "planned" | "active" | "completed"),
-							)
-						}
-						disabled={!canEdit}
-					>
-						<SelectTrigger className="w-full">
-							<SelectValue>
-								{
-									{
-										"": t("automation.nodeConfig.action.sprintStatusUnchanged"),
-										planned: t(
-											"automation.nodeConfig.action.sprintStatusPlanned",
-										),
-										active: t(
-											"automation.nodeConfig.action.sprintStatusActive",
-										),
-										completed: t(
-											"automation.nodeConfig.action.sprintStatusCompleted",
-										),
-									}[sprintStatus]
-								}
-							</SelectValue>
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="__unchanged__">
-								{t("automation.nodeConfig.action.sprintStatusUnchanged")}
-							</SelectItem>
-							<SelectItem value="planned">
-								{t("automation.nodeConfig.action.sprintStatusPlanned")}
-							</SelectItem>
-							<SelectItem value="active">
-								{t("automation.nodeConfig.action.sprintStatusActive")}
-							</SelectItem>
-							<SelectItem value="completed">
-								{t("automation.nodeConfig.action.sprintStatusCompleted")}
-							</SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
-				{canEdit && (
-					<SaveButton
-						saving={saving}
-						disabled={!hasAnyField}
-						onClick={() =>
-							onSave({
-								sprint_update: {
-									name: sprintName.trim() || undefined,
-									start_date: sprintStartDate || undefined,
-									end_date: sprintEndDate || undefined,
-									goal: sprintGoal.trim() || undefined,
-									status: sprintStatus || undefined,
-								},
-							})
-						}
-					/>
-				)}
-			</div>
-		);
-	}
-
-	if (type === "complete_sprint") {
-		return (
-			<div className="space-y-3">
-				<p className="text-xs text-muted-foreground">
-					{t("automation.nodeConfig.action.completeSprintHint")}
-				</p>
-				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.action.moveToSprintLabel")}</Label>
-					<Select
-						value={moveToSprintId || "__backlog__"}
-						onValueChange={(v) =>
-							setMoveToSprintId(!v || v === "__backlog__" ? "" : v)
-						}
-						disabled={!canEdit}
-					>
-						<SelectTrigger className="w-full">
-							<SelectValue>
-								{moveToSprintId
-									? (sprints ?? []).find((s) => s.id === moveToSprintId)?.name
-									: t("automation.nodeConfig.action.moveToSprintBacklog")}
-							</SelectValue>
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="__backlog__">
-								{t("automation.nodeConfig.action.moveToSprintBacklog")}
-							</SelectItem>
-							{(sprints ?? []).map((s) => (
-								<SelectItem key={s.id} value={s.id}>
-									{s.name}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-					<p className="text-xs text-muted-foreground">
-						{t("automation.nodeConfig.action.moveToSprintHint")}
-					</p>
-				</div>
-				{canEdit && (
-					<SaveButton
-						saving={saving}
-						onClick={() =>
-							onSave({ move_to_sprint_id: moveToSprintId || undefined })
-						}
-					/>
-				)}
-			</div>
+			<SprintActionConfig
+				type={type}
+				config={config}
+				projectId={projectId}
+				canEdit={canEdit}
+				saving={saving}
+				onSave={onSave}
+			/>
 		);
 	}
 

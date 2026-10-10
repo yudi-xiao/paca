@@ -56,6 +56,11 @@
   },
   "workflows": [
     {
+      "binding": "AUTOMATION_WORKFLOW",
+      "name": "paca-automation-test",
+      "class_name": "AutomationWorkflow"
+    },
+    {
       "binding": "DOCUMENT_AGENT_WORKFLOW",
       "name": "paca-document-agent-test",
       "class_name": "TestDocumentAgentWorkflow"

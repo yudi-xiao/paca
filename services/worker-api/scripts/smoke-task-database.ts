@@ -30,9 +30,9 @@ function databaseUrl(): string {
   return value.replace(/^(["'])(.*)\1$/, "$2");
 }
 
-if (process.env.PACA_ALLOW_MAIN_DATABASE_FOR_INTERNAL_PREVIEW !== "true") {
+if (process.env.PACA_PROD_SMOKE_CONFIRM !== "RUN_PACA_PROD_SMOKE") {
   throw new Error(
-    "PACA_ALLOW_MAIN_DATABASE_FOR_INTERNAL_PREVIEW=true is required for the destructive-cleanup smoke test.",
+    "PACA_PROD_SMOKE_CONFIRM=RUN_PACA_PROD_SMOKE is required for the destructive-cleanup smoke test.",
   );
 }
 

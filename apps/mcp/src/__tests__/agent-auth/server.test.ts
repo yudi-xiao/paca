@@ -4,9 +4,9 @@ import type {
 	AgentHeartbeatReport,
 } from "../../agent-auth/client.js";
 import {
+	type AgentCapabilityTransport,
 	callAgentCapabilityTool,
 	getAgentCapabilityTools,
-	type AgentCapabilityTransport,
 } from "../../agent-auth/server.js";
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
@@ -137,12 +137,58 @@ describe("Agent Auth MCP tools", () => {
 			"update_task",
 			"discover_tasks",
 			"get_document",
+			"search_docs",
 			"edit_document",
 			"connect_environment",
 			"start_document_workflow",
 			"get_agent_run",
 			"cancel_agent_run",
 		]);
+	});
+
+	it("searches document bodies through a bounded Agent route with a fresh JWT capability", async () => {
+		const client = transport();
+		await callAgentCapabilityTool(
+			client,
+			"search_docs",
+			{ projectId: PROJECT_ID, query: " 上下文 ", limit: 10 },
+			PROJECT_ID,
+		);
+		expect(client.requestAgent).toHaveBeenCalledWith(
+			`/api/v1/agent/projects/${PROJECT_ID}/search/docs`,
+			["document.read"],
+			{
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ query: "上下文", limit: 10 }),
+			},
+		);
+		expect(client.execute).not.toHaveBeenCalled();
+	});
+	it("search rejects a foreign project and client-supplied resource IDs before network work", async () => {
+		const client = transport();
+		await expect(
+			callAgentCapabilityTool(
+				client,
+				"search_docs",
+				{ projectId: TASK_ID, query: "needle" },
+				PROJECT_ID,
+			),
+		).rejects.toThrow("AGENT_PROJECT_PIN_MISMATCH");
+		await expect(
+			callAgentCapabilityTool(client, "search_docs", {
+				projectId: PROJECT_ID,
+				query: "needle",
+				ids: [TASK_ID],
+			}),
+		).rejects.toThrow();
+		await expect(
+			callAgentCapabilityTool(client, "search_tasks", {
+				projectId: PROJECT_ID,
+				query: "needle",
+			}),
+		).rejects.toThrow("AGENT_CAPABILITY_SCOPE_NOT_REQUESTED");
+		expect(client.requestAgent).not.toHaveBeenCalled();
 	});
 
 	it("executes a project read with server-verifiable exact constraints", async () => {

@@ -5,6 +5,7 @@ on:
     paths:
       - "apps/web/**"
       - "services/worker-api/**"
+      - "services/environment-gateway/**"
       - ".github/workflows/worker-api-pr-ci.yml"
   workflow_dispatch:
 
@@ -66,12 +67,23 @@ jobs:
         working-directory: apps/web
         run: bun install --frozen-lockfile
 
-      - name: Build internal React assets
+      - name: Install Environment Gateway dependencies
+        working-directory: services/environment-gateway
+        run: bun install --frozen-lockfile
+
+      - name: Build production React assets
         working-directory: apps/web
-        run: ./node_modules/.bin/tsc -b && VITE_INTERNAL_PREVIEW=true ./node_modules/.bin/vite build
+        run: ./node_modules/.bin/tsc -b && VITE_PACA_RUNTIME=cloudflare ./node_modules/.bin/vite build
 
       - name: Verify generated Worker types
         run: bun run types:check
+
+      - name: Verify single production configuration
+        run: bun run deploy:guard
+
+      - name: Verify Environment Gateway
+        working-directory: services/environment-gateway
+        run: bun run types:check && bun run typecheck && bun run lint && bun run test && bunx wrangler deploy --dry-run
 
       - name: Verify Drizzle migrations
         run: bun run db:check
@@ -84,6 +96,9 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - name: Verify Workers runtime contracts
+        run: bun run test:workers
 
       - name: Apply migrations, run repository contracts, and exercise recovery
         env:

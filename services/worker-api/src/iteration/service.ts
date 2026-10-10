@@ -157,7 +157,11 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function normalizeDate(value: string | null | undefined): string | null {
   if (value === undefined || value === null) return null;
-  if (!DATE_PATTERN.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+  if (
+    !DATE_PATTERN.test(value) ||
+    Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ||
+    new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value
+  ) {
     throw new IterationError(iterationErrorCodes.dateInvalid);
   }
   return value;
@@ -221,6 +225,27 @@ function validateDateRange(startDate: string | null, endDate: string | null): vo
   }
 }
 
+export function normalizeSprintUpdate(
+  current: Sprint,
+  input: SprintUpdateInput,
+): SprintUpdateInput {
+  const normalized: SprintUpdateInput = {};
+  if (input.name !== undefined) normalized.name = normalizeSprintName(input.name);
+  if (input.startDate !== undefined) normalized.startDate = normalizeDate(input.startDate);
+  if (input.endDate !== undefined) normalized.endDate = normalizeDate(input.endDate);
+  if (input.goal !== undefined) normalized.goal = normalizeGoal(input.goal);
+  if (input.status !== undefined) {
+    if (!sprintStatuses.includes(input.status)) {
+      throw new IterationError(iterationErrorCodes.statusInvalid);
+    }
+    normalized.status = input.status;
+  }
+  const nextStart = normalized.startDate === undefined ? current.startDate : normalized.startDate;
+  const nextEnd = normalized.endDate === undefined ? current.endDate : normalized.endDate;
+  validateDateRange(nextStart, nextEnd);
+  return normalized;
+}
+
 export class IterationService {
   constructor(private readonly repository: IterationRepository) {}
 
@@ -257,20 +282,7 @@ export class IterationService {
     input: SprintUpdateInput,
   ): Promise<Sprint> {
     const current = await this.repository.findSprint(projectId, sprintId);
-    const normalized: SprintUpdateInput = {};
-    if (input.name !== undefined) normalized.name = normalizeSprintName(input.name);
-    if (input.startDate !== undefined) normalized.startDate = normalizeDate(input.startDate);
-    if (input.endDate !== undefined) normalized.endDate = normalizeDate(input.endDate);
-    if (input.goal !== undefined) normalized.goal = normalizeGoal(input.goal);
-    if (input.status !== undefined) {
-      if (!sprintStatuses.includes(input.status)) {
-        throw new IterationError(iterationErrorCodes.statusInvalid);
-      }
-      normalized.status = input.status;
-    }
-    const nextStart = normalized.startDate === undefined ? current.startDate : normalized.startDate;
-    const nextEnd = normalized.endDate === undefined ? current.endDate : normalized.endDate;
-    validateDateRange(nextStart, nextEnd);
+    const normalized = normalizeSprintUpdate(current, input);
     if (Object.keys(normalized).length === 0) return current;
     return this.repository.updateSprint(projectId, sprintId, normalized);
   }

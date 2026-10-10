@@ -1,10 +1,10 @@
-import { recoverAbandonedAgentTaskLeases } from "./agent-task/recovery";
 import { createApp } from "./app";
 import { ATTACHMENT_CLEANUP_CRON, runScheduledAttachmentCleanup } from "./attachment/scheduled";
 import { consumeAutomationEventQueue } from "./automation/event-consumer";
 import { dispatchAutomationOutbox } from "./automation/event-outbox";
 import { runScheduledBrandingCleanup } from "./branding/scheduled";
 import { consumeDocumentMaterializationQueue } from "./document/materialization";
+import { runMinuteMaintenance } from "./maintenance";
 import { consumeRealtimeQueue } from "./realtime/consumer";
 import { dispatchRealtimeOutbox } from "./realtime/outbox";
 import { routeRealtimeRequest } from "./realtime/router";
@@ -48,11 +48,7 @@ export default {
   },
   async scheduled(controller, env) {
     if (controller.cron === REALTIME_OUTBOX_CRON) {
-      await dispatchAndLog(env, "scheduled");
-      const taskRecovery = await recoverAbandonedAgentTaskLeases(env);
-      if (taskRecovery.expired > 0) {
-        console.log(JSON.stringify({ event: "agent.task_leases.recovered", ...taskRecovery }));
-      }
+      await runMinuteMaintenance(env, new Date(controller.scheduledTime));
       return;
     }
     if (controller.cron === ATTACHMENT_CLEANUP_CRON) {

@@ -16,7 +16,7 @@ function bindings(): GatewayBindings {
     AGENT_CONNECTIONS: Object.create(null) as Env["AGENT_CONNECTIONS"],
     CONNECTION_TICKET_SECRET: SECRET,
     CONNECTION_TICKETS: Object.create(null) as Env["CONNECTION_TICKETS"],
-    ENVIRONMENT: "internal",
+    ENVIRONMENT: "prod",
     ENVIRONMENT_TICKET_BARRIERS: Object.create(null) as Env["ENVIRONMENT_TICKET_BARRIERS"],
     PUBLIC_ORIGIN: "https://paca-env.howlearnwood.com",
     SANDBOXES: Object.create(null) as Env["SANDBOXES"],

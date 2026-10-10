@@ -4,6 +4,7 @@ import {
 	chattableAgentsQueryOptions,
 	globalConversationsQueryOptions,
 } from "@/lib/agent-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 
 // Global sibling of routes/_authenticated/projects/$projectId/conversations —
 // same UI (see components/projects/agents/conversations-layout.tsx), reused
@@ -12,7 +13,7 @@ import {
 // one project's.
 export const Route = createFileRoute("/_authenticated/conversations")({
 	beforeLoad: () => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+		if (usesCloudflareRuntime()) {
 			throw redirect({ to: "/home" });
 		}
 	},

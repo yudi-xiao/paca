@@ -8,6 +8,7 @@ export default defineConfig({
     }),
   ],
   test: {
+    setupFiles: ["test/workers/setup.ts"],
     include: ["test/workers/**/*.test.ts"],
   },
 });

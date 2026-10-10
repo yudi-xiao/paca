@@ -13,11 +13,28 @@ export class PostgresAutomationTargetReader {
 
   async resolveTaskIds(
     projectId: string,
-    baseTaskId: string,
+    baseTaskId: string | null,
     target: ConditionTarget,
   ): Promise<string[]> {
     return this.database.transaction(
       async (tx) => {
+        if (target.kind === "other") {
+          if (!target.other_task_id)
+            throw new AutomationExecutionError("AUTOMATION_TARGET_NOT_FOUND");
+          const [row] = await tx
+            .select({ id: pacaTasks.id })
+            .from(pacaTasks)
+            .where(
+              and(
+                eq(pacaTasks.id, target.other_task_id),
+                eq(pacaTasks.projectId, projectId),
+                isNull(pacaTasks.deletedAt),
+              ),
+            );
+          if (!row) throw new AutomationExecutionError("AUTOMATION_TARGET_NOT_FOUND");
+          return [row.id];
+        }
+        if (!baseTaskId) throw new AutomationExecutionError("AUTOMATION_EDGE_REQUIRES_TARGET_TASK");
         const [base] = await tx
           .select({ id: pacaTasks.id, parentTaskId: pacaTasks.parentTaskId })
           .from(pacaTasks)
@@ -52,11 +69,6 @@ export class PostgresAutomationTargetReader {
 
         if (target.kind === "parent") {
           return existingIds(base.parentTaskId ? [base.parentTaskId] : []);
-        }
-        if (target.kind === "other") {
-          const ids = await existingIds(target.other_task_id ? [target.other_task_id] : []);
-          if (ids.length !== 1) throw new AutomationExecutionError("AUTOMATION_TARGET_NOT_FOUND");
-          return ids;
         }
         if (target.kind === "children") {
           const rows = await tx

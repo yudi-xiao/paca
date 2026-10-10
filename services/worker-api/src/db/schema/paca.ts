@@ -531,6 +531,9 @@ export const pacaTasks = pgTable(
     }),
     title: text("title").notNull(),
     description: jsonb("description").$type<unknown[] | null>(),
+    searchBody: text("search_body")
+      .notNull()
+      .generatedAlwaysAs(sql`paca_blocknote_search_text("description")`),
     importance: integer("importance").default(0).notNull(),
     storyPoints: integer("story_points"),
     reporterId: uuid("reporter_id").references(() => pacaProjectMembers.id, {
@@ -552,9 +555,18 @@ export const pacaTasks = pgTable(
       foreignColumns: [pacaSprints.id, pacaSprints.projectId],
       name: "paca_task_sprint_project_fk",
     }).onDelete("set null"),
+    index("paca_task_search_body_idx")
+      .using("gin", table.searchBody.asc().op("gin_trgm_ops"))
+      .where(sql`${table.deletedAt} is null`),
+    index("paca_task_search_title_idx")
+      .using("gin", table.title.asc().op("gin_trgm_ops"))
+      .where(sql`${table.deletedAt} is null`),
     index("paca_task_project_number_idx").on(table.projectId, table.taskNumber),
     index("paca_task_project_status_idx").on(table.projectId, table.statusId),
     index("paca_task_project_sprint_idx").on(table.projectId, table.sprintId),
+    index("paca_task_project_due_date_idx")
+      .on(table.projectId, table.dueDate, table.id)
+      .where(sql`${table.deletedAt} is null and ${table.dueDate} is not null`),
     index("paca_task_parent_idx").on(table.parentTaskId),
     check("paca_task_importance_check", sql`${table.importance} >= 0`),
     check(
@@ -1050,6 +1062,9 @@ export const pacaDocuments = pgTable(
       .references(() => pacaProjects.id, { onDelete: "cascade" }),
     title: text("title").default("Untitled").notNull(),
     content: jsonb("content").$type<unknown[] | null>(),
+    searchBody: text("search_body")
+      .notNull()
+      .generatedAlwaysAs(sql`paca_blocknote_search_text("content")`),
     contentVersion: bigint("content_version", { mode: "number" }).default(0).notNull(),
     yjsRevision: bigint("yjs_revision", { mode: "number" }).default(0).notNull(),
     yjsSnapshotKey: text("yjs_snapshot_key"),
@@ -1064,6 +1079,12 @@ export const pacaDocuments = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [
+    index("paca_document_search_body_idx")
+      .using("gin", table.searchBody.asc().op("gin_trgm_ops"))
+      .where(sql`${table.deletedAt} is null`),
+    index("paca_document_search_title_idx")
+      .using("gin", table.title.asc().op("gin_trgm_ops"))
+      .where(sql`${table.deletedAt} is null`),
     index("paca_document_project_position_idx").on(table.projectId, table.position, table.title),
     index("paca_document_deleted_idx")
       .on(table.deletedAt)

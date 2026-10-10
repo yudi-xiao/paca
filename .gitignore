@@ -8,6 +8,7 @@ dist-ssr
 .env.production
 .env.dev
 .paca/agent-host.json
+.paca/github-app/
 .paca/agent-host.json.tmp-*
 .paca/agents/*.json
 .paca/agents/*.json.tmp-*

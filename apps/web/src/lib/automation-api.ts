@@ -25,13 +25,19 @@ export const TRIGGER_TYPES = [
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 
 /** Nodes the internal Worker executor can activate and run today. */
-export const INTERNAL_PREVIEW_TRIGGER_TYPES = [
+export const CLOUDFLARE_TRIGGER_TYPES = [
 	"task_created",
 	"status_changed",
 	"assignee_changed",
 	"priority_changed",
 	"tag_added",
 	"predecessor_done",
+	"due_date_reached",
+	"cron",
+	"sprint_created",
+	"sprint_started",
+	"sprint_completed",
+	"sprint_deleted",
 ] as const satisfies readonly TriggerType[];
 
 // Groups TRIGGER_TYPES by the activity stream each fires from, so the "Add
@@ -78,9 +84,11 @@ export const ACTION_TYPES = [
 ] as const;
 export type ActionType = (typeof ACTION_TYPES)[number];
 
-export const INTERNAL_PREVIEW_ACTION_TYPES = [
+export const CLOUDFLARE_ACTION_TYPES = [
 	"update_task",
 	"wait",
+	"update_sprint",
+	"complete_sprint",
 ] as const satisfies readonly ActionType[];
 
 export const CONDITION_NODE_TYPE = "condition";
@@ -127,9 +135,8 @@ export interface AutomationRun {
 	id: string;
 	automation_id: string;
 	trigger_node_id: string;
-	/** Null when the trigger that started this run had no target task
-	 * configured (only possible when the whole walk stayed within call_api
-	 * actions). */
+	/** Null for Sprint events and schedules without a target task. Such runs
+	 * can wait, check Sprint fields, or explicitly target another task. */
 	task_id: string | null;
 	status: RunStatus;
 	started_at: string;
@@ -351,9 +358,9 @@ export interface TaskFieldUpdate {
  * the triggering task's sprint_id). */
 export interface SprintFieldUpdate {
 	name?: string;
-	start_date?: string;
-	end_date?: string;
-	goal?: string;
+	start_date?: string | null;
+	end_date?: string | null;
+	goal?: string | null;
 	status?: "planned" | "active" | "completed";
 }
 

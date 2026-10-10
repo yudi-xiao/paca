@@ -2,11 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AlertCircle, ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
 import { TaskDetailModal } from "@/components/projects/interactions/task-detail-modal";
-import { InternalPreviewTaskDetail } from "@/components/projects/tasks/internal-preview-task-detail";
+import { CloudflareTaskDetail } from "@/components/projects/tasks/cloudflare-runtime-task-detail";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { taskQueryOptions } from "@/lib/interaction-api";
 import {
 	projectMembersQueryOptions,
@@ -98,10 +98,10 @@ function TaskDetailSkeleton() {
 
 function TaskDetailPage() {
 	const { projectId, taskId } = Route.useParams();
-	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const isCloudflareRuntime = usesCloudflareRuntime();
 
-	if (isInternalPreview) {
-		return <InternalPreviewTaskDetail projectId={projectId} taskId={taskId} />;
+	if (isCloudflareRuntime) {
+		return <CloudflareTaskDetail projectId={projectId} taskId={taskId} />;
 	}
 	return <LegacyTaskDetailPage projectId={projectId} taskId={taskId} />;
 }

@@ -1,4 +1,5 @@
 export { AgentCoordinator } from "../../src/agent-run/coordinator";
+export { AutomationWorkflow } from "../../src/automation/workflow";
 
 import { DocumentAgentWorkflowBase } from "../../src/agent-run/document-workflow-base";
 import type { DocumentAgentWorkflowParams } from "../../src/agent-run/document-workflow-protocol";

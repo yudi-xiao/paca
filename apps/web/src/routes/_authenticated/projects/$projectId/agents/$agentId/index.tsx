@@ -7,12 +7,13 @@ import {
 	agentSkillsQueryOptions,
 	llmModelsQueryOptions,
 } from "@/lib/agent-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/agents/$agentId/",
 )({
 	beforeLoad: ({ params: { projectId } }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
+		if (usesCloudflareRuntime()) {
 			throw redirect({
 				to: "/projects/$projectId",
 				params: { projectId },

@@ -6,7 +6,7 @@ import {
 	getMe,
 	login,
 	logout,
-	registerInternalPreview,
+	registerCloudflare,
 } from "./auth-api";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -43,10 +43,10 @@ describe("auth-api", () => {
 		});
 	});
 
-	it("creates an internal preview account through Better Auth", async () => {
+	it("creates an test account through Better Auth", async () => {
 		vi.mocked(fetch).mockResolvedValue(jsonResponse({ user: { id: "u1" } }));
 
-		await registerInternalPreview("alice@example.com", "correct-password");
+		await registerCloudflare("alice@example.com", "correct-password");
 
 		expect(fetch).toHaveBeenCalledWith(
 			"/api/auth/sign-up/email",

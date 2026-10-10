@@ -31,6 +31,7 @@ import {
 	createAutomation,
 	deleteAutomation,
 } from "@/lib/automation-api";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { projectQueryOptions } from "@/lib/project-api";
 import { timeAgo } from "@/lib/time-ago";
 
@@ -117,7 +118,7 @@ function AutomationListPage() {
 						</p>
 					</div>
 					<div className="flex items-center gap-2">
-						{import.meta.env.VITE_INTERNAL_PREVIEW === "true" ? null : (
+						{usesCloudflareRuntime() ? null : (
 							<Button
 								variant="outline"
 								size="sm"

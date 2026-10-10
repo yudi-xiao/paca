@@ -6,7 +6,6 @@ import {
 	useRouterState,
 } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect } from "react";
-
 import { AppSidebar } from "@/components/app-shell/app-sidebar";
 import { NotificationBell } from "@/components/app-shell/notification-bell";
 import {
@@ -17,7 +16,8 @@ import {
 import { onTokenRefreshed } from "@/lib/api-client";
 import { isPasswordChangeRequired } from "@/lib/api-error";
 import { currentUserQueryOptions } from "@/lib/auth-api";
-import { internalPreviewNavigationTarget } from "@/lib/internal-preview";
+import { cloudflareNavigationTarget } from "@/lib/cloudflare-runtime";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { playNotificationSound } from "@/lib/notification-sound";
 import { PluginRegistryProvider } from "@/lib/plugins/registry";
 import { ShortcutProvider } from "@/lib/shortcuts/provider";
@@ -48,8 +48,8 @@ const CONVERSATIONS_ROUTE_RE = /^\/conversations(\/|$)/;
 
 export const Route = createFileRoute("/_authenticated")({
 	beforeLoad: async ({ context: { queryClient }, location }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
-			const target = internalPreviewNavigationTarget(location.pathname);
+		if (usesCloudflareRuntime()) {
+			const target = cloudflareNavigationTarget(location.pathname);
 			if (target !== location.pathname) {
 				throw redirect({ to: target as "/home" });
 			}
@@ -89,14 +89,14 @@ function AuthenticatedLayout() {
 	const queryClient = useQueryClient();
 	const { data: user } = useQuery(currentUserQueryOptions);
 	const pathname = useRouterState({ select: (s) => s.location.pathname });
-	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const isCloudflareRuntime = usesCloudflareRuntime();
 	// Global agent chat is available everywhere except inside a project
 	// (project pages already mount their own project-scoped AIChatFloat, see
 	// routes/_authenticated/projects/$projectId.tsx) or on the global
 	// Conversations page itself (see CONVERSATIONS_ROUTE_RE above).
 	const showGlobalChat =
 		!!user &&
-		!isInternalPreview &&
+		!isCloudflareRuntime &&
 		!PROJECT_ROUTE_RE.test(pathname) &&
 		!CONVERSATIONS_ROUTE_RE.test(pathname);
 

@@ -1,0 +1,79 @@
+# GitHub 交付验收
+
+交付绑定到具体 Task、已完成的 Agent task lease、PR 编号和固定 head SHA。Agent 执行完成只表示运行结束。服务端重新读取 GitHub 的 CI 和评审证据，随后由有任务写权限的用户接受或要求修改。这个流程不会自动合并 PR、部署代码或修改 Task 状态。
+
+工程状态和启用验收条件统一见根目录 [TODO.md](../../TODO.md)。上线前须完成 GitHub App、Webhook、页面交互和真实交付链路验收。
+
+## GitHub App
+
+prod 复用既有只读 GitHub App `paca-yudi-delivery`，只安装到 `yudi-xiao/paca`。仓库权限为 Metadata: Read、Checks: Read、Pull requests: Read；无需 Contents、Actions、Issues 或写权限。Paca 每次请求签发仅覆盖目标 repository ID 的短期 installation token，校验返回的仓库 ID、名称、权限和有效期。Token 和 App 私钥不会进入业务数据库、日志或客户端。
+
+Worker 继续使用既有 `GITHUB_APP_ID`、`GITHUB_APP_PRIVATE_KEY` 和 `GITHUB_WEBHOOK_SECRET`，本机配置保存在 Git 忽略的 `.paca/github-app/prod.json`（权限 `0600`）。所有部署命令使用项目 Wrangler `paca` profile，无 `--env` 参数，也不创建另一套 App、Secret 或安装范围。
+
+在 Worker 目录执行 `bun run github:app:verify`，确认安装属于 `yudi-xiao`、选择指定仓库且未暂停、只读权限、目标仓库可访问，并发送一次签名 ping 验证 Worker Secret。命令只输出非敏感 App/Installation/Repository ID；不会自动为项目指定 CI 名称或评审策略。需恢复已有私有配置的 Secret 时使用 `bun run github:app:setup --resume`，无需重新创建 App。
+
+Webhook 保持 `https://paca.howlearnwood.com/api/integrations/github/webhook`。`bun run github:app:webhook-config` 核验同一 App 和 prod 根配置后更新并回读该固定地址。
+
+实现依据：[GitHub installation token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)、[App JWT](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app) 和 [Workers crypto](https://developers.cloudflare.com/workers/runtime-apis/nodejs/crypto/)。
+
+## 用户 API
+
+API 使用同源 Better Auth 用户 Session。仓库配置同时要求项目 `projects.write` 和实例 `settings.write`，以批准共享 App 凭据访问的边界。交付查询要求 `tasks.read`，提交、刷新和人工决定要求 `tasks.write`。Agent JWT 不能代替用户 Session 完成人工验收。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET/PUT | `/api/v1/projects/:projectId/github-repository` | 读取或配置仓库及验收策略 |
+| POST | `/api/v1/projects/:projectId/github-repository/discover` | 只读发现目标 PR 的 CI 发布方及评审者身份，不保存策略 |
+| GET/POST | `/api/v1/projects/:projectId/tasks/:taskId/delivery` | 读取交付或提交固定 PR/SHA |
+| GET | `/api/v1/projects/:projectId/tasks/:taskId/delivery/completed-runs` | 选择已完成的本任务 Agent 运行，每页最多 20 条，UUID `cursor` 续页 |
+| POST | `/api/v1/projects/:projectId/tasks/:taskId/delivery/refresh` | 从 GitHub 更新证据 |
+| POST | `/api/v1/projects/:projectId/tasks/:taskId/delivery/decision` | 用户接受或要求修改 |
+
+请求使用 JSON，字段采用 camelCase。每次新操作生成 UUID `requestId`；仅重试完全相同的请求时复用。`expectedVersion` 来自最近读取结果，首次配置或提交为 `0`。版本冲突时重新加载并核对目标，不自动覆写。
+
+仓库配置请求（数字 ID 和策略须替换为实际批准的值）：
+
+```json
+{
+  "requestId": "11111111-1111-4111-8111-111111111111",
+  "expectedVersion": 0,
+  "repositoryId": 100,
+  "installationId": 200,
+  "policy": {
+    "owner": "example-owner",
+    "repository": "example-repository",
+    "requiredChecks": [{ "name": "Tests", "appId": 123 }],
+    "maxCheckAgeSeconds": 86400,
+    "requiredApprovals": 1,
+    "reviewerIds": [456]
+  }
+}
+```
+
+每个 Check 同时固定名称和发布它的 GitHub App ID，不将 Paca 的 App ID 自动当作 CI 发布者。评审策略使用获信任 GitHub 用户的数字 ID；PR 作者自己的批准不计入。服务端拒绝未知、过期、截断、错误仓库或其他提交的证据。
+
+prod 项目设置的「GitHub 交付设置」提供配置入口，也可从尚未连接仓库的任务交付卡片打开。输入 `owner/repository`、一项已有 CI 的示例 PR 编号和可信评审者用户名，点击发现后选择必需 CI、批准数量和检查有效期，再保存。检查列表同时显示名称和发布方 ID，避免将同名检查混为一项；评审用户名由 GitHub 核验并固定为数字 ID。保存仓库或策略变更会失效之前的交付验收。
+
+发现请求包含 `owner`、`repository`、`pullNumber`，可选 `reviewerLogins` 或用于核对已有策略的 `reviewerIds`，二者不能同时提交。最多解析 20 名真人评审者和 500 项完整 CI 结果，整个 GitHub 查询共用 20 秒预算；检查前后重新读取 PR head，变化时要求重新发现。仅返回仓库/安装 ID、固定 head、CI 发布方和账号 ID/用户名；不返回令牌、个人资料或任意 GitHub payload。发现与保存均要求上述两类管理权限，并在外部请求后重新检查权限。
+
+页面以读取的策略版本保护保存；其他管理员修改后须重新加载并发现。网络断开或 5xx 导致结果不确定时，显式重试复用原请求 ID、版本和 payload；不能切换目标后复用旧命令。只读成员可查看当前策略，不会取得管理按钮。
+
+部署后在 Worker 目录执行 `PACA_PROD_SMOKE_CONFIRM=RUN_PACA_PROD_SMOKE PACA_GITHUB_REPOSITORY_SMOKE_CONFIRM=RUN_PROD_GITHUB_REPOSITORY_SMOKE bun run smoke:github-repository:prod` 可重复验证仓库配置 API。该命令另需已登录的 `pscale` 和 `PACA_PLANETSCALE_ORG`，仅访问 `paca/prod` 与已安装的 `yudi-xiao/paca`：创建 15 分钟数据库角色和临时 Session/项目，验证真实发现、保存/重放、版本冲突和系统权限撤销后清理。它不代表真实浏览器或真实开发任务的人工验收。
+
+提交交付包含 `requestId`、`expectedVersion`、`leaseId`、`pullNumber` 和完整 40 位小写 `headSha`。租约须已完成且属于 URL 的项目及 Task。浏览器不提交 CI 结果、验收身份、其他仓库 URL 或证据 payload。
+
+刷新包含 `requestId`、`expectedVersion`。人工决定另含 `decision`（`accept` 或 `request_changes`）和可选 `note`（最多 2000 字符）。接受前服务端重新采集证据，并在外部请求后复查用户权限；要求修改可以在 GitHub 暂时不可用时提交。CI 变绿或刷新不会自动覆盖人工要求修改。
+
+## 状态与恢复
+
+Webhook 地址为 `/api/integrations/github/webhook`。使用 `GITHUB_WEBHOOK_SECRET` 对原始请求 bytes 校验 HMAC-SHA256 后，接收 Check、PR、评审及安装撤销事件。投递 UUID、摘要和失效更新在同一 PostgreSQL 事务中提交；同 ID 的相同投递不会重复递增版本，不同内容返回冲突。仅保存路由信息与摘要，不保存 PR 或评审正文。安装撤销/移除仓库会撤销对应绑定，重新安装后须显式重新配置。迟到的成功事件也只会失效证据，不能通过验收；人工要求修改保留。
+
+请求上限为 1 MiB；一次安装事件最多涉及 100 个项目，超限会拒绝整个事务。投递回执保留 30 天，每分钟清理最多 500 条。失败的 GitHub 投递须通过 GitHub 的投递页面重新投递；遗漏通知时，证据时效限制与接受前重新查询仍然生效。
+
+`awaiting_acceptance` 表示 CI 和评审门禁就绪，等待用户决定；`accepted` 表示用户接受了这个固定提交。`waiting`、`needs_changes`、`stale`、`unavailable` 均不能直接接受。修改仓库或策略会失效旧交付并递增版本，提交不同 SHA 时清除旧决定。
+
+接受和刷新受策略版本、交付版本及幂等键保护。GitHub 读取失败时旧接受状态失效；证据超过一分钟时读取响应要求刷新，将旧接受归入历史信息。业务审计保留决定、可信 actor、固定租约/仓库/PR/SHA 和安全门禁摘要。
+
+缺少 App 配置返回 `GITHUB_DELIVERY_APP_NOT_CONFIGURED`，不退回个人 Token 或 Agent API Key。版本冲突须重新读取。GitHub 网络、权限及超大响应错误使用稳定错误码，不返回原始错误、Token 或 PEM。
+
+GitHub 外部请求使用 `redirect: manual`，所有非 2xx（包括重定向）均拒绝；不会把令牌转发至 `Location` 地址。Workers 的请求构造与拒绝 302 已在原生运行时验证。失败日志仅记录关联请求 ID、操作类别、安全错误码/HTTP 状态及有界耗时，不含 URL、原始消息、正文或凭据。

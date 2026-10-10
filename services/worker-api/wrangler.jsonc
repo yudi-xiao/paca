@@ -1,10 +1,12 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "paca-worker-api",
+  "name": "paca-worker-api-internal",
+  "account_id": "25f556b8c06e910fb3115a6c47c25bf9",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-27",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
+  "workers_dev": false,
+  "preview_urls": false,
   "observability": {
     "enabled": true,
     "logs": {
@@ -24,63 +26,66 @@
     "run_worker_first": ["/api/*", "/.well-known/*", "/health", "/internal/*", "/ws/*"]
   },
   "vars": {
-    "ENVIRONMENT": "development"
+    "ATTACHMENT_CLEANUP_ENABLED": "true",
+    "BETTER_AUTH_URL": "https://paca.howlearnwood.com",
+    "ENVIRONMENT": "prod",
+    "TRUSTED_ORIGINS": "https://paca.howlearnwood.com"
   },
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "f2c6d6944f65417785dd49964e0c3238"
+      "id": "ec828e1b80664166ab38aa511cfd1f82"
     }
   ],
   "r2_buckets": [
     {
       "binding": "TASK_ATTACHMENTS",
-      "bucket_name": "paca-attachments-development"
+      "bucket_name": "paca-attachments-internal"
     },
     {
       "binding": "DOCUMENT_SNAPSHOTS",
-      "bucket_name": "paca-document-snapshots-development"
+      "bucket_name": "paca-document-snapshots-internal"
     }
   ],
   "queues": {
     "producers": [
       {
         "binding": "REALTIME_EVENTS",
-        "queue": "paca-realtime-events-development"
+        "queue": "paca-realtime-events-internal"
       },
       {
         "binding": "DOCUMENT_MATERIALIZATION",
-        "queue": "paca-document-materialization-development"
+        "queue": "paca-document-materialization-internal"
       },
       {
         "binding": "AUTOMATION_EVENTS",
-        "queue": "paca-automation-events-development"
+        "queue": "paca-automation-events-internal"
       }
     ],
     "consumers": [
       {
-        "queue": "paca-realtime-events-development",
+        "queue": "paca-realtime-events-internal",
         "max_batch_size": 10,
         "max_batch_timeout": 1,
         "max_retries": 5,
         "retry_delay": 5,
-        "dead_letter_queue": "paca-realtime-events-development-dlq"
+        "dead_letter_queue": "paca-realtime-events-internal-dlq"
       },
       {
-        "queue": "paca-document-materialization-development",
+        "queue": "paca-document-materialization-internal",
         "max_batch_size": 5,
         "max_batch_timeout": 2,
         "max_retries": 5,
         "retry_delay": 5,
-        "dead_letter_queue": "paca-document-materialization-development-dlq"
+        "dead_letter_queue": "paca-document-materialization-internal-dlq"
       },
       {
-        "queue": "paca-automation-events-development",
+        "queue": "paca-automation-events-internal",
         "max_batch_size": 10,
         "max_batch_timeout": 2,
         "max_retries": 5,
         "retry_delay": 5,
-        "dead_letter_queue": "paca-automation-events-development-dlq"
+        "dead_letter_queue": "paca-automation-events-internal-dlq"
       }
     ]
   },
@@ -107,12 +112,12 @@
   "workflows": [
     {
       "binding": "DOCUMENT_AGENT_WORKFLOW",
-      "name": "paca-document-agent-development",
+      "name": "paca-document-agent-internal",
       "class_name": "DocumentAgentWorkflow"
     },
     {
       "binding": "AUTOMATION_WORKFLOW",
-      "name": "paca-automation-development",
+      "name": "paca-automation-internal",
       "class_name": "AutomationWorkflow"
     }
   ],
@@ -130,121 +135,19 @@
       "new_sqlite_classes": ["AgentCoordinator"]
     }
   ],
-  "env": {
-    "internal": {
-      "name": "paca-worker-api-internal",
-      "workers_dev": true,
-      "routes": [
-        {
-          "pattern": "paca.howlearnwood.com",
-          "custom_domain": true
-        }
-      ],
-      "vars": {
-        "ATTACHMENT_CLEANUP_ENABLED": "true",
-        "BETTER_AUTH_URL": "https://paca.howlearnwood.com",
-        "ENVIRONMENT": "internal",
-        "TRUSTED_ORIGINS": "https://paca.howlearnwood.com"
-      },
-      "triggers": {
-        "crons": ["* * * * *", "15 10 * * *"]
-      },
-      "hyperdrive": [
-        {
-          "binding": "HYPERDRIVE",
-          "id": "ec828e1b80664166ab38aa511cfd1f82"
-        }
-      ],
-      "services": [
-        {
-          "binding": "ENVIRONMENT_GATEWAY",
-          "service": "paca-environment-gateway-internal"
-        }
-      ],
-      "r2_buckets": [
-        {
-          "binding": "TASK_ATTACHMENTS",
-          "bucket_name": "paca-attachments-internal"
-        },
-        {
-          "binding": "DOCUMENT_SNAPSHOTS",
-          "bucket_name": "paca-document-snapshots-internal"
-        }
-      ],
-      "queues": {
-        "producers": [
-          {
-            "binding": "REALTIME_EVENTS",
-            "queue": "paca-realtime-events-internal"
-          },
-          {
-            "binding": "DOCUMENT_MATERIALIZATION",
-            "queue": "paca-document-materialization-internal"
-          },
-          {
-            "binding": "AUTOMATION_EVENTS",
-            "queue": "paca-automation-events-internal"
-          }
-        ],
-        "consumers": [
-          {
-            "queue": "paca-realtime-events-internal",
-            "max_batch_size": 10,
-            "max_batch_timeout": 1,
-            "max_retries": 5,
-            "retry_delay": 5,
-            "dead_letter_queue": "paca-realtime-events-internal-dlq"
-          },
-          {
-            "queue": "paca-document-materialization-internal",
-            "max_batch_size": 5,
-            "max_batch_timeout": 2,
-            "max_retries": 5,
-            "retry_delay": 5,
-            "dead_letter_queue": "paca-document-materialization-internal-dlq"
-          },
-          {
-            "queue": "paca-automation-events-internal",
-            "max_batch_size": 10,
-            "max_batch_timeout": 2,
-            "max_retries": 5,
-            "retry_delay": 5,
-            "dead_letter_queue": "paca-automation-events-internal-dlq"
-          }
-        ]
-      },
-      "durable_objects": {
-        "bindings": [
-          {
-            "name": "ProjectParty",
-            "class_name": "ProjectParty"
-          },
-          {
-            "name": "UserParty",
-            "class_name": "UserParty"
-          },
-          {
-            "name": "DocumentParty",
-            "class_name": "DocumentParty"
-          },
-          {
-            "name": "AgentCoordinator",
-            "class_name": "AgentCoordinator"
-          }
-        ]
-      },
-      "workflows": [
-        {
-          "binding": "DOCUMENT_AGENT_WORKFLOW",
-          "name": "paca-document-agent-internal",
-          "class_name": "DocumentAgentWorkflow"
-        },
-        {
-          "binding": "AUTOMATION_WORKFLOW",
-          "name": "paca-automation-internal",
-          "class_name": "AutomationWorkflow"
-        }
-      ]
+  "routes": [
+    {
+      "pattern": "paca.howlearnwood.com",
+      "custom_domain": true
     }
-  }
+  ],
+  "triggers": {
+    "crons": ["* * * * *", "15 10 * * *"]
+  },
+  "services": [
+    {
+      "binding": "ENVIRONMENT_GATEWAY",
+      "service": "paca-environment-gateway-internal"
+    }
+  ]
 }

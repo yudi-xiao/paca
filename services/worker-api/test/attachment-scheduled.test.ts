@@ -17,7 +17,7 @@ function controller(cron = ATTACHMENT_CLEANUP_CRON): ScheduledController {
 function environment(overrides: Partial<AppBindings> = {}): AppBindings {
   return {
     ATTACHMENT_CLEANUP_ENABLED: "true",
-    ENVIRONMENT: "internal",
+    ENVIRONMENT: "prod",
     ...overrides,
   } as AppBindings;
 }

@@ -2,23 +2,23 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { CalendarDays, FolderKanban, Globe, Lock } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { projectQueryOptions } from "@/lib/project-api";
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId/")({
 	beforeLoad: ({ params }) => {
-		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") return;
+		if (usesCloudflareRuntime()) return;
 		throw redirect({
 			to: "/projects/$projectId/interactions/timeline",
 			params: { projectId: params.projectId },
 		});
 	},
-	component: InternalPreviewProjectOverview,
+	component: ProjectOverview,
 });
 
-function InternalPreviewProjectOverview() {
+function ProjectOverview() {
 	const { projectId } = Route.useParams();
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	const { t } = useTranslation("shared");
@@ -48,9 +48,7 @@ function InternalPreviewProjectOverview() {
 
 			<Card className="border-border/60">
 				<CardHeader>
-					<CardTitle className="text-base">
-						Cloudflare internal preview
-					</CardTitle>
+					<CardTitle className="text-base">{project.name}</CardTitle>
 				</CardHeader>
 				<CardContent className="grid gap-4 text-sm sm:grid-cols-2">
 					<div className="flex items-center gap-3 rounded-lg border border-border/50 p-4">

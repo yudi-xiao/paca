@@ -1,4 +1,24 @@
 {
+	"search": {
+		"title": "このプロジェクトを検索",
+		"description": "タスクとドキュメントのタイトル・本文を検索します。",
+		"queryLabel": "検索文字列",
+		"kindLabel": "検索対象",
+		"placeholder": "キーワードまたはタスク番号（例：#42）",
+		"tasks": "タスク",
+		"docs": "ドキュメント",
+		"submit": "検索",
+		"prompt": "キーワードを入力してください。",
+		"loading": "検索中…",
+		"empty": "一致する結果がありません。別の語句や対象をお試しください。",
+		"resultCount": "{{count}} 件を読み込みました",
+		"error": "検索に失敗しました。接続とプロジェクトのアクセス権を確認してください。",
+		"retry": "再試行",
+		"resultsLabel": "検索結果",
+		"bodyMatch": "本文",
+		"titleMatch": "タイトル / 番号",
+		"more": "さらに読み込む"
+	},
 	"project": {
 		"notFound": "プロジェクトが見つからないか、アクセスが拒否されました。",
 		"settingsPage": {
@@ -1620,7 +1640,8 @@
 			"expandSidebar": "パネルを展開する",
 			"tabGraph": "グラフ",
 			"tabRuns": "実行履歴",
-			"tabDependencyMap": "依存関係マップ"
+			"tabDependencyMap": "依存関係マップ",
+			"contextConnectionError": "この接続には、アクションに必要なタスクまたはスプリントの情報がありません。"
 		},
 		"palette": {
 			"title": "ノードを追加",
@@ -1682,7 +1703,7 @@
 				"tagLabel": "タグ",
 				"anyTag": "任意のタグ",
 				"dueDateOffsetLabel": "オフセット（分）",
-				"dueDateOffsetHint": "0 = 期日当日、負の値 = 期日より前、正の値 = 期日より後",
+				"dueDateOffsetHint": "期日の UTC 0 時に整数の分数を加算（±525600）。負数は前、正数は後。期限切れのタスクは一度だけ補完実行します。",
 				"watchedTasksLabel": "監視対象タスク",
 				"watchedTasksHint": "これらのタスクがすべて「完了」ステータスになったときに発火します",
 				"addWatchedTaskPlaceholder": "監視するタスクを追加…",
@@ -1694,10 +1715,19 @@
 				"noTasksYet": "このプロジェクトにはまだタスクがありません",
 				"loadingMore": "読み込み中…",
 				"clearTargetTask": "対象タスクをクリア",
+				"sprintFilterLabel": "スプリントの絞り込み（任意）",
+				"anySprint": "このプロジェクトのすべてのスプリント",
+				"sprintFilterHint": "選択したスプリントのイベントのみで実行します。絞り込みを解除すると将来のスプリントも含まれます。",
+				"cronInvalid": "有効な日付を含む5項目の式を入力してください。",
+				"sprintMissing": "このスプリントは削除されています。別のスプリントを選ぶか絞り込みを解除してください。",
+				"sprintsLoadFailed": "スプリントを読み込めません。再試行して絞り込みを編集してください。",
+				"retryLoad": "再試行",
+				"requiredTargetTaskLabel": "対象タスク（必須）",
+				"predecessorTargetTaskHint": "監視中の全タスクが完了した後の対象タスクを選んでください。実行時に現在の状態を確認します。",
 				"cronExpressionLabel": "Cron式",
 				"cronExpressionPlaceholder": "*/15 * * * *",
-				"cronExpressionHint": "標準の5フィールドCron形式（分 時 日 月 曜日）。UTCで評価されます",
-				"cronTargetTaskHint": "スケジュールされた発火のたびにこの自動化が実行対象とするタスク。「API呼び出し」または「AIエージェントを起動」アクションのみに到達させたい場合は未設定のままにしてください（これらはタスクを必要としません）。",
+				"cronExpressionHint": "UTC の5項目：分 時 日 月 曜日。秒とマクロは非対応。未実行分は1回にまとめて実行します。",
+				"cronTargetTaskHint": "各実行の対象タスクは任意です。未指定の場合は待機、スプリント条件、または明示的な別タスクを使用できます。",
 				"apiTriggerTargetTaskHint": "下記のWebhookが呼び出されるたびにこの自動化が実行対象とするタスク。「API呼び出し」または「AIエージェントを起動」アクションのみに到達させたい場合は未設定のままにしてください（これらはタスクを必要としません）。",
 				"webhookUrlLabel": "Webhook URL",
 				"webhookTokenLabel": "Webhookトークン",
@@ -1797,7 +1827,12 @@
 				"pluginConditionLabel": "プラグイン条件",
 				"pluginConditionHint": "タスクフィールドの比較の代わりに、このブランチの判定をプラグイン提供の条件に委任します。",
 				"selectPluginPlaceholder": "プラグイン条件を選択…",
-				"addCustomField": "カスタムフィールドを追加…"
+				"addCustomField": "カスタムフィールドを追加…",
+				"sprintContextHint": "トリガーのスプリント、またはトリガーとなったタスクのスプリントの有効な項目を更新します。",
+				"clearSprintField": "{{field}}をクリア",
+				"sprintStatusOnlyHint": "状態変更ではタスクは移動しません。未完了タスクを移動するには「スプリントを完了」を使ってください。",
+				"sprintUpdateInvalid": "名前（1〜200文字）、目標（10,000文字以内）、状態、日付の範囲を確認してください。",
+				"sprintDestinationMissing": "移動先が削除済みまたは完了済みです。別のスプリントかバックログを選んでください。"
 			},
 			"target": {
 				"label": "適用先",
@@ -1856,5 +1891,68 @@
 			"empty": "先行タスクの依存関係はまだ設定されていません",
 			"watchedTasks": "{{count}}件のタスクの完了待ち"
 		}
+	},
+	"delivery": {
+		"title": "GitHub 納品",
+		"hint": "完了した Agent 実行を選び、PR とコミットを固定します。CI の証拠と人による承認は個別に確認します。",
+		"noRepository": "管理者が先にプロジェクトへ GitHub リポジトリを関連付けてください。",
+		"revoked": "リポジトリへのアクセスが取り消されました。管理者が再接続してください。",
+		"noRuns": "このタスクには完了した Agent 実行がありません。",
+		"run": "完了した Agent 実行",
+		"chooseRun": "実行を選択",
+		"pr": "PR 番号",
+		"sha": "コミット SHA（40 文字）",
+		"submit": "納品を提出",
+		"refresh": "証拠を更新",
+		"accept": "このコミットを承認",
+		"requestChanges": "修正を依頼",
+		"note": "承認または修正のメモ",
+		"error": "操作を完了できませんでした。アクセス権を確認して再試行してください。",
+		"conflict": "納品が変更されました。最新の証拠を確認して再操作してください。",
+		"notReady": "承認条件を満たしていません。現在の状態を確認してください。",
+		"draft": "この PR は下書きです。レビュー待ちにしてから承認してください。",
+		"headChanged": "PR の最新コミットが変わりました。新しいコミットを提出してください。",
+		"reviews": "現在のコミットのレビュー承認：{{count}} / {{required}}",
+		"observed": "証拠の確認日時：{{time}}",
+		"previousAcceptance": "{{time}} に承認済みですが、現在の証拠を再確認してください。",
+		"state": {
+			"awaiting_acceptance": "承認待ち",
+			"waiting": "CI またはレビュー待ち",
+			"needs_changes": "修正が必要",
+			"stale": "証拠の更新が必要",
+			"unavailable": "証拠を取得できません",
+			"accepted": "コミット承認済み"
+		},
+		"check": {
+			"passed": "成功",
+			"pending": "待機中",
+			"failed": "失敗",
+			"missing": "未取得",
+			"stale": "期限切れ"
+		}
+	},
+	"repositorySettings": {
+		"title": "GitHub 納品設定",
+		"hint": "取得前に読み取り専用 GitHub App を接続してください。すべての納品には人の承認が必要です。",
+		"connected": "リポジトリ接続済み",
+		"publisher": "発行元 #{{id}}",
+		"reviewPolicy": "必要な承認数：{{count}}、信頼するレビュアー：{{reviewers}}",
+		"readOnly": "ポリシーの変更にはプロジェクト編集権限とインスタンス設定権限が必要です。",
+		"repository": "リポジトリ（所有者/名前）",
+		"samplePr": "サンプル PR 番号",
+		"sampleHint": "CI 実行がある PR から、このプロジェクトの必須チェックを選択します。",
+		"reviewers": "信頼するレビュアーの GitHub ユーザー名（カンマ区切り）",
+		"keepReviewers": "現在のレビュアーを維持",
+		"discover": "リポジトリのチェックを取得",
+		"discoveryError": "インストール済み App、リポジトリ、PR またはレビュアーを確認できません。確認して再試行してください。",
+		"checks": "必須 CI チェック（1〜20 項目）",
+		"noChecks": "この PR には CI チェックがありません。CI 実行後に再取得してください。",
+		"verifiedReviewers": "確認済みレビュアー：{{names}}",
+		"approvals": "必要な GitHub 承認数（0〜5）",
+		"age": "CI の最大有効期間（分、最大 7 日）",
+		"saveHint": "保存すると以前の納品証拠と承認は無効になります。",
+		"save": "納品ポリシーを保存",
+		"saved": "ポリシーを保存しました。タスクの証拠を更新してください。",
+		"invalidPolicy": "チェックを1〜20項目、承認数を確認済み人数以内、有効期間を1〜10080分で設定してください。"
 	}
 }

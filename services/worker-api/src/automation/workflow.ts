@@ -5,6 +5,9 @@ import * as z from "zod";
 
 import { withDatabase } from "../database";
 import { pacaAutomationRunSteps, pacaAutomationRuns } from "../db/schema";
+import { sprintActionFromNode } from "../iteration/automation-config";
+import { PostgresSprintAutomationRepository } from "../iteration/postgres-automation";
+import { IterationError, iterationErrorCodes } from "../iteration/service";
 import { PostgresTaskRepository } from "../task/postgres-repository";
 import { automationTaskActor, TaskService } from "../task/service";
 import { conditionConfigFromNode } from "./condition";
@@ -31,6 +34,8 @@ const loadedRunSchema = z
   .strict();
 
 function safeErrorCode(error: unknown): string {
+  if (error instanceof IterationError && Object.values(iterationErrorCodes).includes(error.code))
+    return `AUTOMATION_${error.code}`;
   if (error instanceof Error && /^AUTOMATION_[A-Z0-9_]{1,90}$/u.test(error.message)) {
     return error.message;
   }
@@ -87,6 +92,8 @@ export class AutomationWorkflow extends WorkflowEntrypoint<Env, AutomationWorkfl
                 run.snapshot.projectId,
                 run.snapshot.event.taskId,
                 node,
+                run.snapshot.event.sprintSnapshot,
+                run.snapshot.event.type === "sprint_deleted",
               ),
             ),
           );
@@ -134,16 +141,46 @@ export class AutomationWorkflow extends WorkflowEntrypoint<Env, AutomationWorkfl
           advance(node.id, null);
           continue;
         }
+        if (node.type === "update_sprint" || node.type === "complete_sprint") {
+          sprintActionFromNode(node);
+          if (run.snapshot.event.type === "sprint_deleted")
+            throw new Error("AUTOMATION_EDGE_REQUIRES_TARGET_SPRINT");
+          // The target is a durable step result. A later task reassignment must
+          // not redirect a retry onto a different Sprint.
+          const sprintId = await step.do(`resolve-sprint-${node.id}`, RETRY, () =>
+            withDatabase(this.env, (database) =>
+              new PostgresSprintAutomationRepository(database).resolveSprint(
+                run.snapshot.projectId,
+                run.snapshot.event.taskId,
+                run.snapshot.event.sprintSnapshot?.id ?? null,
+              ),
+            ),
+          );
+          await step.do(`apply-sprint-${node.id}`, RETRY, () =>
+            withDatabase(this.env, (database) =>
+              new PostgresSprintAutomationRepository(database).apply({
+                projectId: run.snapshot.projectId,
+                runId: params.runId,
+                nodeId: node.id,
+                sprintId,
+              }),
+            ),
+          );
+          advance(node.id, null);
+          continue;
+        }
         const { update, target } = taskUpdateActionFromNode(node);
         let targetIds: string[];
         if (!target || target.kind === "self") {
+          const baseTaskId = run.snapshot.event.taskId;
+          if (!baseTaskId) throw new Error("AUTOMATION_EDGE_REQUIRES_TARGET_TASK");
           // Preserve the existing step name and operation key for in-flight runs.
           const taskId = await step.do(`update-task-${node.id}`, RETRY, () =>
             withDatabase(this.env, async (database) => {
               const service = new TaskService(new PostgresTaskRepository(database));
               const task = await service.updateAs(
                 run.snapshot.projectId,
-                run.snapshot.event.taskId,
+                baseTaskId,
                 automationTaskActor(params.runId),
                 update,
                 `${params.runId}:${node.id}`,

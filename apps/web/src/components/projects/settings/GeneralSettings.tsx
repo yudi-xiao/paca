@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
+import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import {
 	getProjectInitials,
 	projectQueryOptions,
@@ -85,7 +86,7 @@ export function GeneralSettings({
 		isPublic !== (project?.is_public ?? false);
 
 	const initials = getProjectInitials(project?.name ?? "");
-	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
+	const isCloudflareRuntime = usesCloudflareRuntime();
 
 	return (
 		<div className="rounded-xl border border-border/60 bg-card p-6">
@@ -96,7 +97,7 @@ export function GeneralSettings({
 			{/* Identity header — avatar next to the project's name/prefix, same
 			    layout as the profile page's own avatar setting. */}
 			<div className="flex items-center gap-4 mb-6">
-				{isInternalPreview ? (
+				{isCloudflareRuntime ? (
 					<div className="flex size-14 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
 						{initials}
 					</div>

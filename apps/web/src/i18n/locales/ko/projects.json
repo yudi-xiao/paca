@@ -1,4 +1,24 @@
 {
+	"search": {
+		"title": "이 프로젝트 검색",
+		"description": "작업과 문서의 제목 및 본문을 검색합니다.",
+		"queryLabel": "검색어",
+		"kindLabel": "검색 유형",
+		"placeholder": "키워드 또는 작업 번호(예: #42)",
+		"tasks": "작업",
+		"docs": "문서",
+		"submit": "검색",
+		"prompt": "키워드를 입력하세요.",
+		"loading": "검색 중…",
+		"empty": "결과가 없습니다. 다른 키워드나 유형을 선택하세요.",
+		"resultCount": "결과 {{count}}개 로드됨",
+		"error": "검색에 실패했습니다. 연결과 프로젝트 접근 권한을 확인하세요.",
+		"retry": "다시 시도",
+		"resultsLabel": "검색 결과",
+		"bodyMatch": "본문",
+		"titleMatch": "제목 / 번호",
+		"more": "더 보기"
+	},
 	"project": {
 		"notFound": "프로젝트를 찾을 수 없거나 접근 권한이 없습니다.",
 		"settingsPage": {
@@ -1620,7 +1640,8 @@
 			"expandSidebar": "패널 펼치기",
 			"tabGraph": "그래프",
 			"tabRuns": "실행 기록",
-			"tabDependencyMap": "종속성 맵"
+			"tabDependencyMap": "종속성 맵",
+			"contextConnectionError": "이 연결에는 동작에 필요한 작업 또는 스프린트 정보가 없습니다."
 		},
 		"palette": {
 			"title": "노드 추가",
@@ -1682,7 +1703,7 @@
 				"tagLabel": "태그",
 				"anyTag": "모든 태그",
 				"dueDateOffsetLabel": "오프셋(분)",
-				"dueDateOffsetHint": "0 = 마감일 당일, 음수 = 이전, 양수 = 이후",
+				"dueDateOffsetHint": "마감일 UTC 자정에 정수 분을 더합니다(±525600). 음수는 이전, 양수는 이후입니다. 기한이 지난 작업은 한 번 실행됩니다.",
 				"watchedTasksLabel": "관찰 중인 태스크",
 				"watchedTasksHint": "이 태스크들이 모두 \"완료\" 상태가 되면 실행됩니다",
 				"addWatchedTaskPlaceholder": "관찰할 태스크 추가…",
@@ -1694,10 +1715,19 @@
 				"noTasksYet": "이 프로젝트에는 아직 태스크가 없습니다",
 				"loadingMore": "불러오는 중…",
 				"clearTargetTask": "대상 태스크 지우기",
+				"sprintFilterLabel": "스프린트 필터 (선택)",
+				"anySprint": "프로젝트의 모든 스프린트",
+				"sprintFilterHint": "선택한 스프린트의 이벤트에만 실행합니다. 필터를 해제하면 향후 스프린트도 포함됩니다.",
+				"cronInvalid": "가능한 날짜를 포함한 유효한 5개 필드 식을 입력하세요.",
+				"sprintMissing": "이 스프린트는 삭제되었습니다. 다른 스프린트를 선택하거나 필터를 해제하세요.",
+				"sprintsLoadFailed": "스프린트를 불러올 수 없습니다. 다시 시도한 후 필터를 편집하세요.",
+				"retryLoad": "다시 시도",
+				"requiredTargetTaskLabel": "대상 작업 (필수)",
+				"predecessorTargetTaskHint": "감시 중인 모든 작업이 완료된 후 실행할 대상 작업을 선택하세요. 실행 시 현재 상태를 확인합니다.",
 				"cronExpressionLabel": "Cron 표현식",
 				"cronExpressionPlaceholder": "*/15 * * * *",
-				"cronExpressionHint": "표준 5필드 Cron (분 시 일 월 요일), UTC 기준으로 평가됩니다",
-				"cronTargetTaskHint": "예약된 실행마다 이 자동화가 실행되는 대상 태스크입니다. API 호출 또는 AI 에이전트 실행 액션에만 연결하려면 비워 두세요 (해당 액션들은 태스크가 필요하지 않습니다).",
+				"cronExpressionHint": "UTC 기준 5개 필드: 분 시 일 월 요일. 초와 매크로는 지원하지 않습니다. 누락된 실행은 한 번으로 합쳐 실행합니다.",
+				"cronTargetTaskHint": "예약 실행의 작업은 선택 사항입니다. 지정하지 않으면 대기, 스프린트 조건 또는 명시적으로 선택한 다른 작업을 사용할 수 있습니다.",
 				"apiTriggerTargetTaskHint": "아래 웹훅이 호출될 때마다 이 자동화가 실행되는 대상 태스크입니다. API 호출 또는 AI 에이전트 실행 액션에만 연결하려면 비워 두세요 (해당 액션들은 태스크가 필요하지 않습니다).",
 				"webhookUrlLabel": "웹훅 URL",
 				"webhookTokenLabel": "웹훅 토큰",
@@ -1797,7 +1827,12 @@
 				"pluginConditionLabel": "플러그인 조건",
 				"pluginConditionHint": "작업 필드를 비교하는 대신 이 분기의 일치 여부를 플러그인 제공 조건에 위임합니다.",
 				"selectPluginPlaceholder": "플러그인 조건 선택…",
-				"addCustomField": "사용자 지정 필드 추가…"
+				"addCustomField": "사용자 지정 필드 추가…",
+				"sprintContextHint": "트리거 스프린트 또는 트리거 작업이 속한 스프린트의 활성화된 필드를 수정합니다.",
+				"clearSprintField": "{{field}} 비우기",
+				"sprintStatusOnlyHint": "상태 변경으로 작업이 이동하지 않습니다. 미완료 작업을 이동하려면 스프린트 완료를 사용하세요.",
+				"sprintUpdateInvalid": "이름(1–200자), 목표(최대 10,000자), 상태 및 날짜 범위를 확인하세요.",
+				"sprintDestinationMissing": "대상 스프린트가 삭제되었거나 완료되었습니다. 다른 스프린트 또는 백로그를 선택하세요."
 			},
 			"target": {
 				"label": "적용 대상",
@@ -1856,5 +1891,68 @@
 			"empty": "아직 설정된 선행 태스크 종속성이 없습니다",
 			"watchedTasks": "{{count}}개 태스크 대기 중"
 		}
+	},
+	"delivery": {
+		"title": "GitHub 납품",
+		"hint": "완료된 Agent 실행을 선택하고 PR과 커밋을 고정하세요. CI 증거와 사용자 승인은 별도로 확인합니다.",
+		"noRepository": "관리자가 먼저 프로젝트에 GitHub 저장소를 연결해야 합니다.",
+		"revoked": "저장소 접근이 철회되었습니다. 관리자가 다시 연결해야 합니다.",
+		"noRuns": "이 작업에는 완료된 Agent 실행이 없습니다.",
+		"run": "완료된 Agent 실행",
+		"chooseRun": "실행 선택",
+		"pr": "PR 번호",
+		"sha": "커밋 SHA (40자)",
+		"submit": "납품 제출",
+		"refresh": "증거 새로고침",
+		"accept": "이 커밋 승인",
+		"requestChanges": "수정 요청",
+		"note": "승인 또는 수정 메모",
+		"error": "작업을 완료하지 못했습니다. 접근 권한을 확인하고 다시 시도하세요.",
+		"conflict": "납품이 변경되었습니다. 최신 증거를 확인한 후 다시 진행하세요.",
+		"notReady": "승인 조건을 충족하지 못했습니다. 현재 상태를 확인하세요.",
+		"draft": "초안 PR입니다. 검토 대기 상태로 전환한 후 승인하세요.",
+		"headChanged": "PR의 최신 커밋이 변경되었습니다. 새 커밋을 제출하세요.",
+		"reviews": "현재 커밋 검토 승인: {{count}} / {{required}}",
+		"observed": "증거 확인: {{time}}",
+		"previousAcceptance": "{{time}}에 승인했으며 현재 증거는 다시 확인해야 합니다.",
+		"state": {
+			"awaiting_acceptance": "사용자 승인 대기",
+			"waiting": "검사 또는 검토 대기",
+			"needs_changes": "수정 필요",
+			"stale": "증거 새로고침 필요",
+			"unavailable": "증거 사용 불가",
+			"accepted": "커밋 승인됨"
+		},
+		"check": {
+			"passed": "통과",
+			"pending": "대기",
+			"failed": "실패",
+			"missing": "없음",
+			"stale": "만료"
+		}
+	},
+	"repositorySettings": {
+		"title": "GitHub 납품 설정",
+		"hint": "조회 전에 읽기 전용 GitHub App을 연결하세요. 모든 납품은 사용자 승인이 필요합니다.",
+		"connected": "저장소 연결됨",
+		"publisher": "게시자 #{{id}}",
+		"reviewPolicy": "필수 승인: {{count}}; 신뢰하는 검토자: {{reviewers}}",
+		"readOnly": "정책 변경에는 프로젝트 편집 권한과 인스턴스 설정 권한이 필요합니다.",
+		"repository": "저장소 (소유자/이름)",
+		"samplePr": "예시 PR 번호",
+		"sampleHint": "CI 실행이 있는 PR에서 이 프로젝트의 필수 검사를 선택하세요.",
+		"reviewers": "신뢰하는 검토자의 GitHub 사용자 이름 (쉼표로 구분)",
+		"keepReviewers": "현재 검토자 유지",
+		"discover": "저장소 검사 조회",
+		"discoveryError": "설치된 App, 저장소, PR 또는 검토자 계정을 확인할 수 없습니다. 확인 후 다시 시도하세요.",
+		"checks": "필수 CI 검사 (1–20개 선택)",
+		"noChecks": "이 PR에는 CI 검사가 없습니다. CI 실행 후 다시 조회하세요.",
+		"verifiedReviewers": "확인된 검토자: {{names}}",
+		"approvals": "필수 GitHub 승인 수 (0–5)",
+		"age": "CI 최대 유효 시간 (분, 최대 7일)",
+		"saveHint": "정책을 저장하면 이전 납품 증거와 승인이 무효화됩니다.",
+		"save": "납품 정책 저장",
+		"saved": "정책을 저장했습니다. 작업의 증거를 새로고침하세요.",
+		"invalidPolicy": "검사 1–20개, 확인된 검토자 수 이내의 승인 수, CI 유효 시간 1–10080분을 선택하세요."
 	}
 }

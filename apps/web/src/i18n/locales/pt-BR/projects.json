@@ -1,4 +1,24 @@
 {
+	"search": {
+		"title": "Pesquisar neste projeto",
+		"description": "Pesquise títulos e conteúdo de tarefas e documentos.",
+		"queryLabel": "Texto da pesquisa",
+		"kindLabel": "Tipo de pesquisa",
+		"placeholder": "Palavra-chave ou número da tarefa, ex. #42",
+		"tasks": "Tarefas",
+		"docs": "Documentos",
+		"submit": "Pesquisar",
+		"prompt": "Digite uma palavra-chave.",
+		"loading": "Pesquisando…",
+		"empty": "Sem resultados. Tente outra palavra ou tipo.",
+		"resultCount": "{{count}} resultados carregados",
+		"error": "A pesquisa falhou. Verifique a conexão e o acesso ao projeto.",
+		"retry": "Tentar novamente",
+		"resultsLabel": "Resultados da pesquisa",
+		"bodyMatch": "Conteúdo",
+		"titleMatch": "Título / número",
+		"more": "Carregar mais"
+	},
 	"project": {
 		"notFound": "Projeto não encontrado ou acesso negado.",
 		"settingsPage": {
@@ -1620,7 +1640,8 @@
 			"expandSidebar": "Expandir painel",
 			"tabGraph": "Gráfico",
 			"tabRuns": "Histórico de execuções",
-			"tabDependencyMap": "Mapa de dependências"
+			"tabDependencyMap": "Mapa de dependências",
+			"contextConnectionError": "Esta conexão não fornece a tarefa ou o sprint necessário para a ação."
 		},
 		"palette": {
 			"title": "Adicionar nó",
@@ -1682,7 +1703,7 @@
 				"tagLabel": "Tag",
 				"anyTag": "Qualquer tag",
 				"dueDateOffsetLabel": "Deslocamento (minutos)",
-				"dueDateOffsetHint": "0 = no prazo, negativo = antes, positivo = depois",
+				"dueDateOffsetHint": "Meia-noite UTC da data de vencimento + minutos inteiros (±525600). Negativo = antes; positivo = depois. Tarefas vencidas disparam uma vez.",
 				"watchedTasksLabel": "Tarefas observadas",
 				"watchedTasksHint": "Dispara quando TODAS estas tarefas estiverem em um status \"concluído\"",
 				"addWatchedTaskPlaceholder": "Adicionar uma tarefa para observar…",
@@ -1694,10 +1715,19 @@
 				"noTasksYet": "Ainda não há tarefas neste projeto",
 				"loadingMore": "Carregando…",
 				"clearTargetTask": "Limpar tarefa alvo",
+				"sprintFilterLabel": "Filtro de sprint (opcional)",
+				"anySprint": "Qualquer sprint deste projeto",
+				"sprintFilterHint": "Executar apenas para o sprint selecionado. Remova o filtro para incluir sprints futuros.",
+				"cronInvalid": "Insira uma expressão válida de cinco campos com uma data possível.",
+				"sprintMissing": "Este sprint foi excluído. Selecione outro ou remova o filtro.",
+				"sprintsLoadFailed": "Não foi possível carregar os sprints. Tente novamente para editar o filtro.",
+				"retryLoad": "Tentar novamente",
+				"requiredTargetTaskLabel": "Tarefa de destino (obrigatória)",
+				"predecessorTargetTaskHint": "Escolha a tarefa de destino quando todas as monitoradas forem concluídas. Seu estado atual é verificado durante a execução.",
 				"cronExpressionLabel": "Expressão cron",
 				"cronExpressionPlaceholder": "*/15 * * * *",
-				"cronExpressionHint": "Cron padrão de 5 campos (minuto hora dia-do-mês mês dia-da-semana), avaliado em UTC",
-				"cronTargetTaskHint": "A tarefa em que esta automação atua a cada disparo agendado. Deixe em branco se isso deve alcançar apenas uma ação Chamar API ou Acionar agente de IA, que não precisam de uma tarefa.",
+				"cronExpressionHint": "Cinco campos em UTC: minuto hora dia mês dia da semana. Sem segundos nem macros. Execuções perdidas são agrupadas em uma.",
+				"cronTargetTaskHint": "Tarefa opcional para cada execução. Sem ela, use Aguardar, condições de sprint ou uma tarefa de destino explícita.",
 				"apiTriggerTargetTaskHint": "A tarefa em que esta automação atua sempre que o webhook abaixo é chamado. Deixe em branco se isso deve alcançar apenas uma ação Chamar API ou Acionar agente de IA, que não precisam de uma tarefa.",
 				"webhookUrlLabel": "URL do webhook",
 				"webhookTokenLabel": "Token do webhook",
@@ -1797,7 +1827,12 @@
 				"pluginConditionLabel": "Condição de plugin",
 				"pluginConditionHint": "Delega a correspondência deste ramo a uma condição fornecida por um plugin em vez de comparar um campo da tarefa.",
 				"selectPluginPlaceholder": "Selecione uma condição de plugin…",
-				"addCustomField": "Adicionar campo personalizado…"
+				"addCustomField": "Adicionar campo personalizado…",
+				"sprintContextHint": "Atualiza os campos ativados do sprint que disparou o evento ou do sprint da tarefa que o disparou.",
+				"clearSprintField": "Limpar {{field}}",
+				"sprintStatusOnlyHint": "Alterar o status não move tarefas. Use Concluir sprint para mover as tarefas pendentes.",
+				"sprintUpdateInvalid": "Verifique o nome (1–200 caracteres), a meta (até 10.000 caracteres), o status e as datas.",
+				"sprintDestinationMissing": "O destino não existe ou foi concluído. Escolha outro sprint ou o backlog."
 			},
 			"target": {
 				"label": "Aplica-se a",
@@ -1856,5 +1891,68 @@
 			"empty": "Nenhuma dependência de predecessora configurada ainda",
 			"watchedTasks": "Aguardando {{count}} tarefa(s)"
 		}
+	},
+	"delivery": {
+		"title": "Entrega do GitHub",
+		"hint": "Selecione uma execução de Agent concluída e fixe seu PR e commit. As evidências de CI e a aceitação humana são confirmadas separadamente.",
+		"noRepository": "Um administrador deve primeiro vincular o projeto a um repositório do GitHub.",
+		"revoked": "O acesso ao repositório foi revogado. Um administrador deve reconectá-lo.",
+		"noRuns": "Esta tarefa não tem execuções de Agent concluídas.",
+		"run": "Execução de Agent concluída",
+		"chooseRun": "Selecione uma execução",
+		"pr": "Número do pull request",
+		"sha": "SHA do commit (40 caracteres)",
+		"submit": "Enviar entrega",
+		"refresh": "Atualizar evidências",
+		"accept": "Aceitar este commit",
+		"requestChanges": "Solicitar alterações",
+		"note": "Notas de aceitação ou alterações",
+		"error": "Não foi possível concluir a operação. Verifique o acesso e tente novamente.",
+		"conflict": "A entrega mudou. Revise as evidências atuais antes de agir novamente.",
+		"notReady": "As evidências ainda não permitem a aceitação. Verifique o estado atual.",
+		"draft": "Este PR é um rascunho. Publique-o para revisão antes de aceitar.",
+		"headChanged": "O último commit do PR mudou. Envie o novo commit para aceitação.",
+		"reviews": "Aprovações do commit atual: {{count}} / {{required}}",
+		"observed": "Evidências verificadas: {{time}}",
+		"previousAcceptance": "Aceito anteriormente em {{time}}; as evidências atuais precisam de revisão.",
+		"state": {
+			"awaiting_acceptance": "Aguardando aceitação",
+			"waiting": "Aguardando verificações ou revisão",
+			"needs_changes": "Alterações necessárias",
+			"stale": "Evidências precisam de atualização",
+			"unavailable": "Evidências indisponíveis",
+			"accepted": "Commit aceito"
+		},
+		"check": {
+			"passed": "Aprovado",
+			"pending": "Pendente",
+			"failed": "Falhou",
+			"missing": "Ausente",
+			"stale": "Expirado"
+		}
+	},
+	"repositorySettings": {
+		"title": "Configurações de entrega do GitHub",
+		"hint": "Conecte primeiro a GitHub App somente leitura. Cada entrega exige aceitação humana.",
+		"connected": "Repositório conectado",
+		"publisher": "Publicador #{{id}}",
+		"reviewPolicy": "Aprovações necessárias: {{count}}; revisores confiáveis: {{reviewers}}",
+		"readOnly": "Alterar esta política exige permissão para editar o projeto e configurar a instância.",
+		"repository": "Repositório (proprietário/nome)",
+		"samplePr": "Número de PR de exemplo",
+		"sampleHint": "Use um PR com execuções de CI para escolher as verificações exigidas do projeto.",
+		"reviewers": "Usuários do GitHub dos revisores (separados por vírgulas)",
+		"keepReviewers": "Manter os revisores atuais",
+		"discover": "Descobrir verificações",
+		"discoveryError": "Não foi possível verificar a App instalada, o repositório, o PR ou os revisores. Verifique e tente novamente.",
+		"checks": "Verificações CI obrigatórias (selecione 1–20)",
+		"noChecks": "Este PR não tem verificações CI. Execute CI e consulte novamente.",
+		"verifiedReviewers": "Revisores verificados: {{names}}",
+		"approvals": "Aprovações do GitHub exigidas (0–5)",
+		"age": "Idade máxima de CI (minutos, até 7 dias)",
+		"saveHint": "Salvar a política invalida as evidências e aceitações anteriores.",
+		"save": "Salvar política de entrega",
+		"saved": "Política salva. As tarefas precisam atualizar as evidências.",
+		"invalidPolicy": "Selecione 1–20 verificações, aprovações dentro do número de revisores e uma idade de CI de 1–10080 minutos."
 	}
 }
