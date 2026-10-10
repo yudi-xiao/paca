@@ -1924,5 +1924,29 @@
 			"missing": "缺少",
 			"stale": "过期"
 		}
+	},
+	"repositorySettings": {
+		"title": "GitHub 交付设置",
+		"hint": "请先连接只读 GitHub App，再读取仓库检查。每次交付都需要人工验收。",
+		"connected": "仓库已连接",
+		"publisher": "发布方 #{{id}}",
+		"reviewPolicy": "要求评审通过数：{{count}}；可信评审者：{{reviewers}} 人",
+		"readOnly": "修改策略需要项目编辑权限和实例设置权限。",
+		"repository": "仓库（所有者/名称）",
+		"samplePr": "示例 PR 编号",
+		"sampleHint": "选择已有 CI 运行的 PR，用于确定此项目要求通过的检查项。",
+		"reviewers": "可信评审者的 GitHub 用户名（逗号分隔）",
+		"keepReviewers": "保留当前已配置的评审者",
+		"discover": "读取仓库检查",
+		"discoveryError": "无法核验已安装 App、仓库、PR 或评审账号，请检查后重试。",
+		"checks": "必须通过的 CI 检查（选择 1–20 项）",
+		"noChecks": "此 PR 还没有 CI 检查，请先运行 CI 后重新读取。",
+		"verifiedReviewers": "已核验评审者：{{names}}",
+		"approvals": "要求 GitHub 评审通过数（0–5）",
+		"age": "CI 最长有效时间（分钟，最多 7 天）",
+		"saveHint": "保存策略会使原有交付证据和验收结果失效。",
+		"save": "保存交付策略",
+		"saved": "交付策略已保存，任务需要刷新证据。",
+		"invalidPolicy": "请选择 1–20 项检查，评审通过数不得超过已核验人数，CI 有效时间须为 1–10080 分钟。"
 	}
 }

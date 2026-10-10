@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { type RepositoryDiscoveryInput, repositoryDiscoveryInputSchema } from "./discovery";
 import {
   checkSchema,
   evaluateGitHubDelivery,
@@ -12,7 +13,6 @@ import {
   pullSchema,
   reviewSchema,
 } from "./evidence";
-
 import { githubJson } from "./github-http";
 
 type Fetch = typeof globalThis.fetch;
@@ -70,6 +70,47 @@ export class GitHubDeliveryReader {
     }
     // Never treat truncated review pagination as complete evidence.
     throw new GitHubDeliveryError("GITHUB_DELIVERY_UNAVAILABLE");
+  }
+  async discoverChecks(input: RepositoryDiscoveryInput, signal: AbortSignal) {
+    if (!repositoryDiscoveryInputSchema.safeParse(input).success)
+      throw new GitHubDeliveryError("GITHUB_DELIVERY_INPUT_INVALID");
+    const repo = `/repos/${input.owner}/${input.repository}`;
+    const path = `${repo}/pulls/${input.pullNumber}`;
+    const initial = await this.pull(path, signal);
+    if (
+      initial.number !== input.pullNumber ||
+      initial.base.repo.full_name.toLowerCase() !==
+        `${input.owner}/${input.repository}`.toLowerCase()
+    )
+      throw new GitHubDeliveryError("GITHUB_DELIVERY_UNAVAILABLE");
+    const checks = await this.checks(`${repo}/commits/${initial.head.sha}/check-runs`, signal);
+    const current = await this.pull(path, signal);
+    if (
+      current.number !== input.pullNumber ||
+      current.base.repo.full_name.toLowerCase() !==
+        `${input.owner}/${input.repository}`.toLowerCase() ||
+      current.head.sha !== initial.head.sha
+    )
+      throw new GitHubDeliveryError("GITHUB_DELIVERY_UNAVAILABLE");
+    const latest = new Map<string, z.infer<typeof checkSchema>>();
+    for (const check of checks) {
+      if (check.head_sha !== initial.head.sha)
+        throw new GitHubDeliveryError("GITHUB_DELIVERY_UNAVAILABLE");
+      const key = `${check.app.id}:${check.name}`;
+      if ((latest.get(key)?.id ?? 0) < check.id) latest.set(key, check);
+    }
+    return {
+      headSha: initial.head.sha,
+      observedAt: new Date().toISOString(),
+      checks: [...latest.values()]
+        .sort((a, b) => a.name.localeCompare(b.name) || a.app.id - b.app.id)
+        .map((check) => ({
+          name: check.name,
+          appId: check.app.id,
+          appName: check.app.name ?? null,
+          appSlug: check.app.slug ?? null,
+        })),
+    };
   }
   async inspect(
     value: GitHubDeliveryPolicy,

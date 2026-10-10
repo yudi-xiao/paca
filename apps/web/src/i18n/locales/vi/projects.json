@@ -1924,5 +1924,29 @@
 			"missing": "Thiếu",
 			"stale": "Hết hạn"
 		}
+	},
+	"repositorySettings": {
+		"title": "Thiết lập bàn giao GitHub",
+		"hint": "Kết nối GitHub App chỉ đọc trước khi khám phá. Mỗi bàn giao cần người dùng nghiệm thu.",
+		"connected": "Đã kết nối kho",
+		"publisher": "Nhà phát hành #{{id}}",
+		"reviewPolicy": "Số phê duyệt bắt buộc: {{count}}; người đánh giá tin cậy: {{reviewers}}",
+		"readOnly": "Thay đổi chính sách cần quyền sửa dự án và thiết lập hệ thống.",
+		"repository": "Kho (chủ sở hữu/tên)",
+		"samplePr": "Số PR mẫu",
+		"sampleHint": "Dùng PR có lượt chạy CI để chọn kiểm tra bắt buộc cho dự án.",
+		"reviewers": "Tên GitHub của người đánh giá tin cậy (phân cách dấu phẩy)",
+		"keepReviewers": "Giữ người đánh giá hiện tại",
+		"discover": "Khám phá kiểm tra của kho",
+		"discoveryError": "Không xác minh được App đã cài, kho, PR hoặc tài khoản đánh giá. Kiểm tra và thử lại.",
+		"checks": "Kiểm tra CI bắt buộc (chọn 1–20)",
+		"noChecks": "PR chưa có kiểm tra CI. Chạy CI rồi khám phá lại.",
+		"verifiedReviewers": "Người đánh giá đã xác minh: {{names}}",
+		"approvals": "Số phê duyệt GitHub bắt buộc (0–5)",
+		"age": "Tuổi CI tối đa (phút, tối đa 7 ngày)",
+		"saveHint": "Lưu chính sách sẽ vô hiệu bằng chứng và nghiệm thu trước đó.",
+		"save": "Lưu chính sách bàn giao",
+		"saved": "Đã lưu chính sách. Tác vụ cần làm mới bằng chứng.",
+		"invalidPolicy": "Chọn 1–20 kiểm tra, số phê duyệt trong số người đã xác minh và tuổi CI từ 1–10080 phút."
 	}
 }

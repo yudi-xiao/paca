@@ -1924,5 +1924,29 @@
 			"missing": "Ausente",
 			"stale": "Caducada"
 		}
+	},
+	"repositorySettings": {
+		"title": "Configuración de entregas de GitHub",
+		"hint": "Conecta primero la GitHub App de solo lectura. Cada entrega requiere aceptación humana.",
+		"connected": "Repositorio conectado",
+		"publisher": "Publicador #{{id}}",
+		"reviewPolicy": "Aprobaciones requeridas: {{count}}; revisores de confianza: {{reviewers}}",
+		"readOnly": "Cambiar esta política requiere editar el proyecto y configurar la instancia.",
+		"repository": "Repositorio (propietario/nombre)",
+		"samplePr": "Número de PR de ejemplo",
+		"sampleHint": "Usa un PR con ejecuciones de CI para elegir las comprobaciones requeridas del proyecto.",
+		"reviewers": "Usuarios de GitHub de los revisores (separados por comas)",
+		"keepReviewers": "Conservar los revisores actuales",
+		"discover": "Descubrir comprobaciones",
+		"discoveryError": "No se pudieron verificar la App instalada, el repositorio, el PR o los revisores. Comprueba y reintenta.",
+		"checks": "Comprobaciones CI requeridas (elige 1–20)",
+		"noChecks": "Este PR no tiene comprobaciones. Ejecuta CI y vuelve a consultar.",
+		"verifiedReviewers": "Revisores verificados: {{names}}",
+		"approvals": "Aprobaciones de GitHub requeridas (0–5)",
+		"age": "Antigüedad máxima de CI (minutos, hasta 7 días)",
+		"saveHint": "Guardar la política invalida evidencias y aceptaciones anteriores.",
+		"save": "Guardar política de entrega",
+		"saved": "Política guardada. Las tareas deben actualizar su evidencia.",
+		"invalidPolicy": "Elige 1–20 comprobaciones, aprobaciones dentro del número de revisores y una antigüedad de CI de 1–10080 minutos."
 	}
 }

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
 	DeliveryRepository,
@@ -21,6 +22,23 @@ vi.mock("@/hooks/use-project-permissions", () => ({
 }));
 vi.mock("@/lib/api-client", () => ({
 	apiClient: { instance: { get: mocks.get, post: mocks.post } },
+}));
+vi.mock("@tanstack/react-router", () => ({
+	Link: ({
+		params,
+		search,
+		children,
+	}: {
+		params: { projectId: string };
+		search: { section: string };
+		children: ReactNode;
+	}) => (
+		<a
+			href={`/projects/${params.projectId}/settings?section=${search.section}`}
+		>
+			{children}
+		</a>
+	),
 }));
 const projectId = "11111111-1111-4111-8111-111111111111";
 const taskId = "22222222-2222-4222-8222-222222222222";
@@ -206,9 +224,17 @@ describe("task GitHub delivery", () => {
 		).toBe(false);
 		expect(mocks.post).not.toHaveBeenCalled();
 	});
-	it("retries an uncertain decision with the identical request ID and version", async () => {
+	it.each([
+		new Error("connection lost"),
+		{
+			response: {
+				status: 503,
+				data: { error_code: "GITHUB_DELIVERY_UNAVAILABLE" },
+			},
+		},
+	])("retries an uncertain decision with the identical request ID and version (%j)", async (error) => {
 		delivery = ready();
-		mocks.post.mockRejectedValueOnce(new Error("connection lost"));
+		mocks.post.mockRejectedValueOnce(error);
 		mount();
 		const accept = await screen.findByRole("button", {
 			name: "Accept this commit",
@@ -221,6 +247,19 @@ describe("task GitHub delivery", () => {
 		await userEvent.click(retry);
 		await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(2));
 		expect(mocks.post.mock.calls[0]).toEqual(mocks.post.mock.calls[1]);
+	});
+	it("links project managers to repository settings when the binding is revoked", async () => {
+		mocks.permissions.add("projects.write");
+		binding.status = "revoked";
+		mount();
+		expect(
+			await screen.findByRole("link", { name: "GitHub delivery settings" }),
+		).toHaveAttribute("href", `/projects/${projectId}/settings?section=github`);
+		expect(
+			mocks.get.mock.calls.some(([path]) =>
+				String(path).endsWith("completed-runs"),
+			),
+		).toBe(false);
 	});
 	it("hides the card without task read permission", () => {
 		mocks.permissions.clear();

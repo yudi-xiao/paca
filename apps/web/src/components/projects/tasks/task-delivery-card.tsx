@@ -4,6 +4,7 @@ import {
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -13,25 +14,13 @@ import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import {
 	completedDeliveryRunsQueryOptions,
 	type DeliveryCommand,
+	deliveryErrorCode,
+	deliveryOutcomeUncertain,
 	deliveryRepositoryQueryOptions,
 	executeDeliveryCommand,
 	taskDeliveryQueryOptions,
 } from "@/lib/github-delivery-api";
 
-function errorCode(error: unknown): string | undefined {
-	if (!error || typeof error !== "object" || !("response" in error))
-		return undefined;
-	const response = error.response;
-	if (!response || typeof response !== "object" || !("data" in response))
-		return undefined;
-	const data = response.data;
-	return data &&
-		typeof data === "object" &&
-		"error_code" in data &&
-		typeof data.error_code === "string"
-		? data.error_code
-		: undefined;
-}
 export function TaskDeliveryCard({
 	projectId,
 	taskId,
@@ -48,6 +37,7 @@ export function TaskDeliveryCard({
 			projectId={projectId}
 			taskId={taskId}
 			canWrite={hasProjectPermission("tasks.write")}
+			canConfigure={hasProjectPermission("projects.write")}
 		/>
 	);
 }
@@ -55,10 +45,12 @@ function DeliveryContent({
 	projectId,
 	taskId,
 	canWrite,
+	canConfigure,
 }: {
 	projectId: string;
 	taskId: string;
 	canWrite: boolean;
+	canConfigure: boolean;
 }) {
 	const { t } = useTranslation("projects");
 	const client = useQueryClient();
@@ -102,7 +94,7 @@ function DeliveryContent({
 		onError: async (error, command) => {
 			// Unknown transport outcome must retry the same request ID and version.
 			// Known domain failures require fresh state and a new explicit decision.
-			setRetryCommand(errorCode(error) ? null : command);
+			setRetryCommand(deliveryOutcomeUncertain(error) ? command : null);
 			await Promise.all([query.refetch(), repository.refetch()]);
 		},
 	});
@@ -150,7 +142,9 @@ function DeliveryContent({
 	function act(command: DeliveryCommand) {
 		if (!busy && canWrite && active && !retryCommand) mutation.mutate(command);
 	}
-	const error = mutation.isError ? errorCode(mutation.error) : undefined;
+	const error = mutation.isError
+		? deliveryErrorCode(mutation.error)
+		: undefined;
 	return (
 		<Card>
 			<CardHeader>
@@ -181,6 +175,19 @@ function DeliveryContent({
 				{repository.data?.status === "revoked" && (
 					<p role="alert">{t("delivery.revoked")}</p>
 				)}
+				{canConfigure &&
+					!repository.isError &&
+					!repository.isPending &&
+					(!repository.data || repository.data.status === "revoked") && (
+						<Link
+							className="text-sm text-primary underline"
+							to="/projects/$projectId/settings"
+							params={{ projectId }}
+							search={{ section: "github" }}
+						>
+							{t("repositorySettings.title")}
+						</Link>
+					)}
 				{delivery && (
 					<div className="space-y-2">
 						<p role="status" className="font-medium">

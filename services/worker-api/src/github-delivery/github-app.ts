@@ -2,6 +2,12 @@ import { Buffer } from "node:buffer";
 import { createPrivateKey, sign } from "node:crypto";
 import * as z from "zod";
 import {
+  type GitHubRepositoryDiscoverySource,
+  type RepositoryDiscovery,
+  type RepositoryDiscoveryInput,
+  repositoryDiscoveryInputSchema,
+} from "./discovery";
+import {
   GitHubDeliveryError,
   type GitHubDeliveryPolicy,
   type GitHubDeliveryReference,
@@ -60,36 +66,54 @@ export function githubAppJwt(credentials: GitHubAppCredentials, now = new Date()
 }
 /** Mints a per-request, one-repository, read-only installation token. It is
  * never cached in a global, persisted, logged, or returned to the client. */
-export class GitHubAppDeliverySource implements GitHubDeliverySource {
+export class GitHubAppDeliverySource
+  implements GitHubDeliverySource, GitHubRepositoryDiscoverySource
+{
   constructor(
     private readonly credentials: GitHubAppCredentials,
     private readonly fetch_: typeof fetch = globalThis.fetch,
   ) {}
-  private async token(target: Target, signal: AbortSignal): Promise<string> {
+  private async mint(
+    installationId: number,
+    selector: { repository_ids: number[] } | { repositories: string[] },
+    signal: AbortSignal,
+  ) {
     const parsed = tokenSchema.safeParse(
       await githubJson(
-        `/app/installations/${target.installationId}/access_tokens`,
+        `/app/installations/${installationId}/access_tokens`,
         githubAppJwt(this.credentials),
         signal,
         this.fetch_,
-        { repository_ids: [target.repositoryId], permissions },
+        { ...selector, permissions },
       ),
     );
     if (!parsed.success) throw new GitHubDeliveryError("GITHUB_DELIVERY_UNAVAILABLE");
-    const repository = parsed.data.repositories[0];
     const expires = Date.parse(parsed.data.expires_at);
+    if (expires < Date.now() + 30000 || expires > Date.now() + 3900000)
+      throw new GitHubDeliveryError("GITHUB_DELIVERY_UNAVAILABLE");
+    return parsed.data;
+  }
+  private async token(target: Target, signal: AbortSignal): Promise<string> {
+    const minted = await this.mint(
+      target.installationId,
+      { repository_ids: [target.repositoryId] },
+      signal,
+    );
+    const repository = minted.repositories[0];
     if (
       !repository ||
       repository.id !== target.repositoryId ||
       repository.full_name.toLowerCase() !==
-        `${target.policy.owner}/${target.policy.repository}`.toLowerCase() ||
-      expires < Date.now() + 30000 ||
-      expires > Date.now() + 3900000
+        `${target.policy.owner}/${target.policy.repository}`.toLowerCase()
     )
       throw new GitHubDeliveryError("GITHUB_DELIVERY_UNAVAILABLE");
-    return parsed.data.token;
+    return minted.token;
   }
-  private async verify(target: Target, token: string, signal: AbortSignal) {
+  private async verify(
+    target: { repositoryId: number; policy: Pick<GitHubDeliveryPolicy, "owner" | "repository"> },
+    token: string,
+    signal: AbortSignal,
+  ) {
     const result = z
       .object({
         id: identifier,
@@ -136,5 +160,87 @@ export class GitHubAppDeliverySource implements GitHubDeliverySource {
     const token = await this.token(target, signal);
     await this.verify(target, token, signal);
     return new GitHubDeliveryReader(token, this.fetch_).inspect(target.policy, reference, signal);
+  }
+  async discover(value: RepositoryDiscoveryInput): Promise<RepositoryDiscovery> {
+    const input = repositoryDiscoveryInputSchema.safeParse(value);
+    if (!input.success) throw new GitHubDeliveryError("GITHUB_DELIVERY_INPUT_INVALID");
+    const { owner, repository, pullNumber, reviewerIds, reviewerLogins } = input.data;
+    const signal = AbortSignal.timeout(20000);
+    const installed = z
+      .object({
+        id: identifier,
+        app_id: identifier,
+        account: z.object({ login: z.string().min(1).max(100) }),
+        suspended_at: z.null(),
+        permissions: tokenSchema.shape.permissions,
+      })
+      .safeParse(
+        await githubJson(
+          `/repos/${owner}/${repository}/installation`,
+          githubAppJwt(this.credentials),
+          signal,
+          this.fetch_,
+        ),
+      );
+    if (
+      !installed.success ||
+      installed.data.app_id !== Number(this.credentials.appId) ||
+      installed.data.account.login.toLowerCase() !== owner.toLowerCase()
+    )
+      throw new GitHubDeliveryError("GITHUB_DELIVERY_UNAVAILABLE");
+    // Initial discovery narrows by one repository name; subsequent persisted
+    // reads use the verified immutable ID. No installation-wide token is minted.
+    const minted = await this.mint(installed.data.id, { repositories: [repository] }, signal);
+    const target = minted.repositories[0];
+    if (!target || target.full_name.toLowerCase() !== `${owner}/${repository}`.toLowerCase())
+      throw new GitHubDeliveryError("GITHUB_DELIVERY_UNAVAILABLE");
+    await this.verify(
+      { repositoryId: target.id, policy: { owner, repository } },
+      minted.token,
+      signal,
+    );
+    const accounts = reviewerLogins ?? reviewerIds ?? [];
+    const results = await Promise.allSettled([
+      new GitHubDeliveryReader(minted.token, this.fetch_).discoverChecks(input.data, signal),
+      Promise.all(
+        accounts.map(async (account) => {
+          const path = typeof account === "string" ? `/users/${account}` : `/user/${account}`;
+          // Only public account identity is needed, not profile/email data or
+          // additional GitHub permissions. The response is reduced immediately.
+          const user = z
+            .object({
+              id: identifier,
+              login: repositoryDiscoveryInputSchema.shape.owner,
+              type: z.literal("User"),
+            })
+            .safeParse(await githubJson(path, minted.token, signal, this.fetch_));
+          if (
+            !user.success ||
+            (typeof account === "number"
+              ? user.data.id !== account
+              : user.data.login.toLowerCase() !== account.toLowerCase())
+          )
+            throw new GitHubDeliveryError("GITHUB_DELIVERY_UNAVAILABLE");
+          return { id: user.data.id, login: user.data.login };
+        }),
+      ),
+    ]);
+    const checks = results[0];
+    const reviewers = results[1];
+    if (
+      checks.status !== "fulfilled" ||
+      reviewers.status !== "fulfilled" ||
+      new Set(reviewers.value.map((user) => user.id)).size !== reviewers.value.length
+    )
+      throw new GitHubDeliveryError("GITHUB_DELIVERY_UNAVAILABLE");
+    return {
+      owner,
+      repository,
+      repositoryId: target.id,
+      installationId: installed.data.id,
+      pullNumber,
+      ...checks.value,
+      reviewers: reviewers.value,
+    };
   }
 }

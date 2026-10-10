@@ -1924,5 +1924,29 @@
 			"missing": "Missing",
 			"stale": "Expired"
 		}
+	},
+	"repositorySettings": {
+		"title": "GitHub delivery settings",
+		"hint": "Connect the read-only GitHub App before discovery. Every delivery requires human acceptance.",
+		"connected": "Repository connected",
+		"publisher": "Publisher #{{id}}",
+		"reviewPolicy": "Required approvals: {{count}}; trusted reviewers: {{reviewers}}",
+		"readOnly": "Changing this policy requires project edit and instance settings permissions.",
+		"repository": "Repository (owner/name)",
+		"samplePr": "Example PR number",
+		"sampleHint": "Use a PR with CI runs to select the checks required for this project.",
+		"reviewers": "Trusted reviewer usernames (comma separated)",
+		"keepReviewers": "Keep the currently configured reviewers",
+		"discover": "Discover repository checks",
+		"discoveryError": "Could not verify the installed App, repository, PR or reviewer accounts. Check them and retry.",
+		"checks": "Required CI checks (select 1–20)",
+		"noChecks": "This PR has no CI checks. Run CI, then discover again.",
+		"verifiedReviewers": "Verified reviewers: {{names}}",
+		"approvals": "Required GitHub approvals (0–5)",
+		"age": "Maximum CI age (minutes, up to 7 days)",
+		"saveHint": "Saving a policy invalidates previous delivery evidence and acceptance.",
+		"save": "Save delivery policy",
+		"saved": "Delivery policy saved. Tasks must refresh their evidence.",
+		"invalidPolicy": "Choose 1–20 checks, an approval count within the verified reviewers, and a CI age of 1–10080 minutes."
 	}
 }

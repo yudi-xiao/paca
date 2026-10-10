@@ -1924,5 +1924,29 @@
 			"missing": "없음",
 			"stale": "만료"
 		}
+	},
+	"repositorySettings": {
+		"title": "GitHub 납품 설정",
+		"hint": "조회 전에 읽기 전용 GitHub App을 연결하세요. 모든 납품은 사용자 승인이 필요합니다.",
+		"connected": "저장소 연결됨",
+		"publisher": "게시자 #{{id}}",
+		"reviewPolicy": "필수 승인: {{count}}; 신뢰하는 검토자: {{reviewers}}",
+		"readOnly": "정책 변경에는 프로젝트 편집 권한과 인스턴스 설정 권한이 필요합니다.",
+		"repository": "저장소 (소유자/이름)",
+		"samplePr": "예시 PR 번호",
+		"sampleHint": "CI 실행이 있는 PR에서 이 프로젝트의 필수 검사를 선택하세요.",
+		"reviewers": "신뢰하는 검토자의 GitHub 사용자 이름 (쉼표로 구분)",
+		"keepReviewers": "현재 검토자 유지",
+		"discover": "저장소 검사 조회",
+		"discoveryError": "설치된 App, 저장소, PR 또는 검토자 계정을 확인할 수 없습니다. 확인 후 다시 시도하세요.",
+		"checks": "필수 CI 검사 (1–20개 선택)",
+		"noChecks": "이 PR에는 CI 검사가 없습니다. CI 실행 후 다시 조회하세요.",
+		"verifiedReviewers": "확인된 검토자: {{names}}",
+		"approvals": "필수 GitHub 승인 수 (0–5)",
+		"age": "CI 최대 유효 시간 (분, 최대 7일)",
+		"saveHint": "정책을 저장하면 이전 납품 증거와 승인이 무효화됩니다.",
+		"save": "납품 정책 저장",
+		"saved": "정책을 저장했습니다. 작업의 증거를 새로고침하세요.",
+		"invalidPolicy": "검사 1–20개, 확인된 검토자 수 이내의 승인 수, CI 유효 시간 1–10080분을 선택하세요."
 	}
 }

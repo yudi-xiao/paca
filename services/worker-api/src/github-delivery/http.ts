@@ -7,6 +7,7 @@ import {
   requireProjectPermission,
   requireSystemPermission,
 } from "../permission/http";
+import { repositoryDiscoveryInputSchema } from "./discovery";
 import { GitHubDeliveryError } from "./evidence";
 import type { GitHubDeliveryRuntime } from "./runtime";
 import {
@@ -153,6 +154,28 @@ export function createGitHubDeliveryRoutes(
           data: { ...saved, updatedAt: saved.updatedAt.toISOString() },
           request_id: context.get("requestId"),
         });
+      } catch (error) {
+        return failure(context, error);
+      }
+    },
+  );
+  app.post(
+    `${repoPath}/discover`,
+    requireProjectPermission(authorize, { projects: ["write"] }),
+    requireSystemPermission(systemAuthorize, { settings: ["write"] }),
+    async (context) => {
+      try {
+        validScope(context);
+        const input = repositoryDiscoveryInputSchema.safeParse(await readJson(context.req.raw));
+        if (!input.success) throw new DeliveryWorkflowError("DELIVERY_INPUT_INVALID");
+        const data = await runtime.discover(
+          context.env,
+          context.req.raw,
+          context.req.param("projectId"),
+          context.get("permissionActorId"),
+          input.data,
+        );
+        return context.json({ success: true as const, data, request_id: context.get("requestId") });
       } catch (error) {
         return failure(context, error);
       }

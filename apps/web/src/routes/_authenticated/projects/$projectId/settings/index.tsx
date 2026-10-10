@@ -8,15 +8,16 @@ import {
 	Shield,
 	Tag,
 } from "lucide-react";
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CustomFieldsSettings } from "@/components/projects/settings/CustomFieldsSettings";
 import { DangerZone } from "@/components/projects/settings/DangerZone";
 import { GeneralSettings } from "@/components/projects/settings/GeneralSettings";
+import { GitHubDeliverySettings } from "@/components/projects/settings/GitHubDeliverySettings";
 import { RolesSettings } from "@/components/projects/settings/RolesSettings";
 import { TaskStatusesSettings } from "@/components/projects/settings/TaskStatusesSettings";
 import { TaskTypesSettings } from "@/components/projects/settings/TaskTypesSettings";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { currentUserQueryOptions } from "@/lib/auth-api";
 import { RemoteComponent } from "@/lib/plugins/loader";
 import { usePluginRegistry } from "@/lib/plugins/registry";
@@ -34,14 +35,14 @@ import {
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/settings/",
 )({
+	validateSearch: (search: Record<string, unknown>): { section?: string } =>
+		typeof search.section === "string" && search.section.length <= 200
+			? { section: search.section }
+			: {},
+	loaderDeps: ({ search }) => ({ section: search.section }),
 	loader: async ({ context: { queryClient }, params: { projectId } }) => {
 		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true") {
-			await Promise.all([
-				queryClient.ensureQueryData(projectQueryOptions(projectId)),
-				queryClient.ensureQueryData(projectRolesQueryOptions(projectId)),
-				queryClient.ensureQueryData(projectMembersQueryOptions(projectId)),
-				queryClient.ensureQueryData(customFieldsQueryOptions(projectId)),
-			]);
+			await queryClient.ensureQueryData(projectQueryOptions(projectId));
 			return;
 		}
 		await Promise.all([
@@ -64,6 +65,7 @@ const NAV_ITEMS = [
 		labelKey: "project.settingsPage.nav.general",
 		icon: Settings,
 	},
+	{ id: "github", labelKey: "repositorySettings.title", icon: Shield },
 	{ id: "roles", labelKey: "project.settingsPage.nav.roles", icon: Shield },
 	{
 		id: "task-statuses",
@@ -90,14 +92,24 @@ const NAV_ITEMS = [
 function SettingsPage() {
 	const { t } = useTranslation("projects");
 	const { projectId } = Route.useParams();
+	const { section } = Route.useSearch();
+	const navigate = Route.useNavigate();
 	const isInternalPreview = import.meta.env.VITE_INTERNAL_PREVIEW === "true";
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	const { hasPermission } = usePermissions();
-	const { data: currentUser } = useQuery(currentUserQueryOptions);
-	const { data: members = [] } = useQuery(
-		projectMembersQueryOptions(projectId),
-	);
-	const { data: roles = [] } = useQuery(projectRolesQueryOptions(projectId));
+	const { hasProjectPermission } = useProjectPermissions(projectId);
+	const { data: currentUser } = useQuery({
+		...currentUserQueryOptions,
+		enabled: !isInternalPreview,
+	});
+	const { data: members = [] } = useQuery({
+		...projectMembersQueryOptions(projectId),
+		enabled: !isInternalPreview,
+	});
+	const { data: roles = [] } = useQuery({
+		...projectRolesQueryOptions(projectId),
+		enabled: !isInternalPreview,
+	});
 
 	const myMembership = (members as ProjectMember[]).find(
 		(m) => m.user_id === currentUser?.id,
@@ -120,16 +132,23 @@ function SettingsPage() {
 			"project.roles.write"
 		],
 	);
-	const canDelete = hasPermission("projects.delete") || hasProjectDelete;
-	const canEditProject = hasPermission("projects.write") || hasProjectWrite;
-	const canManageRoles =
-		hasPermission("project.roles.write") || hasProjectRolesWrite;
+	const canDelete = isInternalPreview
+		? hasProjectPermission("projects.delete")
+		: hasPermission("projects.delete") || hasProjectDelete;
+	const canEditProject = isInternalPreview
+		? hasProjectPermission("projects.write")
+		: hasPermission("projects.write") || hasProjectWrite;
+	const canManageRoles = isInternalPreview
+		? hasProjectPermission("project.roles.write")
+		: hasPermission("project.roles.write") || hasProjectRolesWrite;
 	const hasTasksWrite = Boolean(
 		(myRole?.permissions as Record<string, boolean> | undefined)?.[
 			"tasks.write"
 		],
 	);
-	const canManageTasks = hasPermission("tasks.write") || hasTasksWrite;
+	const canManageTasks = isInternalPreview
+		? hasProjectPermission("tasks.write")
+		: hasPermission("tasks.write") || hasTasksWrite;
 
 	const { getRegistrations } = usePluginRegistry();
 	const pluginTabs = getRegistrations("project.settings.tab").filter(
@@ -138,22 +157,26 @@ function SettingsPage() {
 
 	const availableNavItems = isInternalPreview
 		? NAV_ITEMS.filter((item) =>
-				["general", "roles", "custom-fields", "danger"].includes(item.id),
+				["general", "roles", "custom-fields", "github", "danger"].includes(
+					item.id,
+				),
 			)
-		: NAV_ITEMS;
+		: NAV_ITEMS.filter((item) => item.id !== "github");
 	const visibleNavItems = canDelete
 		? availableNavItems
 		: availableNavItems.filter((i) => i.id !== "danger");
 
-	const [activeSection, setActiveSection] = useState<
-		| "general"
-		| "roles"
-		| "task-statuses"
-		| "task-types"
-		| "custom-fields"
-		| "danger"
-		| string
-	>("general");
+	const activeSection =
+		section &&
+		(visibleNavItems.some((item) => item.id === section) ||
+			pluginTabs.some(
+				(tab) => `plugin:${tab.pluginId}:${tab.component}` === section,
+			))
+			? section
+			: "general";
+	const setActiveSection = (value: string) => {
+		void navigate({ search: { section: value }, replace: true });
+	};
 
 	return (
 		<div className="flex flex-col min-h-0 flex-1">
@@ -267,6 +290,9 @@ function SettingsPage() {
 
 						{activeSection === "general" && (
 							<GeneralSettings projectId={projectId} canEdit={canEditProject} />
+						)}
+						{activeSection === "github" && isInternalPreview && (
+							<GitHubDeliverySettings projectId={projectId} />
 						)}
 						{activeSection === "roles" && (
 							<RolesSettings

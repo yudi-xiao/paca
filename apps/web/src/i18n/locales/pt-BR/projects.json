@@ -1924,5 +1924,29 @@
 			"missing": "Ausente",
 			"stale": "Expirado"
 		}
+	},
+	"repositorySettings": {
+		"title": "Configurações de entrega do GitHub",
+		"hint": "Conecte primeiro a GitHub App somente leitura. Cada entrega exige aceitação humana.",
+		"connected": "Repositório conectado",
+		"publisher": "Publicador #{{id}}",
+		"reviewPolicy": "Aprovações necessárias: {{count}}; revisores confiáveis: {{reviewers}}",
+		"readOnly": "Alterar esta política exige permissão para editar o projeto e configurar a instância.",
+		"repository": "Repositório (proprietário/nome)",
+		"samplePr": "Número de PR de exemplo",
+		"sampleHint": "Use um PR com execuções de CI para escolher as verificações exigidas do projeto.",
+		"reviewers": "Usuários do GitHub dos revisores (separados por vírgulas)",
+		"keepReviewers": "Manter os revisores atuais",
+		"discover": "Descobrir verificações",
+		"discoveryError": "Não foi possível verificar a App instalada, o repositório, o PR ou os revisores. Verifique e tente novamente.",
+		"checks": "Verificações CI obrigatórias (selecione 1–20)",
+		"noChecks": "Este PR não tem verificações CI. Execute CI e consulte novamente.",
+		"verifiedReviewers": "Revisores verificados: {{names}}",
+		"approvals": "Aprovações do GitHub exigidas (0–5)",
+		"age": "Idade máxima de CI (minutos, até 7 dias)",
+		"saveHint": "Salvar a política invalida as evidências e aceitações anteriores.",
+		"save": "Salvar política de entrega",
+		"saved": "Política salva. As tarefas precisam atualizar as evidências.",
+		"invalidPolicy": "Selecione 1–20 verificações, aprovações dentro do número de revisores e uma idade de CI de 1–10080 minutos."
 	}
 }

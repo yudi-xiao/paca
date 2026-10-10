@@ -29,6 +29,7 @@ API 使用同源 Better Auth 用户 Session。仓库配置同时要求项目 `pr
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET/PUT | `/api/v1/projects/:projectId/github-repository` | 读取或配置仓库及验收策略 |
+| POST | `/api/v1/projects/:projectId/github-repository/discover` | 只读发现目标 PR 的 CI 发布方及评审者身份，不保存策略 |
 | GET/POST | `/api/v1/projects/:projectId/tasks/:taskId/delivery` | 读取交付或提交固定 PR/SHA |
 | GET | `/api/v1/projects/:projectId/tasks/:taskId/delivery/completed-runs` | 选择已完成的本任务 Agent 运行，每页最多 20 条，UUID `cursor` 续页 |
 | POST | `/api/v1/projects/:projectId/tasks/:taskId/delivery/refresh` | 从 GitHub 更新证据 |
@@ -56,6 +57,12 @@ API 使用同源 Better Auth 用户 Session。仓库配置同时要求项目 `pr
 ```
 
 每个 Check 同时固定名称和发布它的 GitHub App ID，不将 Paca 的 App ID 自动当作 CI 发布者。评审策略使用获信任 GitHub 用户的数字 ID；PR 作者自己的批准不计入。服务端拒绝未知、过期、截断、错误仓库或其他提交的证据。
+
+internal 项目设置的「GitHub 交付设置」提供配置入口，也可从尚未连接仓库的任务交付卡片打开。输入 `owner/repository`、一项已有 CI 的示例 PR 编号和可信评审者用户名，点击发现后选择必需 CI、批准数量和检查有效期，再保存。检查列表同时显示名称和发布方 ID，避免将同名检查混为一项；评审用户名由 GitHub 核验并固定为数字 ID。保存仓库或策略变更会失效之前的交付验收。
+
+发现请求包含 `owner`、`repository`、`pullNumber`，可选 `reviewerLogins` 或用于核对已有策略的 `reviewerIds`，二者不能同时提交。最多解析 20 名真人评审者和 500 项完整 CI 结果，整个 GitHub 查询共用 20 秒预算；检查前后重新读取 PR head，变化时要求重新发现。仅返回仓库/安装 ID、固定 head、CI 发布方和账号 ID/用户名；不返回令牌、个人资料或任意 GitHub payload。发现与保存均要求上述两类管理权限，并在外部请求后重新检查权限。
+
+页面以读取的策略版本保护保存；其他管理员修改后须重新加载并发现。网络断开或 5xx 导致结果不确定时，显式重试复用原请求 ID、版本和 payload；不能切换目标后复用旧命令。只读成员可查看当前策略，不会取得管理按钮。
 
 提交交付包含 `requestId`、`expectedVersion`、`leaseId`、`pullNumber` 和完整 40 位小写 `headSha`。租约须已完成且属于 URL 的项目及 Task。浏览器不提交 CI 结果、验收身份、其他仓库 URL 或证据 payload。
 

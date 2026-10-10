@@ -1,9 +1,11 @@
 import type { AppBindings } from "../bindings";
 import { withDatabase } from "../database";
 import { authorizeProjectPermission, authorizeSystemPermission } from "../permission/http";
+import { GitHubRepositoryDiscoveryService, type RepositoryDiscovery } from "./discovery";
 import { GitHubAppDeliverySource } from "./github-app";
 import { PostgresGitHubDeliveryRepository } from "./postgres-repository";
 import {
+  type AssertDeliveryPermission,
   type CompletedDeliveryRunPage,
   DeliveryWorkflowError,
   type GitHubDeliveryRepository,
@@ -13,6 +15,13 @@ import {
 } from "./service";
 
 export type GitHubDeliveryRuntime = {
+  discover(
+    env: AppBindings,
+    request: Request,
+    projectId: string,
+    actorId: string,
+    input: unknown,
+  ): Promise<RepositoryDiscovery>;
   completedRuns(
     env: AppBindings,
     projectId: string,
@@ -76,29 +85,40 @@ function service(env: AppBindings, request: Request) {
       appId: env.GITHUB_APP_ID,
       privateKey: env.GITHUB_APP_PRIVATE_KEY,
     }),
-    async (projectId, actorId, configure) => {
-      const project = await authorizeProjectPermission(
-        request,
-        env,
-        projectId,
-        configure ? { projects: ["write"] } : { tasks: ["write"] },
-      );
-      if (
-        !project.authenticated ||
-        project.userId !== actorId ||
-        !project.decision.allowed ||
-        !project.decision.scopeExists
-      )
-        throw new DeliveryWorkflowError("DELIVERY_PERMISSION_DENIED");
-      if (configure) {
-        const system = await authorizeSystemPermission(request, env, { settings: ["write"] });
-        if (!system.authenticated || system.userId !== actorId || !system.allowed)
-          throw new DeliveryWorkflowError("DELIVERY_PERMISSION_DENIED");
-      }
-    },
+    authorizer(env, request),
   );
 }
+function authorizer(env: AppBindings, request: Request): AssertDeliveryPermission {
+  return async (projectId, actorId, configure) => {
+    const project = await authorizeProjectPermission(
+      request,
+      env,
+      projectId,
+      configure ? { projects: ["write"] } : { tasks: ["write"] },
+    );
+    if (
+      !project.authenticated ||
+      project.userId !== actorId ||
+      !project.decision.allowed ||
+      !project.decision.scopeExists
+    )
+      throw new DeliveryWorkflowError("DELIVERY_PERMISSION_DENIED");
+    if (configure) {
+      const system = await authorizeSystemPermission(request, env, { settings: ["write"] });
+      if (!system.authenticated || system.userId !== actorId || !system.allowed)
+        throw new DeliveryWorkflowError("DELIVERY_PERMISSION_DENIED");
+    }
+  };
+}
 export const githubDeliveryRuntime: GitHubDeliveryRuntime = {
+  discover: (env, request, projectId, actorId, input) =>
+    new GitHubRepositoryDiscoveryService(
+      new GitHubAppDeliverySource({
+        appId: env.GITHUB_APP_ID,
+        privateKey: env.GITHUB_APP_PRIVATE_KEY,
+      }),
+      authorizer(env, request),
+    ).discover(projectId, actorId, input),
   completedRuns: (env, projectId, taskId, cursor) =>
     withDatabase(env, (db) =>
       new PostgresGitHubDeliveryRepository(db).completedRuns(projectId, taskId, cursor),

@@ -71,6 +71,17 @@ function runtime() {
     },
   };
   const implementation = {
+    discover: vi.fn(async () => ({
+      owner: "paca-test",
+      repository: "delivery",
+      repositoryId: 100,
+      installationId: 200,
+      pullNumber: 42,
+      headSha: "a".repeat(40),
+      observedAt: new Date().toISOString(),
+      checks: [],
+      reviewers: [],
+    })),
     completedRuns: vi.fn(async () => ({
       items: [{ leaseId, harnessKind: "codex", finishedAt: new Date() }],
       nextCursor: null,
@@ -100,6 +111,42 @@ function request(body: unknown, method = "POST") {
   };
 }
 describe("GitHub delivery user HTTP boundary", () => {
+  it("requires current project and system write authority for bounded read-only discovery", async () => {
+    const { app, implementation } = runtime();
+    const input = {
+      owner: "paca-test",
+      repository: "delivery",
+      pullNumber: 42,
+      reviewerLogins: ["alice"],
+    };
+    const response = await app.request(`${repoPath}/discover`, request(input), env);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(implementation.discover).toHaveBeenCalledWith(
+      env,
+      expect.any(Request),
+      projectId,
+      "trusted-user",
+      input,
+    );
+    expect(
+      (await app.request(`${repoPath}/discover`, request({ ...input, token: "forged" }), env))
+        .status,
+    ).toBe(400);
+    const denied = createApp({
+      githubDelivery: implementation,
+      authorizeProjectPermission: allow,
+      authorizeSystemPermission: async () => ({
+        authenticated: true,
+        userId: "trusted-user",
+        allowed: false,
+        grants: [],
+      }),
+      log: vi.fn(),
+    });
+    expect((await denied.request(`${repoPath}/discover`, request(input), env)).status).toBe(403);
+    expect(implementation.discover).toHaveBeenCalledTimes(1);
+  });
   it("lists completed runs only through task read authorization and validates the cursor", async () => {
     const { app, implementation } = runtime();
     const response = await app.request(`${taskPath}/completed-runs`, {}, env);

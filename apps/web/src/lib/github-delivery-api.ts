@@ -2,6 +2,33 @@ import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { apiClient } from "./api-client";
 import type { SuccessEnvelope } from "./api-error";
 
+export function deliveryErrorCode(error: unknown): string | undefined {
+	if (!error || typeof error !== "object" || !("response" in error))
+		return undefined;
+	const response = error.response;
+	if (!response || typeof response !== "object" || !("data" in response))
+		return undefined;
+	const data = response.data;
+	return data &&
+		typeof data === "object" &&
+		"error_code" in data &&
+		typeof data.error_code === "string"
+		? data.error_code
+		: undefined;
+}
+export function deliveryOutcomeUncertain(error: unknown): boolean {
+	if (!error || typeof error !== "object" || !("response" in error))
+		return true;
+	const response = error.response;
+	return (
+		!response ||
+		typeof response !== "object" ||
+		!("status" in response) ||
+		typeof response.status !== "number" ||
+		response.status >= 500
+	);
+}
+
 export type DeliveryPolicy = {
 	owner: string;
 	repository: string;
@@ -65,6 +92,58 @@ export type CompletedDeliveryRuns = {
 	items: { leaseId: string; harnessKind: string; finishedAt: string }[];
 	nextCursor: string | null;
 };
+export type RepositoryDiscoveryInput = {
+	owner: string;
+	repository: string;
+	pullNumber: number;
+	reviewerLogins?: string[];
+	reviewerIds?: number[];
+};
+export type RepositoryDiscovery = {
+	owner: string;
+	repository: string;
+	repositoryId: number;
+	installationId: number;
+	pullNumber: number;
+	headSha: string;
+	observedAt: string;
+	checks: {
+		name: string;
+		appId: number;
+		appName: string | null;
+		appSlug: string | null;
+	}[];
+	reviewers: { id: number; login: string }[];
+};
+export type DeliveryRepositoryCommand = {
+	requestId: string;
+	expectedVersion: number;
+	repositoryId: number;
+	installationId: number;
+	policy: DeliveryPolicy;
+};
+export async function discoverDeliveryRepository(
+	projectId: string,
+	input: RepositoryDiscoveryInput,
+): Promise<RepositoryDiscovery> {
+	return (
+		await apiClient.instance.post<SuccessEnvelope<RepositoryDiscovery>>(
+			`/projects/${projectId}/github-repository/discover`,
+			input,
+		)
+	).data.data;
+}
+export async function configureDeliveryRepository(
+	projectId: string,
+	input: DeliveryRepositoryCommand,
+): Promise<DeliveryRepository> {
+	return (
+		await apiClient.instance.put<SuccessEnvelope<DeliveryRepository>>(
+			`/projects/${projectId}/github-repository`,
+			input,
+		)
+	).data.data;
+}
 const path = (projectId: string, taskId: string) =>
 	`/projects/${projectId}/tasks/${taskId}/delivery`;
 const fresh = { staleTime: 0, gcTime: 0, retry: false as const };

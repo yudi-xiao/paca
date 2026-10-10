@@ -1924,5 +1924,29 @@
 			"missing": "Absent",
 			"stale": "Expiré"
 		}
+	},
+	"repositorySettings": {
+		"title": "Paramètres de livraison GitHub",
+		"hint": "Connectez d’abord la GitHub App en lecture seule. Chaque livraison exige une validation humaine.",
+		"connected": "Dépôt connecté",
+		"publisher": "Éditeur #{{id}}",
+		"reviewPolicy": "Approbations requises : {{count}} ; réviseurs de confiance : {{reviewers}}",
+		"readOnly": "Modifier cette politique exige les droits de modification du projet et de configuration de l’instance.",
+		"repository": "Dépôt (propriétaire/nom)",
+		"samplePr": "Numéro de PR exemple",
+		"sampleHint": "Utilisez une PR avec des exécutions CI pour sélectionner les contrôles requis du projet.",
+		"reviewers": "Identifiants GitHub des réviseurs (séparés par des virgules)",
+		"keepReviewers": "Conserver les réviseurs actuels",
+		"discover": "Découvrir les contrôles",
+		"discoveryError": "Impossible de vérifier l’App installée, le dépôt, la PR ou les réviseurs. Vérifiez et réessayez.",
+		"checks": "Contrôles CI requis (choisir 1 à 20)",
+		"noChecks": "Cette PR n’a aucun contrôle CI. Exécutez CI puis relancez la recherche.",
+		"verifiedReviewers": "Réviseurs vérifiés : {{names}}",
+		"approvals": "Approbations GitHub requises (0 à 5)",
+		"age": "Ancienneté maximale de CI (minutes, jusqu’à 7 jours)",
+		"saveHint": "L’enregistrement invalide les preuves et validations précédentes.",
+		"save": "Enregistrer la politique",
+		"saved": "Politique enregistrée. Les tâches doivent actualiser leurs preuves.",
+		"invalidPolicy": "Choisissez 1 à 20 contrôles, un nombre d’approbations limité aux réviseurs vérifiés et une durée CI de 1 à 10080 minutes."
 	}
 }

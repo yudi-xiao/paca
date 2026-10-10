@@ -66,7 +66,14 @@ export const checkSchema = z.object({
   status: z.string().min(1).max(50),
   conclusion: z.string().max(50).nullable(),
   completed_at: z.iso.datetime({ offset: true }).nullable(),
-  app: z.object({ id: identifier }),
+  app: z.object({
+    id: identifier,
+    name: z.string().min(1).max(200).optional(),
+    slug: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9-]{0,99}$/)
+      .optional(),
+  }),
 });
 export const reviewSchema = z.object({
   id: identifier,

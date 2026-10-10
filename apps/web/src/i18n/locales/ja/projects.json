@@ -1924,5 +1924,29 @@
 			"missing": "未取得",
 			"stale": "期限切れ"
 		}
+	},
+	"repositorySettings": {
+		"title": "GitHub 納品設定",
+		"hint": "取得前に読み取り専用 GitHub App を接続してください。すべての納品には人の承認が必要です。",
+		"connected": "リポジトリ接続済み",
+		"publisher": "発行元 #{{id}}",
+		"reviewPolicy": "必要な承認数：{{count}}、信頼するレビュアー：{{reviewers}}",
+		"readOnly": "ポリシーの変更にはプロジェクト編集権限とインスタンス設定権限が必要です。",
+		"repository": "リポジトリ（所有者/名前）",
+		"samplePr": "サンプル PR 番号",
+		"sampleHint": "CI 実行がある PR から、このプロジェクトの必須チェックを選択します。",
+		"reviewers": "信頼するレビュアーの GitHub ユーザー名（カンマ区切り）",
+		"keepReviewers": "現在のレビュアーを維持",
+		"discover": "リポジトリのチェックを取得",
+		"discoveryError": "インストール済み App、リポジトリ、PR またはレビュアーを確認できません。確認して再試行してください。",
+		"checks": "必須 CI チェック（1〜20 項目）",
+		"noChecks": "この PR には CI チェックがありません。CI 実行後に再取得してください。",
+		"verifiedReviewers": "確認済みレビュアー：{{names}}",
+		"approvals": "必要な GitHub 承認数（0〜5）",
+		"age": "CI の最大有効期間（分、最大 7 日）",
+		"saveHint": "保存すると以前の納品証拠と承認は無効になります。",
+		"save": "納品ポリシーを保存",
+		"saved": "ポリシーを保存しました。タスクの証拠を更新してください。",
+		"invalidPolicy": "チェックを1〜20項目、承認数を確認済み人数以内、有効期間を1〜10080分で設定してください。"
 	}
 }
