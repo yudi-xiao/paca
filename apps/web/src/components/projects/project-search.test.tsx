@@ -106,9 +106,7 @@ describe("project body search", () => {
 			"needle",
 		);
 		expect(mocks.get).not.toHaveBeenCalled();
-		await userEvent.click(
-			screen.getByRole("button", { name: /^Search$/ }),
-		);
+		await userEvent.click(screen.getByRole("button", { name: /^Search$/ }));
 		expect(await screen.findByText("#42 Release task")).toBeInTheDocument();
 		expect(screen.getByText(hit.snippet)).toBeInTheDocument();
 		expect(document.querySelector("script")).toBeNull();
