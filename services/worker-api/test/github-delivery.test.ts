@@ -224,7 +224,7 @@ describe("GitHub evidence HTTP adapter", () => {
       expect(new URL(String(url)).origin).toBe("https://api.github.com");
       expect(init).toMatchObject({
         method: "GET",
-        redirect: "error",
+        redirect: "manual",
         signal: expect.any(AbortSignal),
         headers: { authorization: "Bearer private-token", "x-github-api-version": "2026-03-10" },
       });

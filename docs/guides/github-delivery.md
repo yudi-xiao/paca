@@ -64,6 +64,8 @@ internal 项目设置的「GitHub 交付设置」提供配置入口，也可从�
 
 页面以读取的策略版本保护保存；其他管理员修改后须重新加载并发现。网络断开或 5xx 导致结果不确定时，显式重试复用原请求 ID、版本和 payload；不能切换目标后复用旧命令。只读成员可查看当前策略，不会取得管理按钮。
 
+部署后在 Worker 目录执行 `PACA_GITHUB_REPOSITORY_SMOKE_CONFIRM=RUN_INTERNAL_GITHUB_REPOSITORY_SMOKE bun run smoke:github-repository:internal` 可重复验证仓库配置 API。该命令另需已登录的 `pscale` 和 `PACA_PLANETSCALE_ORG`，仅访问 `paca/internal` 与已安装的 `yudi-xiao/paca`：创建 15 分钟数据库角色和临时 Session/项目，验证真实发现、保存/重放、版本冲突和系统权限撤销后清理。它不代表真实浏览器或真实开发任务的人工验收。
+
 提交交付包含 `requestId`、`expectedVersion`、`leaseId`、`pullNumber` 和完整 40 位小写 `headSha`。租约须已完成且属于 URL 的项目及 Task。浏览器不提交 CI 结果、验收身份、其他仓库 URL 或证据 payload。
 
 刷新包含 `requestId`、`expectedVersion`。人工决定另含 `decision`（`accept` 或 `request_changes`）和可选 `note`（最多 2000 字符）。接受前服务端重新采集证据，并在外部请求后复查用户权限；要求修改可以在 GitHub 暂时不可用时提交。CI 变绿或刷新不会自动覆盖人工要求修改。
@@ -79,3 +81,5 @@ Webhook 地址为 `/api/integrations/github/webhook`。使用 `GITHUB_WEBHOOK_SE
 接受和刷新受策略版本、交付版本及幂等键保护。GitHub 读取失败时旧接受状态失效；证据超过一分钟时读取响应要求刷新，将旧接受归入历史信息。业务审计保留决定、可信 actor、固定租约/仓库/PR/SHA 和安全门禁摘要。
 
 缺少 App 配置返回 `GITHUB_DELIVERY_APP_NOT_CONFIGURED`，不退回个人 Token 或 Agent API Key。版本冲突须重新读取。GitHub 网络、权限及超大响应错误使用稳定错误码，不返回原始错误、Token 或 PEM。
+
+GitHub 外部请求使用 `redirect: manual`，所有非 2xx（包括重定向）均拒绝；不会把令牌转发至 `Location` 地址。Workers 的请求构造与拒绝 302 已在原生运行时验证。失败日志仅记录关联请求 ID、操作类别、安全错误码/HTTP 状态及有界耗时，不含 URL、原始消息、正文或凭据。

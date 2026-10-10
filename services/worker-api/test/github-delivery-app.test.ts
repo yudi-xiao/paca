@@ -80,7 +80,7 @@ describe("GitHub App delivery credentials", () => {
     );
     const options = fetch_.mock.calls[0]?.[1];
     expect(options?.method).toBe("POST");
-    expect(options?.redirect).toBe("error");
+    expect(options?.redirect).toBe("manual");
     expect(JSON.parse(String(options?.body))).toEqual({
       repository_ids: [100],
       permissions: { metadata: "read", checks: "read", pull_requests: "read" },

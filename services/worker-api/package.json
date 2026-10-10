@@ -16,6 +16,7 @@
     "github:app:setup": "bun run scripts/setup-github-app.ts",
     "github:app:verify": "bun run scripts/verify-github-app.ts",
     "github:app:webhooks": "bun run scripts/inspect-github-app-webhooks.ts",
+    "smoke:github-repository:internal": "bun run scripts/smoke-github-repository-internal.ts",
     "db:reset:internal": "bun run scripts/reset-internal-database.ts",
     "auth:schema:generate": "auth generate --config src/auth/schema.config.ts --output src/db/schema/auth.ts --yes",
     "db:generate": "DATABASE_URL=postgresql://schema:generator@127.0.0.1:5432/paca drizzle-kit generate --config drizzle.config.ts",

@@ -55,6 +55,18 @@ async function readJson(request: Request): Promise<unknown> {
 function failure(context: DeliveryContext, error: unknown) {
   if (!(error instanceof DeliveryWorkflowError) && !(error instanceof GitHubDeliveryError))
     throw error;
+  if (error instanceof GitHubDeliveryError) {
+    // Only reviewed, bounded adapter metadata is observable. Never log remote
+    // bodies, URLs, user input, credentials, or the original error message.
+    console.warn(
+      JSON.stringify({
+        event: "github.delivery.unavailable",
+        requestId: context.get("requestId"),
+        code: error.code,
+        ...error.diagnostic,
+      }),
+    );
+  }
   const status =
     error instanceof GitHubDeliveryError
       ? 503

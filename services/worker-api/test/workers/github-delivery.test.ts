@@ -5,6 +5,40 @@ import { githubJson } from "../../src/github-delivery/github-http";
 import { verifyGitHubWebhook } from "../../src/github-delivery/webhook";
 
 describe("GitHub App credentials in the Workers runtime", () => {
+  it("constructs native Workers requests and refuses credential redirects", async () => {
+    expect(
+      await githubJson(
+        "/repos/test/repo/installation",
+        "test-token",
+        AbortSignal.timeout(1000),
+        async (input, init) => {
+          const request = new Request(input, init);
+          expect(request.redirect).toBe("manual");
+          return Response.json({ id: 1 });
+        },
+      ),
+    ).toEqual({ id: 1 });
+    let calls = 0;
+    await expect(
+      githubJson(
+        "/repos/test/repo/installation",
+        "test-token",
+        AbortSignal.timeout(1000),
+        async (input, init) => {
+          new Request(input, init);
+          calls++;
+          return new Response(null, {
+            status: 302,
+            headers: { location: "https://untrusted.test/steal" },
+          });
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "GITHUB_DELIVERY_UNAVAILABLE",
+      diagnostic: { failure: "http", httpStatus: 302 },
+    });
+    expect(calls).toBe(1);
+  });
   it("preserves 64-bit GitHub webhook delivery IDs without rounding in Workers", async () => {
     expect(
       await githubJson(

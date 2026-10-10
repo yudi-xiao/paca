@@ -131,7 +131,7 @@ describe("GitHub repository configuration discovery", () => {
     expect(
       f.fetch_.mock.calls.every(
         ([url, options]) =>
-          String(url).startsWith("https://api.github.com/") && options?.redirect === "error",
+          String(url).startsWith("https://api.github.com/") && options?.redirect === "manual",
       ),
     ).toBe(true);
     expect(new Set(f.fetch_.mock.calls.map(([, options]) => options?.signal)).size).toBe(1);

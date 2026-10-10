@@ -38,6 +38,21 @@ export const githubDeliveryReferenceSchema = z
   .object({ pullNumber: identifier, headSha: z.string().regex(/^[a-f0-9]{40}$/) })
   .strict();
 export type GitHubDeliveryReference = z.infer<typeof githubDeliveryReferenceSchema>;
+export type GitHubFailureDiagnostic = {
+  operation:
+    | "installation"
+    | "token"
+    | "repository"
+    | "pull"
+    | "checks"
+    | "reviews"
+    | "user"
+    | "other";
+  failure: "http" | "transport" | "response" | "too_large";
+  httpStatus?: number;
+  transportKind?: "aborted" | "timeout" | "invalid_request" | "other";
+  elapsedMs?: number;
+};
 export class GitHubDeliveryError extends Error {
   constructor(
     readonly code:
@@ -45,6 +60,7 @@ export class GitHubDeliveryError extends Error {
       | "GITHUB_DELIVERY_UNAVAILABLE"
       | "GITHUB_DELIVERY_APP_NOT_CONFIGURED"
       | "GITHUB_DELIVERY_TOO_LARGE",
+    readonly diagnostic?: GitHubFailureDiagnostic,
   ) {
     super(code);
     this.name = "GitHubDeliveryError";
