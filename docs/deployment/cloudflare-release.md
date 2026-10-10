@@ -53,6 +53,42 @@ Public email signup is disabled for production and unknown environment labels. T
 operator onboarding flow must be completed and tested before publishing a login page. Do not
 open public signup briefly to create the owner or copy a test user's password.
 
+### One-time unpublished production initialization
+
+`bun run db:inspect:production` captures only deployed Hyperdrive consumers and Paca domain
+ownership, never Secret bindings. The script listing API returns all scripts (its only optional
+filter is tags); a failed settings read fails the inventory. Both the known former-main and new
+production Hyperdrive must be unused. Inventory does not retire an unknown non-Worker consumer;
+the former broad main role is explicitly retired by initialization.
+
+Create and verify an immediately preceding named backup using the database provider's backup
+tool. For this initial clean-slate release, the operator is pinned to `paca/main`, branch ID
+`1taj95uxia8x`, and the known pre-release migration baseline through `0014`. Supply the successful
+backup ID and explicit initialization confirmation:
+
+```bash
+PACA_INITIALIZE_PRODUCTION=INITIALIZE_UNPUBLISHED_PACA_MAIN \
+PACA_PRODUCTION_BACKUP_ID=<verified-backup-id> bun run db:initialize:production
+PACA_PRODUCTION_OWNER_EMAIL=<owner-email> bun run auth:owner:production
+```
+
+These variables contain no passwords. Initialization rejects an old/unfinished backup, wrong
+branch, an existing production Worker or a consumed Hyperdrive. It resets the schema, replays
+versioned migrations and applies/verifies runtime grants in one transaction. Failure restores the
+previous schema. It cannot reset a current migration baseline again and is not a post-release
+maintenance command. A temporary TLS-verified operator credential stays in process memory,
+expires shortly, transfers ownership to `postgres` and is explicitly deleted on completion.
+
+The owner command verifies the complete ledger, runtime privileges and empty user table before
+opening a random one-time URL on `127.0.0.1`. The owner enters their own name and password there.
+The page expires after ten minutes and checks exact Host/Origin, email, input size, password
+confirmation and concurrent submissions. Account creation, canonical first-owner provisioning
+and bootstrap Session revocation share one transaction; failure leaves no partial user or role
+assignment. Repeated initialization is rejected. No account password, login cookie or provider credential
+is saved, printed or sent to a public endpoint. The local setup URL is shown once for the owner's
+direct input and expires shortly. Production stays unpublished until this step and
+the remaining candidate validation gates pass.
+
 ## Candidate validation
 
 From `services/worker-api`:

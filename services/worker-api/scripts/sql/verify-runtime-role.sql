@@ -69,16 +69,27 @@ WITH application_tables(table_name) AS (
 )
 SELECT count(*) = 0 AS crud_is_valid
 FROM application_tables
+CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS required_privileges(action)
 WHERE NOT has_table_privilege(
   :'runtime_role',
   format('public.%I', table_name),
-  'SELECT,INSERT,UPDATE,DELETE'
+  action
 )
 \gset
 
 SELECT (
   has_schema_privilege(:'runtime_role', 'public', 'USAGE')
   AND NOT has_schema_privilege(:'runtime_role', 'public', 'CREATE')
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_roles inherited
+    WHERE inherited.rolname IN ('postgres', 'pg_read_all_data', 'pg_write_all_data')
+      AND pg_has_role(:'runtime_role', inherited.oid, 'MEMBER')
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_roles
+    WHERE rolname = :'runtime_role'
+      AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
+  )
   AND NOT has_table_privilege(
     :'runtime_role',
     'public.paca_schema_migration',

@@ -89,12 +89,17 @@
 - 验证命令：配置隔离/错误注入契约、认证协议（关闭注册仍可登录）、Worker/Gateway 类型/lint/回归、types 检查、生产 dry-run、数据库空基线/runtime 权限验收及候选部署健康/同源 smoke；生产切流前补齐完整用户/Agent/交付页面验收。
 - 回滚路径：候选部署失败仅回滚生产候选版本，保持现有 internal 入口及新用户数据；入口切换时记录两个 Worker 版本和域名归属，失败恢复原入口，停止新任务领取，不复用 internal 凭据或恢复 legacy 身份。
 - [x] 生产候选配置与发布守卫：独立 Worker/Gateway、Hyperdrive/R2/Queue/Workflow/DO 命名，候选无公网路由；24 类误配注入契约和候选/切流双阶段检查通过。默认 development 改为本地 Hyperdrive 占位，并以真实本地 Worker `/health` 200 验证，可避免误连生产。
-- [ ] 生产认证与安全初始化契约。
+- [x] 生产认证与安全初始化契约：关闭公网注册，首位 Owner 使用本机一次性页面及 Better Auth/`pacaPermission` 规范流程；真实 PostgreSQL 验证失败回滚、拒绝重复创建、密码可正常登录及临时 Session 撤销。本机页面校验精确 Origin/Host、邮箱、密码确认、大小/方法边界、并发和到期关闭。
+- 本轮交付：生产初始化工具固定未发布的 `main` 分支，核验 Cloudflare 旧数据库消费者、最新备份和 migration 基线，使用短期 operator role 与 TLS PG Client 重建/授予显式 runtime 权限；管理员通过仅绑定本机的短时一次性页面自行设置密码，沿用 Better Auth 与 Paca Permission 首位 Owner 语义，拒绝重复初始化。验证错误目标/备份/已发布环境、真实 PostgreSQL 权限与 Owner/Session 清理、schema 恢复及本机页面输入边界。失败停止生产发布，不改 internal 数据；凭据不进命令参数或日志。
 - [x] 前端 Cloudflare runtime 与内部注册开关分离：两类 Cloudflare 构建明确选择 `VITE_PACA_RUNTIME=cloudflare`，生产禁用测试注册仍保留 GitHub 设置等原生入口；前端 674 项测试及生产构建通过。
 - [ ] 独立数据库/Hyperdrive/R2/Queue/Workflow/DO/Secret 实际验收。
-- 2026-10-10 资源准备：已创建生产文档快照桶及 3 个源队列/3 个 DLQ，复用既有生产附件桶；新建非继承的 `paca-worker-production` 角色和 Hyperdrive `98086061f9064f6c8f815303002c4a88`（连接上限 5、禁用查询缓存、TLS require）。该角色尚未应用 runtime grants，生产 Worker/Gateway/Secrets 尚未部署，不能视为生产验收完成。
-- 生产数据库只读盘点：`main` 当前 39 表、3 个旧账号、4 个 Session，未做删除或迁移；后续先停用旧部署消费者/宽权限角色，再执行独立 clean-slate 初始化，不复制或清空当前 internal 工作区。临时只读角色已删除。
-- 注册边界已覆盖 production/未知/缺失环境拒绝注册且不产生用户/Session，既有账号仍可登录并撤销 Session；首次生产管理员的安全初始化流程仍未完成。
+- 2026-10-10 资源准备：已创建生产文档快照桶及 3 个源队列/3 个 DLQ，复用既有生产附件桶；新建非继承的 `paca-worker-production` 角色和 Hyperdrive `98086061f9064f6c8f815303002c4a88`（连接上限 5、禁用查询缓存、TLS require）。该角色已应用并验证显式 runtime grants；生产 Worker/Gateway/Secrets 尚未部署，不能视为生产验收完成。
+- 2026-10-10 生产数据库初始化：全账户 Worker settings 盘点确认旧 main/new production Hyperdrive 均无部署消费者，域名仍由 internal 持有。初始化前备份 `irq17lr8vbcl` 已成功；旧宽权限角色已删除，`main` 在单一事务内完成 clean-slate 重建及 40 份 migration，初始账号数为 0。migration operator role 已转交对象所有权并删除；未复制或清空当前 internal 工作区。
+- 修复 runtime 权限检查的 OR 漏检：逐表逐 action 校验全部 CRUD，并拒绝 schema CREATE、migration ledger、宽权限角色成员关系及数据库/角色管理权限；真实 PostgreSQL 覆盖分别撤销 CRUD 权限的失败路径。
+- 远端数据库验收：生产 59 张表/40 份 migration/0 账号/0 Session，全部 public 对象稳定归属 `postgres`；runtime 权限及旧宽权限/initializer 角色清理验证通过。internal 保留既有人类账号和 1 个 Session，40 份 migration，未创建正式项目。
+- 供应商恢复演练：将备份 `irq17lr8vbcl` 恢复到独立 `paca-recovery-20261010`（PS-DEV）并验证 39 表、15 份完整 migration、3 账号/3 credential account/4 Session 与源快照一致；只读验证角色已删除，临时恢复分支随后清理。没有将旧账号复制回当前 production/internal。
+- 首次生产管理员本机页面已开启，待用户直接设置密码；公网注册仍关闭，当前域名和 internal 登录保持可用。真实首位账号创建完成前不得部署生产登录页。
+- 本轮验证：Worker 643 项单元测试、66 项真实 PostgreSQL 契约及 40 份 migration 重放/事务回滚/前滚恢复通过；新增初始化目标/备份/已部署拒绝、本机页面边界与 Owner 原子性测试通过，typecheck/lint 通过。独立恢复分支与验证角色已实际删除；生产首位账号仍待用户设置密码。
 - 验证：Worker 637 项单元测试、64 项真实 PostgreSQL 契约、40 份 migration 空库重放与回滚/前滚演练通过，33 项 Workers runtime 契约通过；Gateway 33 项测试通过；两个环境 types 检查和生产 dry-run 通过。上述 dry-run 不代表远端资源、Secret 或浏览器验收完成。
 - internal 已部署修复，版本 `4597ee81-0553-4a30-86cc-95d5d8f13a64`；在线 `/health`、首页和 Agent discovery 为 200，匿名 `/api/me` 为 401。内置浏览器仍仅能列出现有 `/home` 标签，正文读取再次超时，未把 HTTP 检查算作真实页面验收。
 - [ ] internal 域名迁移、生产切流与正式上线验收。
