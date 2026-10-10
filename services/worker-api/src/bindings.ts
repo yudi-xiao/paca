@@ -11,6 +11,9 @@ type RuntimeConfigBindings = {
   ENVIRONMENT_GATEWAY?: Fetcher;
   ENVIRONMENT?: string;
   INTERNAL_HEALTH_TOKEN?: string;
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
+  GITHUB_WEBHOOK_SECRET?: string;
   TRUSTED_ORIGINS?: string;
 };
 

@@ -46,6 +46,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
+import { ProjectSearch } from "@/components/projects/project-search";
 import { EntityAvatarContent } from "@/components/shared/entity-avatar";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -1000,6 +1001,9 @@ function ProjectNavItems({
 			{!collapsed && (
 				<SidebarGroupContent>
 					<SidebarMenu>
+						{!isAnonymous && (
+							<ProjectSearch key={projectId} projectId={projectId} />
+						)}
 						{PROJECT_NAV_ITEMS.filter(
 							(item) => !isAnonymous || !ANON_HIDDEN_SEGMENTS.has(item.segment),
 						).map(({ segment, icon: Icon, labelKey }) => {

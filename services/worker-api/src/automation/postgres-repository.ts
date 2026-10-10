@@ -7,11 +7,15 @@ import {
   pacaAutomationRunSteps,
   pacaAutomationRuns,
   pacaAutomations,
+  pacaSprints,
   pacaTasks,
 } from "../db/schema";
+import { cronTriggerConfig, nextCronOccurrence } from "./cron";
 import { AutomationExecutionError } from "./errors";
 import {
+  isSprintTrigger,
   predecessorDoneTriggerConfigFromNode,
+  sprintTriggerConfigSchema,
   validateRunnableAutomationGraph,
 } from "./execution-plan";
 import {
@@ -279,7 +283,27 @@ export class PostgresAutomationRepository {
         validateRunnableAutomationGraph(nodes, edges);
         const predecessorTaskIds = new Set<string>();
         for (const node of nodes) {
-          if (node.kind !== "trigger" || node.type !== "predecessor_done") continue;
+          if (node.kind !== "trigger") continue;
+          if (node.type === "cron") {
+            const config = cronTriggerConfig(node.config);
+            if (config.target_task_id) predecessorTaskIds.add(config.target_task_id);
+            continue;
+          }
+          if (isSprintTrigger(node.type)) {
+            const config = sprintTriggerConfigSchema.parse(node.config);
+            if (config.sprint_id) {
+              const [sprint] = await tx
+                .select({ id: pacaSprints.id })
+                .from(pacaSprints)
+                .where(
+                  and(eq(pacaSprints.id, config.sprint_id), eq(pacaSprints.projectId, projectId)),
+                );
+              if (!sprint)
+                throw new AutomationExecutionError("AUTOMATION_TRIGGER_SPRINT_NOT_FOUND");
+            }
+            continue;
+          }
+          if (node.type !== "predecessor_done") continue;
           const config = predecessorDoneTriggerConfigFromNode(node);
           predecessorTaskIds.add(config.target_task_id);
           for (const id of config.watched_task_ids) predecessorTaskIds.add(id);
@@ -300,9 +324,30 @@ export class PostgresAutomationRepository {
           }
         }
       }
+      const activatedAt = new Date();
+      const cronNodes = await tx
+        .select()
+        .from(pacaAutomationNodes)
+        .where(
+          and(
+            eq(pacaAutomationNodes.automationId, automationId),
+            eq(pacaAutomationNodes.kind, "trigger"),
+            eq(pacaAutomationNodes.type, "cron"),
+          ),
+        );
+      for (const node of cronNodes) {
+        await tx
+          .update(pacaAutomationNodes)
+          .set({
+            nextScheduledAt: active
+              ? nextCronOccurrence(cronTriggerConfig(node.config).cron_expression, activatedAt)
+              : null,
+          })
+          .where(eq(pacaAutomationNodes.id, node.id));
+      }
       const [updated] = await tx
         .update(pacaAutomations)
-        .set({ status: nextStatus, updatedAt: new Date() })
+        .set({ status: nextStatus, updatedAt: activatedAt })
         .where(eq(pacaAutomations.id, automationId))
         .returning();
       if (!updated) throw new Error("AUTOMATION_STATUS_UPDATE_MISSING");

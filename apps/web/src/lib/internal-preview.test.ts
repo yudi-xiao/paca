@@ -18,6 +18,12 @@ describe("internal preview route availability", () => {
 			"priority_changed",
 			"tag_added",
 			"predecessor_done",
+			"due_date_reached",
+			"cron",
+			"sprint_created",
+			"sprint_started",
+			"sprint_completed",
+			"sprint_deleted",
 		]);
 		expect(INTERNAL_PREVIEW_ACTION_TYPES).toEqual(["update_task", "wait"]);
 	});

@@ -152,6 +152,21 @@ const applicationTables = [
 ] as const;
 
 describe("reviewed permission migration", () => {
+  it.each([
+    "0038_clammy_yellowjacket",
+    "0039_jittery_lionheart",
+  ])("keeps GitHub migration %s transactional and checksummed", async (name) => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(new URL(`../drizzle/${name}.sql`, import.meta.url), "utf8"),
+      readFile(new URL(`../drizzle/meta/${name.slice(0, 4)}_snapshot.json`, import.meta.url)),
+    ]);
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(
+      `VALUES ('${name}', '${createHash("sha256").update(snapshot).digest("hex")}')`,
+    );
+    expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN/);
+  });
   it("is transactional and records the exact Drizzle snapshot checksum", async () => {
     const [migration, snapshot] = await Promise.all([
       readFile(migrationURL, "utf8"),
@@ -547,6 +562,34 @@ describe("reviewed permission migration", () => {
     expect(migration).toContain("AFTER UPDATE OF status_id ON paca_task");
     expect(migration).toContain("s.category = 'done'");
     expect(migration).toContain("'watched_task_id'");
+  });
+
+  it("adds durable due-date deduplication and indexed task scans transactionally", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(new URL("../drizzle/0035_cold_steve_rogers.sql", import.meta.url), "utf8"),
+      readFile(new URL("../drizzle/meta/0035_snapshot.json", import.meta.url)),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0035_cold_steve_rogers', '${checksum}')`);
+    expect(migration).toContain('UNIQUE("schedule_key")');
+    expect(migration).toContain('"paca_task_project_due_date_idx"');
+    expect(migration).toContain("'due_date_reached'");
+  });
+
+  it("persists Cron cursors and Sprint events in the versioned migration", async () => {
+    const [migration, snapshot] = await Promise.all([
+      readFile(new URL("../drizzle/0036_majestic_white_queen.sql", import.meta.url), "utf8"),
+      readFile(new URL("../drizzle/meta/0036_snapshot.json", import.meta.url)),
+    ]);
+    const checksum = createHash("sha256").update(snapshot).digest("hex");
+    expect(migration.trimStart()).toMatch(/^BEGIN;/);
+    expect(migration.trimEnd()).toMatch(/COMMIT;$/);
+    expect(migration).toContain(`VALUES ('0036_majestic_white_queen', '${checksum}')`);
+    expect(migration).toContain('"next_scheduled_at"');
+    expect(migration).toContain("AFTER INSERT OR UPDATE OF status OR DELETE ON paca_sprint");
+    expect(migration).toContain("'sprint_deleted'");
   });
 
   it("keeps runtime role grants explicit for every non-ledger application table", async () => {

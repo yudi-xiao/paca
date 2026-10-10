@@ -87,6 +87,8 @@ export class AutomationWorkflow extends WorkflowEntrypoint<Env, AutomationWorkfl
                 run.snapshot.projectId,
                 run.snapshot.event.taskId,
                 node,
+                run.snapshot.event.sprintSnapshot,
+                run.snapshot.event.type === "sprint_deleted",
               ),
             ),
           );
@@ -137,13 +139,15 @@ export class AutomationWorkflow extends WorkflowEntrypoint<Env, AutomationWorkfl
         const { update, target } = taskUpdateActionFromNode(node);
         let targetIds: string[];
         if (!target || target.kind === "self") {
+          const baseTaskId = run.snapshot.event.taskId;
+          if (!baseTaskId) throw new Error("AUTOMATION_EDGE_REQUIRES_TARGET_TASK");
           // Preserve the existing step name and operation key for in-flight runs.
           const taskId = await step.do(`update-task-${node.id}`, RETRY, () =>
             withDatabase(this.env, async (database) => {
               const service = new TaskService(new PostgresTaskRepository(database));
               const task = await service.updateAs(
                 run.snapshot.projectId,
-                run.snapshot.event.taskId,
+                baseTaskId,
                 automationTaskActor(params.runId),
                 update,
                 `${params.runId}:${node.id}`,

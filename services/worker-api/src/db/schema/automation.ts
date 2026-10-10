@@ -33,6 +33,7 @@ export const pacaAutomationEventOutbox = pgTable(
       .references(() => pacaProjects.id, { onDelete: "cascade" }),
     taskId: uuid("task_id"),
     eventType: text("event_type").notNull(),
+    scheduleKey: text("schedule_key"),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     status: text("status").$type<PacaAutomationEventStatus>().default("pending").notNull(),
     attempts: integer("attempts").default(0).notNull(),
@@ -50,10 +51,15 @@ export const pacaAutomationEventOutbox = pgTable(
       table.availableAt,
       table.createdAt,
     ),
+    unique("paca_automation_event_schedule_unique").on(table.scheduleKey),
+    check(
+      "paca_automation_event_schedule_key_check",
+      sql`${table.scheduleKey} is null or length(${table.scheduleKey}) between 1 and 255`,
+    ),
     index("paca_automation_event_project_idx").on(table.projectId, table.createdAt),
     check(
       "paca_automation_event_type_check",
-      sql`${table.eventType} in ('task_created', 'status_changed', 'assignee_changed', 'priority_changed', 'tag_added', 'predecessor_done')`,
+      sql`${table.eventType} in ('task_created', 'status_changed', 'assignee_changed', 'priority_changed', 'tag_added', 'predecessor_done', 'due_date_reached', 'cron', 'sprint_created', 'sprint_started', 'sprint_completed', 'sprint_deleted')`,
     ),
     check(
       "paca_automation_event_status_check",
@@ -105,6 +111,7 @@ export const pacaAutomationNodes = pgTable(
     kind: text("kind").$type<PacaAutomationNodeKind>().notNull(),
     type: text("type").notNull(),
     config: jsonb("config").$type<Record<string, unknown>>().default({}).notNull(),
+    nextScheduledAt: timestamp("next_scheduled_at", { withTimezone: true }),
     posX: doublePrecision("pos_x").default(0).notNull(),
     posY: doublePrecision("pos_y").default(0).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -112,6 +119,11 @@ export const pacaAutomationNodes = pgTable(
   },
   (table) => [
     unique("paca_automation_node_id_automation_unique").on(table.id, table.automationId),
+    index("paca_automation_node_schedule_idx")
+      .on(table.nextScheduledAt, table.id)
+      .where(
+        sql`${table.kind} = 'trigger' and ${table.type} = 'cron' and ${table.nextScheduledAt} is not null`,
+      ),
     index("paca_automation_node_automation_idx").on(table.automationId, table.createdAt),
     index("paca_automation_node_trigger_type_idx")
       .on(table.type)

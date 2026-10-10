@@ -30,6 +30,11 @@ const migrations = [
   "0032_wandering_domino",
   "0033_light_barracuda",
   "0034_cute_payback",
+  "0035_cold_steve_rogers",
+  "0036_majestic_white_queen",
+  "0037_common_skin",
+  "0038_clammy_yellowjacket",
+  "0039_jittery_lionheart",
 ] as const;
 
 type RolePayload = {

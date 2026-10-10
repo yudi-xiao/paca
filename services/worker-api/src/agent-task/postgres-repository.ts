@@ -229,6 +229,23 @@ export class PostgresAgentTaskLeaseRepository implements AgentTaskLeaseRepositor
         ) {
           return agentTaskLeaseErrorCodes.leaseScopeMismatch;
         }
+        // A user cancellation stops execution immediately. Its owner may still
+        // acknowledge that stop with a currently authorized request; the ack
+        // must preserve the cancellation time, reason, and lease expiry.
+        if (current.status === "cancelled" && input.command.action === "cancel_ack") {
+          const [acknowledged] = await transaction
+            .update(pacaAgentTaskLeases)
+            .set({ version: current.version + 1, updatedAt: input.now })
+            .where(eq(pacaAgentTaskLeases.id, current.id))
+            .returning();
+          if (!acknowledged) throw new Error("AGENT_TASK_LEASE_UPDATE_FAILED");
+          await transaction.insert(pacaAgentTaskLeaseEvents).values({
+            ...eventValues(current.id, input.command, fingerprint),
+            actorType: "agent",
+            actorId: input.actor.agentId,
+          });
+          return { duplicate: false, lease: publicLease(acknowledged) };
+        }
         if (current.status !== "active") return agentTaskLeaseErrorCodes.leaseTerminal;
         if (current.leaseExpiresAt.getTime() <= input.now.getTime()) {
           await transaction

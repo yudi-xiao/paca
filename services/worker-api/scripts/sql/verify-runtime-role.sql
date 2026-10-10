@@ -61,7 +61,11 @@ WITH application_tables(table_name) AS (
     ('paca_automation_edge'),
     ('paca_automation_run'),
     ('paca_automation_run_step'),
-    ('paca_automation_event_outbox')
+    ('paca_automation_event_outbox'),
+    ('paca_github_repository'),
+    ('paca_github_delivery'),
+    ('paca_github_webhook_receipt'),
+    ('paca_github_delivery_audit')
 )
 SELECT count(*) = 0 AS crud_is_valid
 FROM application_tables

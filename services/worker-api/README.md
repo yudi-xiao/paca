@@ -4,6 +4,11 @@ Cloudflare Workers + Hono entrypoint for the incremental Paca API migration. It 
 public liveness, a token-protected Hyperdrive/PostgreSQL health check, the Better Auth route
 boundary, the React internal preview, and the Drizzle schema/migration baseline.
 
+Native project repository approval and fixed-commit delivery APIs use a dedicated,
+read-only GitHub App. See [GitHub delivery setup](../../docs/guides/github-delivery.md)
+for permissions, Secret configuration, user API contracts, and recovery behavior.
+Release and acceptance status remains in the root `TODO.md`.
+
 ## Commands
 
 ```bash
@@ -26,6 +31,71 @@ bun run dev:local
 ```
 
 Never add the connection string to `wrangler.jsonc`.
+
+## Local Cloudflare auth profile
+
+Use the named `paca` Wrangler OAuth profile for this checkout. From `services/worker-api`,
+create or refresh the profile and bind it to the repository root:
+
+```bash
+bunx wrangler auth create paca
+bunx wrangler auth activate paca ../..
+bunx wrangler auth list
+bunx wrangler deployments list --env internal
+```
+
+The root binding also applies to `services/environment-gateway` and other subdirectories.
+Wrangler stores credentials and directory bindings in its local user configuration; no OAuth
+token is stored in the repository. Both Worker configurations pin the Paca Cloudflare account
+ID. To use another account in another project, create a different named profile and activate
+it at that project's root. A new machine or checkout path needs its own login/binding.
+`CLOUDFLARE_API_TOKEN` overrides profiles, including in CI; `--profile paca` selects this
+profile for an individual supported command. See the [Cloudflare command reference](https://developers.cloudflare.com/workers/wrangler/commands/general/).
+
+## Project body search
+
+Authenticated users search project tasks or documents with
+`GET /api/v1/projects/{projectId}/search/{tasks|docs}?q={keyword}&limit=20`.
+The user must have `tasks.read` or `docs.read`. Agent Auth clients use the matching
+`POST /api/v1/agent/projects/{projectId}/search/{tasks|docs}` with
+`{"query":"keyword","limit":20}`; active `task.read`/`document.read` Grants must bind
+the project and concrete resource IDs, and delegated users must retain their current permissions.
+MCP exposes these routes as `search_tasks` and `search_docs`.
+
+Search performs literal keyword matching on titles, task numbers and BlockNote text. It returns
+bounded plain-text snippets and a query-bound `next_cursor`; pass that cursor unchanged for the
+next page. It excludes deleted content and arbitrary BlockNote properties, and responses use
+`Cache-Control: no-store`. This is keyword search, without semantic ranking. Migration `0037`
+requires PostgreSQL's `pg_trgm` extension and creates stored text projections plus partial GIN
+indexes; deploy the migration before the Worker.
+
+After building `apps/mcp`, run the isolated online search/Agent protocol check:
+
+```bash
+PACA_SEARCH_SMOKE_CONFIRM=RUN_INTERNAL_SEARCH_SMOKE \
+PACA_PLANETSCALE_ORG={organization-id} \
+bun run smoke:search:internal
+```
+
+The script fixes both the Worker origin and database branch to `internal`, provisions only its
+temporary permission fixtures, exercises public Session/Agent Auth APIs and the built local
+MCP process, then revokes identities and cleans up its project/user/private files/database role.
+It checks protocol behavior; a real coding task and rendered browser interaction need separate
+acceptance.
+
+## GitHub delivery evidence inspection
+
+`bun run github:delivery:inspect` reads a private operator policy file from
+`PACA_GITHUB_POLICY_FILE`, a PR number from `PACA_GITHUB_PULL_NUMBER`, and the fixed 40-character
+commit SHA from `PACA_GITHUB_HEAD_SHA`. An optional `PACA_GITHUB_INSTALLATION_TOKEN` supplies
+read access to private repositories. The policy pins owner/repository, required Check names and
+publishing App IDs, trusted reviewer IDs, approval count and maximum Check age.
+
+The reader checks the PR head again after collecting complete, bounded CI/review pages. Missing,
+failed, skipped, untrusted or stale checks fail the gate. Its output is inspection evidence with
+`humanAcceptance=required`; it does not bind a project, persist an acceptance or close a task.
+Native project/Run binding, GitHub App credential provisioning, reliable events and user acceptance
+are still separate integration requirements.
 
 ## React internal preview
 
@@ -521,3 +591,87 @@ and revokes Better Auth Agent Auth identities, while `/device/capabilities` hand
 device-authorization approval flow. These routes do not call the old `/api/v1/admin/agents`
 contract. Agent Auth discovery is served as JSON from
 `/.well-known/agent-configuration` through the Worker-first boundary.
+
+
+## Automation due-date contract
+
+`due_date_reached` uses the task's date-only `due_date` at **00:00 UTC**, plus
+`due_date_offset_minutes` (an integer from -525600 through 525600, default 0).
+Negative offsets fire before the date, positive offsets after it. The existing
+minute Cron Trigger captures up to 50 overdue node/task pairs per invocation;
+missed ticks catch up from PostgreSQL without an in-memory cursor.
+
+Migration `0035_cold_steve_rogers` adds a nullable unique schedule key to the
+Automation outbox and a partial project/due-date task index. A key identifies
+**graph version + trigger node + task + due date**. Concurrent/repeated scans,
+Queue retries and completed delivery cannot create a second event for that key.
+Postponing to a different date creates a new key when that date becomes due;
+clearing a date cancels unplanned events, and restoring an already captured date
+within the same graph version does not fire again. Activating an overdue graph
+catches up once. Editing the graph creates a new version, eligible for a new run.
+
+Before creating a Run, the consumer checks the exact trigger, offset, graph
+version, active graph/project and current live task date. Stopped or changed
+graphs and stale/deleted tasks cannot create a new Run. Once a Run is persisted,
+its graph snapshot remains the retry authority if Workflow startup fails;
+stopping a graph prevents new Runs and does not cancel accepted Runs.
+The scheduler writes only PostgreSQL outbox events; Queue/Workflow delivery uses
+the existing durable retry and action idempotency paths. Retain schedule keys
+when introducing future event-retention jobs to preserve deduplication.
+
+Minute maintenance isolates scanning, realtime delivery and lease recovery:
+failed scanning still allows pending Automation delivery, other recovery loops
+complete, and a sanitized failure is reported to Cron monitoring. Apply the
+migration **before** deploying the new Worker. Until internal deployment and
+real event/browser smoke pass, this capability is locally verified only.
+
+## Automation Cron and Sprint contract
+
+Migration `0036_majestic_white_queen` adds a nullable, indexed
+`next_scheduled_at` cursor to each Cron trigger. Activation validates a
+**deterministic five-field expression in UTC** and starts at the next matching
+minute after activation. Lists, ranges, steps, named months and weekdays are
+supported; seconds, macros, random/hash expressions and platform-specific
+extensions are rejected. Day-of-month and weekday restrictions use standard
+Cron OR semantics. Both API and editor reject impossible calendar expressions.
+The parser is pinned to `cron-parser@5.10.1`.
+
+The minute maintenance invocation captures up to **50 due-date pairs and 50 Cron
+nodes**, followed by an Automation outbox batch of up to 100. Each Cron node is
+locked with `FOR UPDATE SKIP LOCKED`; the event and cursor advance in the same
+transaction. A durable key identifies graph version, trigger node and exact
+scheduled minute. Repeated ticks do not duplicate an event. If multiple
+scheduled minutes were missed, the node captures only the **latest missed
+occurrence** and resumes at the next future minute, rather than replaying an
+unbounded history. Stopping a graph clears its cursors; reactivation starts from
+the next future occurrence. Planning rechecks the graph version, exact trigger,
+schedule grid and any configured live, project-scoped target task.
+
+Sprint `created`, `started`, `completed` and `deleted` events are captured by a
+PostgreSQL trigger in the same transaction as the lifecycle mutation. Ordinary
+edits and repeated writes of the same status do not produce lifecycle events.
+Each trigger can optionally filter one Sprint; activation rejects filters from
+another project. Archived or deleted projects cannot start new Runs. Deletion
+preserves a bounded Sprint snapshot in the outbox and accepted Run, allowing
+later condition steps to read the removed Sprint without recreating it. Other
+Sprint conditions read the current project-scoped Sprint at execution time.
+
+Sprint Runs and Cron Runs without a target have **no base task**. They may wait,
+evaluate Sprint fields, or read/update an explicitly selected other task.
+Activation rejects relative task actions/conditions reachable from such
+triggers, and runtime guards reject invalid persisted self-update paths. The
+editor follows the same reachability rules and offers localized input errors,
+Sprint filters, deleted-filter warnings and a retry action for failed loading.
+PostgreSQL contracts verify mutations, scope, rollback and concurrency; Workers
+runtime tests exercise the production Workflow graph with database steps
+replaced by the official introspector. Database behavior is tested separately.
+
+Before rolling back to a Worker that does not recognize the new event types,
+stop these graphs and drain accepted Runs. Keep the additive migrations and
+durable outbox records; do not roll back the database schema.
+
+Official API reference: [Workflows test introspection](https://developers.cloudflare.com/workers/testing/vitest-integration/test-apis/).
+
+Apply `0035` and `0036` before deploying the Worker. These new capabilities have
+passed local verification; target-account deployment and real browser/event
+smoke tests are still required before declaring them available online.

@@ -467,13 +467,42 @@ export class AgentAuthClient {
 			);
 		}
 		const declaredLength = Number(response.headers.get("content-length") ?? 0);
-		if (declaredLength > MAX_RESPONSE_BYTES) {
+		if (
+			!Number.isSafeInteger(declaredLength) ||
+			declaredLength < 0 ||
+			declaredLength > MAX_RESPONSE_BYTES ||
+			!response.body
+		) {
+			void response.body?.cancel().catch(() => undefined);
 			throw new AgentAuthClientError("AGENT_RESPONSE_INVALID");
 		}
-		const bytes = new Uint8Array(await response.arrayBuffer());
-		if (bytes.byteLength > MAX_RESPONSE_BYTES) {
-			throw new AgentAuthClientError("AGENT_RESPONSE_INVALID");
+		const reader = response.body.getReader();
+		const chunks: Uint8Array[] = [];
+		let total = 0;
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				total += value.byteLength;
+				if (total > MAX_RESPONSE_BYTES) {
+					await reader.cancel().catch(() => undefined);
+					throw new AgentAuthClientError("AGENT_RESPONSE_INVALID");
+				}
+				chunks.push(value);
+			}
+		} catch (error) {
+			if (error instanceof AgentAuthClientError) throw error;
+			throw new AgentAuthClientError("AGENT_NETWORK_UNAVAILABLE", true);
+		} finally {
+			reader.releaseLock();
 		}
+		const bytes = new Uint8Array(total);
+		let offset = 0;
+		for (const chunk of chunks) {
+			bytes.set(chunk, offset);
+			offset += chunk.byteLength;
+		}
+
 		let body: unknown = null;
 		try {
 			body = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
@@ -661,6 +690,15 @@ export class AgentAuthClient {
 				method: "GET",
 			},
 		);
+	}
+
+	/** Read-only diagnostics. The response is never an authorization decision. */
+	async status(): Promise<unknown> {
+		const target = new URL(`${this.config.issuer}/agent/status`);
+		target.searchParams.set("agent_id", this.config.agentId);
+		return this.jsonRequest(target.toString(), this.config.capabilities, {
+			method: "GET",
+		});
 	}
 
 	async heartbeat(report: AgentHeartbeatReport): Promise<unknown> {

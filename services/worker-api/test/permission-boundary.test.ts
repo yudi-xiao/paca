@@ -65,7 +65,10 @@ describe("permission architecture boundary", () => {
       >["projects"],
       log: vi.fn(),
     });
-    const bindings = { ENVIRONMENT: "test" } as AppBindings;
+    const bindings = {
+      ENVIRONMENT: "test",
+      GITHUB_WEBHOOK_SECRET: "test-only-webhook-secret-at-least-20-characters",
+    } as AppBindings;
     const routes = new Map<string, { method: string; path: string }>();
 
     for (const route of app.routes) {

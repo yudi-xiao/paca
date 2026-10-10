@@ -43,6 +43,10 @@ import {
 	updateAutomation,
 	updateAutomationNode,
 } from "@/lib/automation-api";
+import {
+	workerNodeRequiresTask,
+	workerTriggerHasNoTask,
+} from "@/lib/automation-context";
 import { sprintsQueryOptions } from "@/lib/interaction-api";
 import {
 	customFieldsQueryOptions,
@@ -180,6 +184,8 @@ function AutomationBuilderPage() {
 	// standalone message at the agent instead of assigning a task when
 	// there's none) is off-limits downstream from it.
 	function nodeRequiresTask(node: AutomationNode): boolean {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true")
+			return workerNodeRequiresTask(node);
 		if (node.kind === "condition") return true;
 		if (node.kind === "action") {
 			return node.type !== "call_api" && node.type !== "trigger_ai_agent";
@@ -188,6 +194,8 @@ function AutomationBuilderPage() {
 	}
 
 	function isTaskLessTrigger(node: AutomationNode): boolean {
+		if (import.meta.env.VITE_INTERNAL_PREVIEW === "true")
+			return workerTriggerHasNoTask(node);
 		if (node.kind !== "trigger") return false;
 		if (!["predecessor_done", "cron", "api_trigger"].includes(node.type)) {
 			return false;

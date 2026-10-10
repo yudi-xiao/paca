@@ -12,33 +12,140 @@
 
 ## 当前状态
 
-更新时间：2026-09-28
+更新时间：2026-10-10
 
-当前可用基线：**M1～M9 的核心路径已形成 internal 纵向切片；Automation 的六类任务事件触发器已完成代码和数据库阶段，但新增四类尚未部署到 Worker。下一阶段集中完成权限单权威切换、Automation/Agent Conversation 剩余能力和 Runner 正式部署。**
+当前可用基线：**M1～M9 的核心路径已形成 internal 纵向切片；六类任务事件、到期、Cron 和四类 Sprint 自动化触发器及正文检索已部署 internal；调度与 Sprint 仍待真实事件/浏览器验收。当前优先完成本地 Agent 接入和 GitHub 交付验收，同时完成权限单权威切换、Automation/Agent Conversation 剩余能力及正式上线验收。**
 
 - internal 入口为 `https://paca.howlearnwood.com`，React Static Assets、Hono API、Better Auth、Hyperdrive、R2、PartyServer/DO、Queues、Workflows、Agents SDK 与 Cloudflare Sandbox 已连通。
-- `paca/internal` 已通过 clean-slate 工具从空 schema 重放，并继续应用至 `0034_cute_payback.sql`；35 项 ledger 已记录，legacy attachment migration 账本和 `legacy-agent-runner` Environment backend 已删除。`paca/main` 仍停在 `0014`。internal Worker runtime role 仅拥有 54 张业务表 CRUD，不可访问迁移账本。
+- `paca/internal` 已通过 clean-slate 工具从空 schema 重放，并继续应用至 `0037_common_skin.sql`；迁移 ledger 与最小 runtime role 权限验证通过，legacy attachment migration 账本和 `legacy-agent-runner` Environment backend 已删除。`paca/main` 仍停在 `0014`。internal Worker runtime role 不可访问迁移账本。
 - Agent Auth 的用户审批、Agent/Host、受约束 Grant、任务/文档/环境执行、审计和撤销边界已可用；`capability.executed` 以真实 Agent 为 actor，delegated 用户仅保留为委托上下文。
-- PostgreSQL 测试流程已能从空库应用 35 个 migration，并覆盖 migration ledger、clean-slate schema、前滚恢复演练和 repository contract。
+- PostgreSQL 测试流程已能从空库应用至 `0037`，并覆盖 migration ledger、clean-slate schema、前滚恢复演练和 repository contract。
 - Worker 业务路由权限边界、Go legacy JWT role 移除、Agent Runner 单 Agent 身份隔离及 legacy Environment backend 删除均已通过 CI；已落地提交已同步至远端 `master`。
-- 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。已部署的 Automation 支持 `task_created`/`status_changed`；新增 `assignee_changed`/`priority_changed`/`tag_added`/`predecessor_done` 的代码和 `0033`/`0034` 数据库迁移已通过本地契约验证并应用至 internal 数据库，仍待 Worker 部署与真实事件烟测。完整动作、Webhook 和调度仍未完成。
+- 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。新增任务字段/前置任务事件和可靠调度已部署，线上 Automation 图 CRUD、任务事件→条件/动作/等待→Run/步骤记录的 smoke 通过；这不代替四类新增任务事件、到期、Cron、Sprint 和浏览器的逐项验收。完整动作、Webhook 与远端调度验收仍未完成。
 
 ### 本阶段收尾与交接
 
-- [x] Automation 任务字段和前置任务触发器代码、迁移、契约测试及文档已提交并同步至远端 `master`；internal 数据库已应用对应 migration。此次收尾没有新增业务代码或重新部署 Worker。
-- [ ] 恢复目标 Cloudflare 账号的 Worker 部署权限后，部署当前 `master`，再以真实任务事件验收四类新增触发器和受限图前端入口；部署成功前不得把它们记为线上可用。
-- [ ] Automation 的下一个编码节点是 `due_date_reached` 的可靠调度：明确日期/偏移语义，复用现有定时入口，把到期事件持久化并防重复投递，覆盖延期、重试、图停用和多触发节点场景。
+- [x] Automation 任务字段和前置任务触发器代码、迁移、契约测试及文档已提交并同步至远端 `master`；internal 数据库已应用对应 migration，当前 Worker 已包含这些触发器。
+- [x] 2026-10-10 恢复 Cloudflare 与 PlanetScale CLI 授权；Wrangler `paca` OAuth profile 绑定项目根目录，Worker API/Environment Gateway 固定 Paca account ID，两处只读部署记录验证通过。凭据由 Wrangler 本机保存，不进入仓库。
+- [x] 当前改动已部署 internal，健康检查和真实 Automation 图 CRUD/条件/动作/Workflow Run smoke 通过。
+- [ ] 以真实任务事件验收四类新增触发器和受限图前端入口。
+- [x] `due_date_reached` 的可靠调度代码、本地迁移及契约验收已完成：UTC 日期/有界分钟偏移、数据库唯一调度键、独立 outbox、消费复查、延期/重试/停用/多节点与并发扫描。已部署 internal，真实事件验收仍待完成。
+- [x] Automation 可靠 `cron` 与 Sprint 事件触发器已完成本地实现及契约验收；保持激活白名单只包含已实现并验证的执行器。
+- [ ] Automation 下一编码节点为 Sprint 动作、Agent 动作、Call API/Webhook，随后完成完整浏览器契约。
+
+### 本轮实施：到期事件可靠调度
+
+- 最小交付物：`due_date_reached` 严格配置校验、UTC 日期/分钟偏移契约、有界到期扫描、数据库唯一调度键与持久 outbox、消费时日期/图版本复查，以及前端节点入口与偏移输入校验。
+- 验证命令：Worker `db:check`、`typecheck`、`lint`、`test`、`test:postgres`，Web `test` 与 internal build；部署权限恢复后执行 internal 真实事件和浏览器验收。
+- 回滚路径：先停用到期图并等待已接受的到期 Run 完成，再回滚至已验证 Worker；保留 additive migration 和调度去重记录，不执行破坏性 down migration。
+- [x] 实现并完成本地到期调度及延期、并发扫描、重投、停用、多触发节点和 UTC 边界契约验收。`0035_cold_steve_rogers` 在独立本地 `_test` 库重放，Drizzle 检查、Worker 类型/lint/回归、PostgreSQL 契约和迁移恢复、Web 回归/internal build、Workers 运行时、binding types 与部署 dry-run 均通过。
+- [x] 修复分钟维护失败互相阻塞与 Automation producer 晚到覆写 delivered 状态的竞态；故障隔离与实际数据库交错写入契约通过。到期输入拒绝空值、小数、越界，所有支持语言明确 UTC 及补触发语义。
+- [x] internal 已应用 `0035`/`0036`/`0037`，迁移 ledger、runtime role 权限验证及临时迁移身份回收完成；本地迁移恢复演练再次通过。
+- [x] internal Worker 已部署，原 Cloudflare `10000` 授权阻塞已解除。
+- [ ] 真实到期事件与浏览器验收。
+
+### 本轮实施：周期调度与 Sprint 事件
+
+- 最小交付物：UTC 五段 Cron 校验、持久调度游标与有界扫描/遗漏合并、图版本及 occurrence 幂等 outbox；Sprint 生命周期同事务事件与无 Task 的真实运行上下文，条件和显式任务目标契约，以及前端可执行节点入口。
+- 验证命令：Worker `db:check`、`typecheck`、`lint`、`test`、`test:postgres`、`test:workers`、binding types/deploy dry-run；Web 回归与 internal build；权限恢复后执行真实事件/浏览器验收。
+- 回滚路径：先停用周期/Sprint 图并等待已接受的新类型 Run 完成，再回滚 Worker，保留 additive migration、outbox 与调度游标；不复用旧 Valkey scheduler、不执行破坏性 down migration。
+- [x] `0036` 版本化迁移、UTC 五字段 Cron 和索引游标、遗漏周期合并补执行、并发锁及 occurrence 幂等事件已完成；Sprint 生命周期同事务捕获、筛选与删除快照已完成。空库重放、PostgreSQL 事务/并发/项目隔离/无任务上下文契约和迁移恢复通过。
+- [x] Workflow 支持没有基础 Task 的等待、Sprint 条件与显式其他任务目标；激活和执行时拒绝缺少基础任务的相对目标。正式 Workflow 的 Workers 运行时编排测试通过，数据库步骤由官方 introspector 替换，SQL 行为由真实 PostgreSQL 契约验证。
+- [x] 前端启用已验收节点，校验 Cron 并显示本地化输入错误，补齐 Sprint 筛选、删除提示和加载重试；修正无 Task 连线、前置任务必填及数量限制，并允许清除已删除的监听项。Worker 类型/lint/完整回归、Web 完整回归与最终类型/internal build、binding types 与部署 dry-run 通过。
+- [x] 两类调度每分钟各捕获至多 50 项，合计匹配单批 100 项 outbox 派发上限；故障隔离与延期恢复仍保持独立可靠。
+- [x] internal 数据库已应用 `0036`。
+- [x] internal Worker 已部署 Cron/Sprint 事件支持。
+- [ ] 真实事件与浏览器验收。
+
+### 本轮实施：Sprint 自动化动作
+
+- 最小交付物：`update_sprint` 和 `complete_sprint` 的严格配置、真实 Sprint 目标解析、复用迭代领域校验和完成时任务流转、同事务 Run 步骤/业务审计/事件，以及前端已验收入口与输入反馈。
+- 验证命令：Worker 类型/lint/回归、PostgreSQL 事务/幂等/作用域/任务流转契约、Workers 编排；Web 类型/回归/internal build 和部署预检。
+- 回滚路径：先停用相关图并等待已接受的新动作 Run 完成，再回滚 Worker；保留数据库事件和 Run 审计，不回退至 legacy 执行器。
+- [ ] Sprint 动作实现及完整本地验收。
+- [ ] internal Worker 部署和真实事件/浏览器验收。
 
 ### 当前优先顺序
 
-1. 将 Better Auth/`pacaPermission` 切换为唯一用户权限权威，并退出旧 Go 权限存储与合并逻辑。
-2. 以 clean-slate schema 在 Worker 中依次重建 Automation 和 Agent Conversation；补齐 Queue/Workflow、权限、幂等、审计和 MCP 契约，不迁移旧数据。
-3. 正式部署 Runner Agent Auth Host/Agent 身份，验收 JWT 轮换和 Project-scoped Capability 后，删除 Agent 执行路径中的 legacy `PACA_API_KEY`。
-4. 补齐 Environment 浏览器文件/SSH/Port Forward 契约，并完成 BlockNote、Sprint/Custom Field/View 的真实浏览器 E2E。
+1. 本地 Agent 接入：完成 Codex/Claude Code Host/Agent 注册审批、连接诊断、真实工作目录、心跳、任务领取/续租/检查点/取消与交付；保留本机工具授权，Agent Auth 是唯一身份边界。
+2. 正文检索：任务描述与文档正文的项目内关键词搜索、摘要和游标分页；同一 API 服务浏览器与受约束 Agent/MCP，未获授权内容不可进入结果。
+3. GitHub 交付验收：绑定项目仓库及任务 Run 的固定 Commit/PR，验证真实 CI/评审证据并由用户验收；区分执行完成与交付通过。
+4. 完成 Better Auth/`pacaPermission` 单权威切换、Automation/Agent Conversation 剩余能力、Runner 正式部署和 legacy 退出；已有未完成改动先修至可验证基线。
+5. 完成 Environment、BlockNote、Sprint/Custom Field/View 的真实浏览器验收，以及个人筛选、搜索分页、并发更新和错误恢复体验。
+6. 完成生产资源隔离、部署权限、可观测性、恢复/回滚演练及真实开发任务端到端验收后，才声明正式可用。
+
+### 优先实施：本地 Agent 接入
+
+- 最小交付物：私有配置与单 Agent 身份校验、可操作的本地连接诊断；Codex/Claude Code Harness 在真实工作目录连接 Agent Auth、受约束 MCP 和任务 lease；心跳、续租、检查点、中断恢复、取消及授权撤销贯穿执行。
+- 验收：新机器按文档接入后可发现获准任务并完成一项真实开发任务；同一任务无重复 active lease，网络失败和撤销会停止推进，进程日志不含私钥/JWT/Grant，工具权限仍由本机用户控制。
+- 验证命令：MCP `npm run build`、`npm test`；Worker `typecheck`、`test`、`test:postgres`；bridge/Runner Go 单元与 race 测试；internal 真实 Host/Agent/MCP/lease 验收。
+- 回滚路径：停止领取新任务，取消或等待现有 lease 收尾，撤销对应 Agent Grant，回滚已验证客户端/Worker；不恢复 legacy Agent API Key。
+- [x] MCP `--doctor` 只读诊断、0600 私有配置/单 Agent 身份/认证模式隔离、授权状态与项目范围摘要及安全错误提示；本地 build 和完整测试通过。
+- [x] 原生 MCP `execute_task_lease` 接入受约束任务执行协议；固定本地 Harness、具体 Task/action/有效期、心跳和幂等请求，Sandbox Broker 不开放该能力；本地 build 和完整 MCP 测试通过。
+- [x] 修复用户取消后拒绝 Agent `cancel_ack` 的状态机问题；确认保留原取消时间/原因/租约有效期，且拒绝续租、检查点和结果提交。PostgreSQL 并发重试、身份/作用域和其他终态契约通过，已部署 internal。
+- [x] internal 临时 Host/Agent 的注册审批、独立调度标签审批、连接诊断、真实 MCP stdio 搜索/任务发现/领取/幂等重试/续租/检查点/提交，以及断线恢复、用户取消确认和 Grant 撤销均通过；临时身份撤销、测试数据和本地私有配置清理完成。
+- [ ] 完整真实用户接入体验；旧测试身份返回 401，需要真实用户新审批并在真实工作目录完成 Codex/Claude Code 开发任务，不回退 API Key。
+- [ ] 真实 Codex/Claude Code 任务执行、恢复、取消和撤销验收。
+
+### 优先实施：正文检索
+
+- 最小交付物：任务标题/编号/描述、文档标题/正文的字面关键词检索，返回稳定 ID、匹配片段、来源与有界游标；浏览器入口及 Agent Auth MCP `search_tasks`/`search_docs`，查询始终受项目及具体 Grant 约束。
+- 验收：中文、格式化文本、嵌套 BlockNote、百分号/下划线等字面字符，空结果、分页、已删除记录、项目隔离及撤销均符合契约；不把 JSON 结构键、任意属性、secret 或全文无界返回给调用方。
+- 验证命令：Worker 类型/lint/单元、真实 PostgreSQL contract；MCP build/test；Web 类型、检索交互测试与 internal build；真实浏览器及本地 Agent 检索验收。
+- 回滚路径：关闭新检索入口，回滚 Worker/MCP；保留 additive schema/index，不绕过权限退回全量下载。
+- [x] 领域接口、PostgreSQL generated body/pg_trgm 索引、用户 HTTP 和受约束 Agent/MCP 检索；中文/嵌套正文、字面通配字符、删除/项目隔离、精确时间游标与分页、授权边界及 5000 文档规模契约通过，`0037` 已应用 internal。
+- [x] 浏览器搜索入口、类型切换、文本摘要、游标加载、空结果/错误重试和九种语言反馈；本地交互测试、完整 Web 回归及 internal build 通过。
+- [x] 已部署 internal 并通过真实用户中文正文/字面字符/游标分页/未登录拒绝、Agent 精确任务与文档 Grant/撤销、MCP stdio 和删除文档隐藏验收；临时测试资源已清理。
+- [ ] 完成真实浏览器检索交互与真实 Codex/Claude 开发任务中的按需检索验收。
+
+### 优先实施：GitHub 交付验收
+
+- 最小交付物：项目仓库绑定、Run/Task 的 PR 与 Commit SHA 关联、GitHub 来源的 CI/评审证据、等待验收/通过/需修改状态和可信用户验收审计；GitHub App/凭据及 webhook 采用最小权限、签名验证和投递幂等。
+- 验收：拒绝其他仓库/任务的证据；PR 新 Commit 使旧验收失效，陈旧/未知/失败的 CI 不能通过门禁；Agent 自报完成不等于验收通过；用户失权后不能验收；Webhook 重投不重复推进任务，不自动合并或发布代码。
+- 验证命令：Worker 领域/HTTP/真实 PostgreSQL contract、GitHub 固定 payload 与 HTTP fixtures、Web 状态/验收交互及 build；internal 真实 PR→CI→人工验收链路。
+- 回滚路径：停用 GitHub 事件消费和新验收写入，保留交付证据/审计，回滚已验证版本；不把未知状态标为通过。
+- [x] 只读 GitHub 证据协议/采集器与诊断 CLI：固定仓库/PR/head SHA、可信 Check App/评审用户、重检 head、分页及响应上限、安全错误、证据时效；在上游真实 PR #557 的固定提交上读取 E2E CI 成功。此检查仅产生等待人工验收的证据，不写任务验收。
+- [x] 持久项目仓库/已完成 Task Lease/固定 PR 与 SHA 关联、策略及交付版本 CAS、幂等决定与审计；Hono 用户 Session 权限边界和外部查询后权限复查，仓库配置另需实例管理权限。领域/HTTP/真实 PostgreSQL contract 已验证，数据库表已应用 internal。
+- [x] GitHub App 短期 JWT 与单仓库只读 installation token 适配；原始 bytes HMAC-SHA256 Webhook 校验、事务回执与证据失效、安装撤销、回执有界清理；本地/Workers runtime 已验证。
+- [x] 服务端人工接受/要求修改、失效与历史状态：接受前重新取证，保留人工要求修改，拒绝过期或未知证据，不自动关闭任务。
+- [x] 专用私有只读 GitHub App `paca-yudi-delivery` 已创建，安装事件确认仅选择 `yudi-xiao/paca`；internal 三项 Secret 已配置，单仓库访问与签名 ping 验证通过，真实安装事件及首次 ping 重投均收到成功响应。本地 manifest 引导与私有凭据恢复流程已验证，临时创建页面已关闭。
+- [ ] 项目仓库与任务交付页面、浏览器体验及真实 PR→CI→人工验收链路。
+
+### 已纳入计划的上游功能（2026-10-10）
+
+对比来源：`Paca-AI/paca`，最新正式发布 [`v0.18.6`](https://github.com/Paca-AI/paca/releases/tag/v0.18.6)（2026-10-06）；同时核对截至 2026-10-09 的 `master`，固定提交 [`09c3f873f594d1857afd16bc9a173317d9502f44`](https://github.com/Paca-AI/paca/commit/09c3f873f594d1857afd16bc9a173317d9502f44)。本地代码、未提交改动、Worker migration manifest 和前端 internal 入口分别检查；保留 legacy 文件或页面不代表新环境可用。
+
+用户已确认将以下功能纳入正式计划。本地 Agent、正文检索和 GitHub 交付验收优先，其余按依赖分阶段交付；未勾选项不代表已实现，也不要求全部成为首发阻塞。进入各阶段前须补充最小交付物、验证命令和回滚路径。
+
+| 上游能力及证据 | 当前 Cloudflare 落点 | 对 Agent First 流程的建议 |
+| --- | --- | --- |
+| 本地 [ACP bridge](https://github.com/Paca-AI/paca/blob/09c3f873f594d1857afd16bc9a173317d9502f44/apps/acp-bridge/README.md)、`provider_cli` 和 [Paca Skills](https://github.com/Paca-AI/paca/blob/09c3f873f594d1857afd16bc9a173317d9502f44/docs/guides/install-skills.md) | 有 bridge/MCP/Runner 代码及新 Harness 协议，但 Agent Conversation、Skills 和 Runner 正式部署尚未完整验收 | 优先完成本地 Agent 接入和连接诊断，让现有 Codex/Claude 工作目录参与执行；保留本地工具授权，以 Agent Auth 替换旧 bridge/API Key 身份，不能直接沿用上游自动批准所有本机工具的行为 |
+| [正文搜索与 MCP `search_docs`/`search_tasks`，#531](https://github.com/Paca-AI/paca/pull/531) | Worker 任务查询已有标题/编号搜索；未发现对应正文搜索 API 和新 MCP 工具 | 高价值增量：返回项目内匹配片段、文档路径、稳定 ID 和游标，供 Agent 按需读取；当前上游为关键词匹配，不能宣传成语义搜索 |
+| [Jev 自动补字段、自动分派、AI 条件，#510](https://github.com/Paca-AI/paca/pull/510) | Worker 未实现这组功能 | 基础执行链稳定后增补；仅补空字段、不覆盖人工输入，低置信度转人工/Else；候选 Agent 必须先通过真实 Grant、在线状态及 Harness 能力过滤，模型选择不能扩大授权；隔离决策 provider |
+| [预览页面标注转任务](https://github.com/Paca-AI/paca/blob/09c3f873f594d1857afd16bc9a173317d9502f44/apps/extension/README.md) | 未迁移 extension/annotation API，Environment 预览契约未完成 | 适合“指出界面问题→Agent 修复→重新验收”；依赖预览访问边界，重设计 Better Auth 授权，不能复制 legacy Cookie/跨 scheme 登录方案 |
+| [统一项目活动页，v0.18.0](https://github.com/Paca-AI/paca/releases/tag/v0.18.0)、活动 diff/revert | 已有任务活动、Agent 及 Workflow 审计；未形成统一项目活动和一般字段撤销入口 | 聚合任务、文档、运行与交付证据，支持人工接管；字段撤销必须检测当前版本并形成新审计，不能覆盖其他人后续修改 |
+| [项目导出，#541](https://github.com/Paca-AI/paca/pull/541) | 未发现 Worker 导出聚合/API | 作为数据可携带性增量：任务/评论/活动 CSV、文档 Markdown；独立授权、分页生成、结果有时效。上游不包含文档评论/版本及全部附件内容，不能称为完整备份恢复 |
+| [GitHub 分支/PR 状态与 BDD 插件，上游路线图](https://github.com/Paca-AI/paca/blob/09c3f873f594d1857afd16bc9a173317d9502f44/ROADMAP.md) | Worker 插件列表仍为空投影，运行时未迁移 | 优先考虑受限 GitHub 集成和结构化验收条件；“任务→Run→Commit/PR→CI→人工验收”是本地建议扩展，路线图勾选不作为插件已在本环境验收的证据 |
+
+上线前补充核查（以下均未做本环境完整验收）：
+
+- [ ] 个人视图配置与团队默认分离，默认保存“仅自己”，显式发布才改变共享配置。参考 [#545](https://github.com/Paca-AI/paca/pull/545)；当前 Worker View 主要是项目共享配置，不因上游前端已有入口而声明支持个人覆盖。
+- [ ] 用户、成员、Agent 与关联任务选择器支持服务端搜索和游标分页；覆盖非首屏候选、已删除候选、空结果、键盘选择及失败重试。参考 [#551](https://github.com/Paca-AI/paca/pull/551)。
+- [ ] 对照 [#552](https://github.com/Paca-AI/paca/pull/552) 的场景复核 Task/Document/Folder/Sprint/View 的并发更新、修改与删除竞态、父子关系和目录循环；复用已存在的 Worker 事务与版本保护，仅补未覆盖契约，不能把上游修复直接判为本地同一缺陷。
+- [ ] 补齐搜索和异步结果的可理解反馈：明确关键词匹配范围、分页/截断、无结果与错误；Agent 或自动化失败需显示可操作原因，禁止未持久化字段仍提示保存成功。
+
+已纳入后续计划的增量（尚未实施）：
+
+- [ ] 项目 Skills 包：共享开发约束、测试及验收规范，保留 `SKILL.md` 与 references/assets，记录版本和本机采用状态；与仓库 `AGENTS.md` 合并时保留用户已有约束，不自动执行包内脚本。上游 [#453](https://github.com/Paca-AI/paca/issues/453) 的项目级注册/分发仍是开放需求，不能与现有 bundled/plugin Skills 混为已完成。
+- [ ] 聊天图片/文件输入：支持粘贴、拖放、发送前预览和移除，文本与附件引用作为同一 turn；复用项目/任务附件权限，模型不支持时明确反馈。上游 [#397](https://github.com/Paca-AI/paca/issues/397) 仍开放，不把“可读任务附件”误认为“聊天可上传附件”。
+- [ ] GitHub 交付门禁（优先）：以固定 Commit/PR 的真实 CI 和评审证据区分“Agent 执行完成”“等待验收”“验收通过”；不得仅凭 Agent 自报完成自动关闭任务或发布代码。
+
+上游 `master` 已合入 [#557 IAM policy roles](https://github.com/Paca-AI/paca/pull/557)，尚不属于 `v0.18.6`。本分支继续遵守 Better Auth + `pacaPermission` + Agent Auth 单一权威与 clean-slate 约束；仅可借鉴权限编辑体验和测试场景，不能合入旧角色迁移、独立 Go IAM evaluator 或 legacy Agent API Key 路径。容器/RustFS/Valkey/WASM 插件实施也必须按当前架构重新评估，不能整体合并上游替代功能适配。
 
 ### 已知阻塞或待人工验收
 
-- [ ] 当前 Wrangler 登录身份缺少目标 Worker 所属账号的部署权限；取得对应权限后才能完成新增 Automation 代码的 internal 部署和远端烟测。
+- [x] 目标 Cloudflare 账号部署授权已恢复，项目 `paca` auth profile 已绑定并完成部署。
+- [ ] 用户已确认 Codex 内置浏览器能正常显示页面，但标签页控制接口仍连续超时；恢复后继续真实页面交互验收，HTTP/协议 smoke 不能替代渲染验收。
 - [ ] 在 Hyperdrive dashboard 确认查询和连接指标。
 - [ ] 用真实登录浏览器完成 Sprint 生命周期、自定义字段和 View CRUD E2E。
 - [ ] 用真实浏览器完成 BlockNote 协作编辑、刷新恢复及 Agent 独占时只读提示验收。
@@ -138,14 +245,16 @@
 - [x] Run/Step 只读查询已按现有前端契约迁移，限制单次查询量并经 Project 权限和数据库作用域双重约束。
 - [x] `task_created`/`status_changed` 已在任务写入事务中写入独立 Automation outbox；专用 Queue/DLQ、租约恢复与重复消息处理已部署到 internal，并通过空库、PostgreSQL 和真实 Session 烟测。
 - [x] Queue 消费已按事件匹配 active 图、持久化幂等 Run 与图快照，并用固定 Run ID 启动 Workflow；已实现 wait 步骤和失败记录。internal 真实任务事件至 Run/Step 完成烟测通过；重投与图编辑后恢复由 PostgreSQL 契约覆盖。
-- [x] 受限图激活/停用已开放且要求 `workflows.execute`：仅允许六类已实现的任务事件触发器、条件分支、`wait` 和已实现字段的 `update_task`；不支持的配置、模板或未实现动作在激活时拒绝，active 图必须先停用才可编辑或归档。新增四类触发器的 Worker 部署与远端验收仍未完成。
+- [x] 受限图激活/停用已开放且要求 `workflows.execute`：仅允许六类已实现的任务事件触发器及已本地验证的到期调度、条件分支、`wait` 和已实现字段的 `update_task`；不支持的配置、模板或未实现动作在激活时拒绝，active 图必须先停用才可编辑或归档。新增四类触发器已部署 Worker，逐项远端验收仍未完成。
 - [x] `0031` 的任务写入幂等 marker 与业务更新、系统 actor 审计同事务提交；PostgreSQL 契约覆盖重复调用，internal 真实烟测覆盖激活、任务事件→Workflow→`update_task`、活动记录、停用以及独立 wait 路径。
 - [x] 条件节点的有序分支与 else 已接入持久 Workflow 步骤；支持任务/Sprint 字段、父子与关联任务目标及 any/all，并对配置、项目隔离和目标数量实施校验。PostgreSQL 契约与 internal 真实事件烟测覆盖命中/else 路径。
 - [x] `update_task` 已扩展类型、状态、Sprint、父任务、描述、日期和指派；日期配置严格转为任务日期。`0032` 允许真实 `system` actor 的指派通知，PostgreSQL 契约覆盖重试时通知与审计不重复。
 - [x] `update_task` 已支持 reporter 和 custom field 合并写入，并可将任务目标解析为当前、父子、指定或关联任务；目标集合在 Workflow 步骤中冻结，逐任务幂等键抵御批次部分成功后的重试。PostgreSQL 契约覆盖作用域、双子任务和重复投递；internal 真实事件烟测覆盖两个子任务的 Workflow 扇出、字段和审计。
-- [x] `0033` 扩展 `assignee_changed`/`priority_changed`/`tag_added`：任务字段触发器与指派集合事务写入独立事件，tag 配置可过滤新增标签；空库迁移、PostgreSQL 事件/幂等契约、Worker 与 Web 测试通过，migration 已应用至 internal。新增触发器尚未部署 Worker，也未完成远端烟测。
-- [x] `0034` 扩展 `predecessor_done`：激活时验证目标和监听任务均在当前项目；进入 Done 时冻结满足“全部完成”的触发节点，并用图行锁串行化并发完成；规划 Run 时再次检查任务状态和目标。空库迁移、并发 PostgreSQL 契约、Worker/Web 测试通过，migration 已应用至 internal；Worker 部署与远端烟测仍待完成。
-- [ ] 扩展 Automation 完整触发器与动作、Webhook token、调度和前端入口；补齐事件/动作矩阵、目标集合扩容、故障恢复与真实浏览器验收。受限图列表/编辑入口与节点选择已在前端代码启用，但尚待重新部署 internal 和浏览器验收；当前 Wrangler 登录账号无目标 Worker 所属账号的权限。
+- [x] `0033` 扩展 `assignee_changed`/`priority_changed`/`tag_added`：任务字段触发器与指派集合事务写入独立事件，tag 配置可过滤新增标签；空库迁移、PostgreSQL 事件/幂等契约、Worker 与 Web 测试通过，migration 和 Worker 已部署 internal，逐项远端烟测仍待完成。
+- [x] `0034` 扩展 `predecessor_done`：激活时验证目标和监听任务均在当前项目；进入 Done 时冻结满足“全部完成”的触发节点，并用图行锁串行化并发完成；规划 Run 时再次检查任务状态和目标。空库迁移、并发 PostgreSQL 契约、Worker/Web 测试通过，migration 和 Worker 已部署 internal，逐项远端烟测仍待完成。
+- [x] `0035` 新增持久唯一调度键及任务到期索引；每分钟有界捕获 `due_date_reached`，使用 UTC 零点加整数分钟偏移（±525600），延期后新日期可再次触发，消费时复查指定节点、图版本和任务日期；已接受 Run 保留快照恢复。完整本地回归和部署预检通过，internal migration/Worker 已部署，真实调度事件与浏览器验收仍待完成。
+- [x] `0036` 新增 Cron 游标和四类 Sprint 事件；激活时初始化下一个 UTC 周期，错过周期合并补执行，节点行锁串行化并发捕获，事件和游标同事务提交。Sprint 删除快照及无 Task 条件/显式目标已接入 Workflow；前端校验和筛选已落地。完整本地回归、PostgreSQL 契约与 Workers 编排验收通过，已部署 internal，真实事件与浏览器验收仍待完成。
+- [ ] 扩展 Automation 完整触发器与动作、Webhook token、调度和前端入口；补齐事件/动作矩阵、目标集合扩容、故障恢复与真实浏览器验收。受限图列表/编辑入口与节点选择已部署 internal，当前部署授权已恢复，真实浏览器验收仍待完成。
 
 - [x] 已建立 Go API → Hono Worker 迁移清单、机器可检查 manifest、稳定 501 未迁移边界和 Worker 版本回滚策略。
 - [x] React 保留 TanStack Router/Query/Form；Static Assets 与 `/api/*` 同源，SPA 深链与懒加载版本错位可恢复。

@@ -32,6 +32,12 @@ export const INTERNAL_PREVIEW_TRIGGER_TYPES = [
 	"priority_changed",
 	"tag_added",
 	"predecessor_done",
+	"due_date_reached",
+	"cron",
+	"sprint_created",
+	"sprint_started",
+	"sprint_completed",
+	"sprint_deleted",
 ] as const satisfies readonly TriggerType[];
 
 // Groups TRIGGER_TYPES by the activity stream each fires from, so the "Add
@@ -127,9 +133,8 @@ export interface AutomationRun {
 	id: string;
 	automation_id: string;
 	trigger_node_id: string;
-	/** Null when the trigger that started this run had no target task
-	 * configured (only possible when the whole walk stayed within call_api
-	 * actions). */
+	/** Null for Sprint events and schedules without a target task. Such runs
+	 * can wait, check Sprint fields, or explicitly target another task. */
 	task_id: string | null;
 	status: RunStatus;
 	started_at: string;

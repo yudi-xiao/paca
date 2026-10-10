@@ -21,6 +21,7 @@ function event(): AutomationEventRow {
     projectId,
     taskId,
     eventType: "task_created",
+    scheduleKey: null,
     payload: { task_id: taskId, status_id: null },
     status: "pending",
     attempts: 0,

@@ -1,10 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
 	CallToolRequestSchema,
 	ListToolsRequestSchema,
 	type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { markdownToBlocknote } from "../utils/index.js";
 import {
@@ -13,6 +13,7 @@ import {
 	type AgentHeartbeatReport,
 	exactConstraint,
 } from "./client.js";
+import { taskLeaseInput, taskLeaseTool } from "./task-lease.js";
 
 type JsonRecord = Record<string, unknown>;
 const DOCUMENT_AGENT_WORKFLOW_ID = "00000000-0000-4000-8000-000000000201";
@@ -46,6 +47,13 @@ function constraintAllows(value: unknown, requested: string): boolean {
 }
 
 const scopeInput = z.object({ projectId: z.string().uuid() }).strict();
+const searchInput = scopeInput
+	.extend({
+		query: z.string().trim().min(1).max(200),
+		limit: z.number().int().min(1).max(50).optional(),
+		cursor: z.string().min(1).max(2048).optional(),
+	})
+	.strict();
 const taskInput = scopeInput.extend({ taskId: z.string().uuid() }).strict();
 const createTaskInput = scopeInput
 	.extend({
@@ -234,6 +242,7 @@ function executionScope(grant: AgentGrantRequest): JsonRecord {
 		!organizationId ||
 		!projectId ||
 		!validUntil ||
+		!Number.isFinite(Date.parse(validUntil)) ||
 		Date.parse(validUntil) <= Date.now()
 	) {
 		throw new Error("AGENT_CAPABILITY_SCOPE_INVALID");
@@ -504,6 +513,25 @@ tools.start_document_workflow = {
 	inputSchema: tools.edit_document.inputSchema,
 };
 
+for (const kind of ["tasks", "docs"] as const) {
+	tools[`search_${kind}`] = {
+		name: `search_${kind}`,
+		description:
+			"Search titles and visible BlockNote body text within this project's explicitly granted resources. Literal matching, bounded excerpts and cursor pagination; current server grants determine visibility.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				projectId: { type: "string", format: "uuid" },
+				query: { type: "string", minLength: 1, maxLength: 200 },
+				limit: { type: "integer", minimum: 1, maximum: 50 },
+				cursor: { type: "string", minLength: 1, maxLength: 2048 },
+			},
+			required: ["projectId", "query"],
+			additionalProperties: false,
+		},
+	};
+}
+
 export function getAgentCapabilityTools(config: AgentCapabilityConfig): Tool[] {
 	const requested = new Set(
 		config.grantRequests.map((request) => request.capability),
@@ -523,11 +551,25 @@ export function getAgentCapabilityTools(config: AgentCapabilityConfig): Tool[] {
 		);
 	return [
 		...(available("project.read") ? [tools.get_project] : []),
-		...(available("task.read") ? [tools.get_task] : []),
+		...(available("task.read") ? [tools.get_task, tools.search_tasks] : []),
 		...(available("task.create") ? [tools.create_task] : []),
 		...(available("task.write") ? [tools.update_task] : []),
 		...(available("task.execute") ? [tools.discover_tasks] : []),
-		...(available("document.read") ? [tools.get_document] : []),
+		...(available("task.execute") &&
+		config.grantRequests.some(
+			(grant) =>
+				grant.capability === "task.execute" &&
+				Boolean(exactOrEqualConstraint(grant.constraints.taskId)) &&
+				constraintAllows(grant.constraints.operationMode, "execute") &&
+				["claim", "renew", "checkpoint", "complete", "fail", "cancel_ack"].some(
+					(action) => constraintAllows(grant.constraints.action, action),
+				),
+		)
+			? [taskLeaseTool]
+			: []),
+		...(available("document.read")
+			? [tools.get_document, tools.search_docs]
+			: []),
 		...(available("document.edit") ? [tools.edit_document] : []),
 		...(available("environment.connect") ? [tools.connect_environment] : []),
 		...(documentWorkflowAvailable && available("document.edit")
@@ -551,6 +593,47 @@ export async function callAgentCapabilityTool(
 			throw new Error("AGENT_PROJECT_PIN_MISMATCH");
 	};
 	switch (name) {
+		case "search_tasks":
+		case "search_docs": {
+			const input = searchInput.parse(value);
+			requirePin(input.projectId);
+			const kind = name === "search_tasks" ? "tasks" : "docs";
+			const capability = kind === "tasks" ? "task.read" : "document.read";
+			const key = kind === "tasks" ? "taskId" : "documentId";
+			// Local configuration limits which project/capability may be requested;
+			// only the server's active resource grants authorize actual results.
+			const grant = matchingGrant(client.config, capability, (constraints) => {
+				const value = constraints[key];
+				const operator = record(value);
+				const ids = exactOrEqualConstraint(value)
+					? [exactOrEqualConstraint(value)]
+					: operator &&
+							Object.keys(operator).length === 1 &&
+							Array.isArray(operator.in)
+						? operator.in
+						: [];
+				return (
+					exactOrEqualConstraint(constraints.projectId) === input.projectId &&
+					ids.length > 0 &&
+					ids.length <= 100 &&
+					ids.every((id) => z.string().uuid().safeParse(id).success)
+				);
+			});
+			executionScope(grant);
+			const { projectId, ...body } = input;
+			return result(
+				await client.requestAgent(
+					`/api/v1/agent/projects/${projectId}/search/${kind}`,
+					[capability],
+					{
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify(body),
+					},
+				),
+			);
+		}
+
 		case "get_project": {
 			const input = scopeInput.parse(value);
 			requirePin(input.projectId);
@@ -634,6 +717,35 @@ export async function callAgentCapabilityTool(
 			if (!heartbeat) throw new Error("PACA_AGENT_HARNESS_INVALID");
 			await client.heartbeat(heartbeat);
 			return result(await client.discoverTasks());
+		case "execute_task_lease": {
+			const input = taskLeaseInput.parse(value);
+			requirePin(input.projectId);
+			if (!client.config.capabilities.includes("task.execute"))
+				throw new Error("AGENT_CAPABILITY_SCOPE_INVALID");
+			const grant = matchingGrant(
+				client.config,
+				"task.execute",
+				(constraints) =>
+					exactOrEqualConstraint(constraints.projectId) === input.projectId &&
+					exactOrEqualConstraint(constraints.taskId) === input.taskId &&
+					constraintAllows(constraints.operationMode, "execute") &&
+					constraintAllows(constraints.action, input.action),
+			);
+			const scope = executionScope(grant);
+			if (!heartbeat || heartbeat.harnesses.length !== 1)
+				throw new Error("PACA_AGENT_HARNESS_INVALID");
+			const harness = heartbeat.harnesses[0];
+			if (!harness) throw new Error("PACA_AGENT_HARNESS_INVALID");
+			await client.heartbeat(heartbeat);
+			return result(
+				await client.execute("task.execute", {
+					...scope,
+					...input,
+					operationMode: "execute",
+					...(input.action === "claim" ? { harness } : {}),
+				}),
+			);
+		}
 		case "get_document": {
 			const input = documentInput.parse(value);
 			requirePin(input.projectId);

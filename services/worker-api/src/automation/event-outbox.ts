@@ -90,7 +90,12 @@ export class PostgresAutomationOutboxRepository implements AutomationOutboxRepos
         failureCode: null,
         updatedAt: now,
       })
-      .where(inArray(pacaAutomationEventOutbox.id, ids));
+      .where(
+        and(
+          inArray(pacaAutomationEventOutbox.id, ids),
+          eq(pacaAutomationEventOutbox.status, "enqueuing"),
+        ),
+      );
   }
 
   async release(ids: string[], now: Date, failureCode: string): Promise<void> {
@@ -104,7 +109,12 @@ export class PostgresAutomationOutboxRepository implements AutomationOutboxRepos
         failureCode,
         updatedAt: now,
       })
-      .where(inArray(pacaAutomationEventOutbox.id, ids));
+      .where(
+        and(
+          inArray(pacaAutomationEventOutbox.id, ids),
+          eq(pacaAutomationEventOutbox.status, "enqueuing"),
+        ),
+      );
   }
 
   async get(id: string): Promise<AutomationEventRow | null> {

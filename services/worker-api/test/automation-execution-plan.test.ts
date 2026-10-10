@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  dueDateTriggerConfigFromNode,
   matchesTaskTrigger,
   orderedReachableNodes,
   taskUpdateActionFromNode,
@@ -191,6 +192,59 @@ describe("automation execution plan", () => {
       branches: [{ handle: "priority", tree: { field: "tags", operator: "equals", value: "x" } }],
     };
     expect(runnable).toThrow("AUTOMATION_CONDITION_CONFIG_INVALID");
+  });
+
+  it("validates bounded whole-minute due date offsets and date payloads", () => {
+    expect(dueDateTriggerConfigFromNode({ type: "due_date_reached", config: {} })).toEqual({
+      due_date_offset_minutes: 0,
+    });
+    for (const offset of [-525600, 0, 525600]) {
+      expect(
+        dueDateTriggerConfigFromNode({
+          type: "due_date_reached",
+          config: { due_date_offset_minutes: offset },
+        }).due_date_offset_minutes,
+      ).toBe(offset);
+    }
+    for (const offset of [-525601, 525601, 0.5, "0", null]) {
+      expect(() =>
+        dueDateTriggerConfigFromNode({
+          type: "due_date_reached",
+          config: { due_date_offset_minutes: offset },
+        }),
+      ).toThrow("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
+    }
+    expect(() =>
+      dueDateTriggerConfigFromNode({ type: "due_date_reached", config: { timezone: "local" } }),
+    ).toThrow("AUTOMATION_TRIGGER_CONFIG_UNSUPPORTED");
+    const payload = {
+      trigger_node_id: triggerId,
+      graph_version: 1,
+      due_date: "2024-02-29",
+      due_date_offset_minutes: 0,
+      scheduled_for: "2024-02-29T00:00:00.000Z",
+    };
+    const node = { type: "due_date_reached", config: {} };
+    expect(matchesTaskTrigger("due_date_reached", payload, node)).toBe(true);
+    expect(
+      matchesTaskTrigger("due_date_reached", payload, {
+        ...node,
+        config: { due_date_offset_minutes: 1 },
+      }),
+    ).toBe(false);
+    expect(() =>
+      matchesTaskTrigger("due_date_reached", { ...payload, due_date: "2026-02-29" }, node),
+    ).toThrow("AUTOMATION_EVENT_PAYLOAD_INVALID");
+    const graph = snapshot();
+    const trigger = graph.nodes[0];
+    if (!trigger) throw new Error("AUTOMATION_TEST_NODE_MISSING");
+    trigger.type = "due_date_reached";
+    expect(() =>
+      validateRunnableAutomationGraph(
+        graph.nodes.map((node) => ({ ...node, automationId: graph.projectId })),
+        graph.edges,
+      ),
+    ).not.toThrow();
   });
 
   it("matches scoped status triggers and rejects unsupported trigger configuration", () => {
