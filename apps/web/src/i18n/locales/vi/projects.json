@@ -1640,7 +1640,8 @@
 			"expandSidebar": "Mở rộng bảng",
 			"tabGraph": "Sơ đồ",
 			"tabRuns": "Lịch sử chạy",
-			"tabDependencyMap": "Bản đồ phụ thuộc"
+			"tabDependencyMap": "Bản đồ phụ thuộc",
+			"contextConnectionError": "Kết nối này thiếu nhiệm vụ hoặc Sprint cần thiết cho hành động."
 		},
 		"palette": {
 			"title": "Thêm nút",
@@ -1826,7 +1827,12 @@
 				"pluginConditionLabel": "Điều kiện plugin",
 				"pluginConditionHint": "Giao việc khớp của nhánh này cho một điều kiện do plugin cung cấp thay vì so sánh trường công việc.",
 				"selectPluginPlaceholder": "Chọn điều kiện plugin…",
-				"addCustomField": "Thêm trường tùy chỉnh…"
+				"addCustomField": "Thêm trường tùy chỉnh…",
+				"sprintContextHint": "Cập nhật các trường đã bật của Sprint kích hoạt hoặc Sprint chứa nhiệm vụ kích hoạt.",
+				"clearSprintField": "Xóa {{field}}",
+				"sprintStatusOnlyHint": "Thay đổi trạng thái không di chuyển nhiệm vụ. Dùng Hoàn thành Sprint để chuyển các nhiệm vụ chưa xong.",
+				"sprintUpdateInvalid": "Kiểm tra tên (1–200 ký tự), mục tiêu (tối đa 10.000 ký tự), trạng thái và khoảng ngày.",
+				"sprintDestinationMissing": "Sprint đích đã bị xóa hoặc hoàn thành. Chọn Sprint khác hoặc Backlog."
 			},
 			"target": {
 				"label": "Áp dụng cho",

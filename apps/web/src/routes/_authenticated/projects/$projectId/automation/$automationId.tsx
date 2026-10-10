@@ -44,7 +44,9 @@ import {
 	updateAutomationNode,
 } from "@/lib/automation-api";
 import {
+	workerNodeRequiresSprint,
 	workerNodeRequiresTask,
+	workerTriggerHasNoSprint,
 	workerTriggerHasNoTask,
 } from "@/lib/automation-context";
 import { sprintsQueryOptions } from "@/lib/interaction-api";
@@ -223,7 +225,11 @@ function AutomationBuilderPage() {
 		]);
 
 		for (const trigger of nodes) {
-			if (!isTaskLessTrigger(trigger)) continue;
+			const noTask = isTaskLessTrigger(trigger);
+			const noSprint =
+				import.meta.env.VITE_INTERNAL_PREVIEW === "true" &&
+				workerTriggerHasNoSprint(trigger);
+			if (!noTask && !noSprint) continue;
 			const visited = new Set([trigger.id]);
 			const queue = [...(outgoing.get(trigger.id) ?? [])];
 			for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
@@ -231,7 +237,11 @@ function AutomationBuilderPage() {
 				visited.add(id);
 				const node = nodesById.get(id);
 				if (!node) continue;
-				if (nodeRequiresTask(node)) return true;
+				if (
+					(noTask && nodeRequiresTask(node)) ||
+					(noSprint && workerNodeRequiresSprint(node))
+				)
+					return true;
 				queue.push(...(outgoing.get(id) ?? []));
 			}
 		}
@@ -666,7 +676,11 @@ function AutomationBuilderPage() {
 								)
 							) {
 								setErrorMessage(
-									t("automation.builder.taskLessTriggerConnectionError"),
+									t(
+										import.meta.env.VITE_INTERNAL_PREVIEW === "true"
+											? "automation.builder.contextConnectionError"
+											: "automation.builder.taskLessTriggerConnectionError",
+									),
 								);
 								return;
 							}

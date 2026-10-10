@@ -1640,7 +1640,8 @@
 			"expandSidebar": "Déployer le panneau",
 			"tabGraph": "Graphe",
 			"tabRuns": "Historique des exécutions",
-			"tabDependencyMap": "Carte des dépendances"
+			"tabDependencyMap": "Carte des dépendances",
+			"contextConnectionError": "Cette connexion ne fournit pas la tâche ou le sprint nécessaire à l’action."
 		},
 		"palette": {
 			"title": "Ajouter un nœud",
@@ -1826,7 +1827,12 @@
 				"pluginConditionLabel": "Condition de plugin",
 				"pluginConditionHint": "Délègue la correspondance de cette branche à une condition fournie par un plugin plutôt qu'à une comparaison de champ de tâche.",
 				"selectPluginPlaceholder": "Sélectionner une condition de plugin…",
-				"addCustomField": "Ajouter un champ personnalisé…"
+				"addCustomField": "Ajouter un champ personnalisé…",
+				"sprintContextHint": "Modifie les champs activés du sprint déclencheur ou du sprint de la tâche déclencheuse.",
+				"clearSprintField": "Effacer {{field}}",
+				"sprintStatusOnlyHint": "Changer le statut ne déplace pas les tâches. Utilisez Terminer le sprint pour déplacer les tâches inachevées.",
+				"sprintUpdateInvalid": "Vérifiez le nom (1–200 caractères), l’objectif (10 000 caractères maximum), le statut et les dates.",
+				"sprintDestinationMissing": "Cette destination est absente ou terminée. Choisissez un autre sprint ou le backlog."
 			},
 			"target": {
 				"label": "S'applique à",

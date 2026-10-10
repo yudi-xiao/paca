@@ -23,6 +23,7 @@ async function pscale(args: string[]): Promise<string> {
         cwd: workerDirectory,
         encoding: "utf8",
         maxBuffer: 8 * 1024 * 1024,
+        timeout: 20_000,
       })
     ).stdout;
   } catch {
@@ -75,6 +76,7 @@ async function request(path: string, method: string, cookie?: string, body?: Jso
     headers,
     body: body ? JSON.stringify(body) : undefined,
     redirect: "manual",
+    signal: AbortSignal.timeout(20_000),
   });
 }
 
@@ -87,7 +89,11 @@ async function expectJson(response: Response, status: number, step: string): Pro
   return value;
 }
 
-async function waitForCompletedRun(path: string, cookie: string, taskId: string): Promise<string> {
+async function waitForCompletedRun(
+  path: string,
+  cookie: string,
+  taskId: string | null,
+): Promise<string> {
   const deadline = Date.now() + 180_000;
   while (Date.now() < deadline) {
     const history = await expectJson(
@@ -138,6 +144,8 @@ async function main(): Promise<void> {
   const client = new pg.Client({
     connectionString: role.databaseURL,
     ssl: { rejectUnauthorized: true },
+    connectionTimeoutMillis: 15_000,
+    statement_timeout: 20_000,
   });
   let cookie: string | undefined;
   let userId: string | undefined;
@@ -151,6 +159,17 @@ async function main(): Promise<void> {
     const health = await expectJson(await request("/health", "GET"), 200, "HEALTH");
     if (health.environment !== "internal") throw new Error("AUTOMATION_SMOKE_WRONG_ENVIRONMENT");
 
+    // Run only after real onboarding. A smoke signup must never claim the
+    // clean-slate instance's first-owner slot, even briefly during registration.
+    const owner = await client.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+        SELECT 1 FROM paca_user_system_role assignment
+        JOIN paca_system_role role ON role.id = assignment.role_id
+        WHERE role.name = 'SUPER_ADMIN' AND role.is_built_in = true
+      ) AS exists`,
+    );
+    if (!owner.rows[0]?.exists) throw new Error("AUTOMATION_SMOKE_REAL_OWNER_REQUIRED");
+
     const signUp = await request("/api/auth/sign-up/email", "POST", undefined, {
       email,
       name: "Automation Smoke",
@@ -162,6 +181,9 @@ async function main(): Promise<void> {
 
     await client.query("BEGIN");
     try {
+      // A disposable first signup must not hold the instance-owner slot while
+      // a real user is onboarding. This fixture only needs project creation.
+      await client.query("DELETE FROM paca_user_system_role WHERE user_id = $1", [userId]);
       const membership = await client.query<{ id: string }>(
         'SELECT id FROM "member" WHERE organization_id = $1 AND user_id = $2',
         ["paca-default", userId],
@@ -224,6 +246,7 @@ async function main(): Promise<void> {
       throw new Error("AUTOMATION_SMOKE_GRAPH_NOT_INACTIVE");
     }
     const graphPath = `${base}/${automationId}`;
+    console.log(JSON.stringify({ status: "ok", step: "automation-smoke-fixture-created" }));
     const emptyRuns = await expectJson(
       await request(`${graphPath}/runs?limit=10`, "GET", cookie),
       200,
@@ -598,6 +621,180 @@ async function main(): Promise<void> {
     );
     await expectJson(await request(fanoutPath, "DELETE", cookie), 200, "FANOUT_ARCHIVE");
     automationId = undefined;
+
+    // A real Sprint event exercises both actions, frozen context, rollover and audit.
+    const sprintBase = `/api/v1/projects/${projectId}/sprints`;
+    const sourceSprint = await expectJson(
+      await request(sprintBase, "POST", cookie, {
+        name: `Sprint source ${suffix}`,
+        start_date: "2026-10-01",
+        goal: "Before",
+      }),
+      201,
+      "SPRINT_SOURCE_CREATE",
+    );
+    const sourceSprintId = stringField(sourceSprint.data, "id");
+    const destinationSprint = await expectJson(
+      await request(sprintBase, "POST", cookie, { name: `Sprint destination ${suffix}` }),
+      201,
+      "SPRINT_DESTINATION_CREATE",
+    );
+    const destinationSprintId = stringField(destinationSprint.data, "id");
+    const doneStatus = await client.query<{ id: string }>(
+      "SELECT id FROM paca_task_status WHERE project_id = $1 AND category = 'done' ORDER BY id LIMIT 1",
+      [projectId],
+    );
+    const doneStatusId = doneStatus.rows[0]?.id;
+    if (!doneStatusId) throw new Error("AUTOMATION_SMOKE_DONE_STATUS_MISSING");
+    const sprintTask = await expectJson(
+      await request(taskBase, "POST", cookie, {
+        title: `Rollover ${suffix}`,
+        sprint_id: sourceSprintId,
+      }),
+      201,
+      "SPRINT_UNFINISHED_TASK_CREATE",
+    );
+    const doneTask = await expectJson(
+      await request(taskBase, "POST", cookie, {
+        title: `Done ${suffix}`,
+        sprint_id: sourceSprintId,
+        status_id: doneStatusId,
+      }),
+      201,
+      "SPRINT_DONE_TASK_CREATE",
+    );
+    const sprintGraphName = `Sprint actions ${suffix}`;
+    const sprintGraph = await expectJson(
+      await request(base, "POST", cookie, { name: sprintGraphName }),
+      201,
+      "SPRINT_GRAPH_CREATE",
+    );
+    automationId = stringField(sprintGraph.data, "id");
+    const sprintGraphPath = `${base}/${automationId}`;
+    const sprintTrigger = await expectJson(
+      await request(`${sprintGraphPath}/nodes`, "POST", cookie, {
+        kind: "trigger",
+        type: "sprint_started",
+        config: { sprint_id: sourceSprintId },
+        pos_x: 0,
+        pos_y: 0,
+      }),
+      201,
+      "SPRINT_TRIGGER_CREATE",
+    );
+    const sprintUpdate = await expectJson(
+      await request(`${sprintGraphPath}/nodes`, "POST", cookie, {
+        kind: "action",
+        type: "update_sprint",
+        config: { sprint_update: { goal: "{{automation.name}}", start_date: null } },
+        pos_x: 200,
+        pos_y: 0,
+      }),
+      201,
+      "SPRINT_UPDATE_CREATE",
+    );
+    const sprintComplete = await expectJson(
+      await request(`${sprintGraphPath}/nodes`, "POST", cookie, {
+        kind: "action",
+        type: "complete_sprint",
+        config: { move_to_sprint_id: destinationSprintId },
+        pos_x: 400,
+        pos_y: 0,
+      }),
+      201,
+      "SPRINT_COMPLETE_CREATE",
+    );
+    const sprintUpdateId = stringField(sprintUpdate.data, "id");
+    const sprintCompleteId = stringField(sprintComplete.data, "id");
+    for (const [source, target] of [
+      [stringField(sprintTrigger.data, "id"), sprintUpdateId],
+      [sprintUpdateId, sprintCompleteId],
+    ]) {
+      await expectJson(
+        await request(`${sprintGraphPath}/edges`, "POST", cookie, {
+          source_node_id: source,
+          target_node_id: target,
+        }),
+        201,
+        "SPRINT_EDGE_CREATE",
+      );
+    }
+    await expectJson(
+      await request(`${sprintGraphPath}/activate`, "POST", cookie),
+      200,
+      "SPRINT_GRAPH_ACTIVATE",
+    );
+    await expectJson(
+      await request(`${sprintBase}/${sourceSprintId}`, "PATCH", cookie, { status: "active" }),
+      200,
+      "SPRINT_START",
+    );
+    const sprintRunId = await waitForCompletedRun(sprintGraphPath, cookie, null);
+    const completedSprint = await expectJson(
+      await request(`${sprintBase}/${sourceSprintId}`, "GET", cookie),
+      200,
+      "SPRINT_RESULT_READ",
+    );
+    if (
+      record(completedSprint.data)?.status !== "completed" ||
+      record(completedSprint.data)?.goal !== sprintGraphName ||
+      record(completedSprint.data)?.start_date !== null
+    ) {
+      throw new Error("AUTOMATION_SMOKE_SPRINT_RESULT_INVALID");
+    }
+    const rolloverTaskId = stringField(sprintTask.data, "id");
+    for (const [taskId, expectedSprint] of [
+      [rolloverTaskId, destinationSprintId],
+      [stringField(doneTask.data, "id"), sourceSprintId],
+    ]) {
+      const task = await expectJson(
+        await request(`${taskBase}/${taskId}`, "GET", cookie),
+        200,
+        "SPRINT_TASK_RESULT_READ",
+      );
+      if (record(task.data)?.sprint_id !== expectedSprint)
+        throw new Error("AUTOMATION_SMOKE_SPRINT_ROLLOVER_INVALID");
+    }
+    const sprintSteps = await expectJson(
+      await request(`${sprintGraphPath}/runs/${sprintRunId}/steps`, "GET", cookie),
+      200,
+      "SPRINT_RUN_STEPS",
+    );
+    const sprintStepItems = record(sprintSteps.data)?.items;
+    if (
+      !Array.isArray(sprintStepItems) ||
+      sprintStepItems.length !== 2 ||
+      !sprintStepItems.some(
+        (step) =>
+          record(step)?.node_id === sprintUpdateId &&
+          record(record(step)?.output_snapshot)?.applied === true,
+      ) ||
+      !sprintStepItems.some(
+        (step) =>
+          record(step)?.node_id === sprintCompleteId &&
+          record(record(step)?.output_snapshot)?.moved_task_count === 1,
+      )
+    ) {
+      throw new Error("AUTOMATION_SMOKE_SPRINT_STEPS_INVALID");
+    }
+    const rolloverAudit = await client.query<{ actor_type: string; content: JsonRecord }>(
+      "SELECT actor_type, content FROM paca_task_activity WHERE task_id = $1 AND activity_type = 'task.updated'",
+      [rolloverTaskId],
+    );
+    if (
+      rolloverAudit.rows.length !== 1 ||
+      rolloverAudit.rows[0]?.actor_type !== "system" ||
+      rolloverAudit.rows[0]?.content.automation_run_id !== sprintRunId
+    )
+      throw new Error("AUTOMATION_SMOKE_SPRINT_AUDIT_INVALID");
+    await expectJson(
+      await request(`${sprintGraphPath}/deactivate`, "POST", cookie),
+      200,
+      "SPRINT_GRAPH_DEACTIVATE",
+    );
+    await expectJson(await request(sprintGraphPath, "DELETE", cookie), 200, "SPRINT_GRAPH_ARCHIVE");
+    automationId = undefined;
+    console.log(JSON.stringify({ status: "ok", step: "automation-sprint-actions-internal" }));
 
     // Exercise the durable sleep path separately after the immediate task action.
     const workflowGraph = await expectJson(

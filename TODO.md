@@ -17,9 +17,9 @@
 当前可用基线：**M1～M9 的核心路径已形成 internal 纵向切片；六类任务事件、到期、Cron 和四类 Sprint 自动化触发器及正文检索已部署 internal；调度与 Sprint 仍待真实事件/浏览器验收。当前优先完成本地 Agent 接入和 GitHub 交付验收，同时完成权限单权威切换、Automation/Agent Conversation 剩余能力及正式上线验收。**
 
 - internal 入口为 `https://paca.howlearnwood.com`，React Static Assets、Hono API、Better Auth、Hyperdrive、R2、PartyServer/DO、Queues、Workflows、Agents SDK 与 Cloudflare Sandbox 已连通。
-- `paca/internal` 已通过 clean-slate 工具从空 schema 重放，并继续应用至 `0037_common_skin.sql`；迁移 ledger 与最小 runtime role 权限验证通过，legacy attachment migration 账本和 `legacy-agent-runner` Environment backend 已删除。`paca/main` 仍停在 `0014`。internal Worker runtime role 不可访问迁移账本。
+- `paca/internal` 已通过 clean-slate 工具从空 schema 重放，并继续应用至 `0039`；迁移 ledger 与最小 runtime role 权限验证通过，legacy attachment migration 账本和 `legacy-agent-runner` Environment backend 已删除。`paca/main` 仍停在 `0014`。internal Worker runtime role 不可访问迁移账本。
 - Agent Auth 的用户审批、Agent/Host、受约束 Grant、任务/文档/环境执行、审计和撤销边界已可用；`capability.executed` 以真实 Agent 为 actor，delegated 用户仅保留为委托上下文。
-- PostgreSQL 测试流程已能从空库应用至 `0037`，并覆盖 migration ledger、clean-slate schema、前滚恢复演练和 repository contract。
+- PostgreSQL 测试流程已能从空库应用至 `0039`，并覆盖 migration ledger、clean-slate schema、前滚恢复演练和 repository contract。
 - Worker 业务路由权限边界、Go legacy JWT role 移除、Agent Runner 单 Agent 身份隔离及 legacy Environment backend 删除均已通过 CI；已落地提交已同步至远端 `master`。
 - 当前仍处于未上线开发期，用户已明确允许清空并重建数据；不迁移 legacy User/密码/Session/JWT、旧附件或其他历史业务数据。Better Auth 与 Worker schema 是新环境唯一基线。新增任务字段/前置任务事件和可靠调度已部署，线上 Automation 图 CRUD、任务事件→条件/动作/等待→Run/步骤记录的 smoke 通过；这不代替四类新增任务事件、到期、Cron、Sprint 和浏览器的逐项验收。完整动作、Webhook 与远端调度验收仍未完成。
 
@@ -31,7 +31,7 @@
 - [ ] 以真实任务事件验收四类新增触发器和受限图前端入口。
 - [x] `due_date_reached` 的可靠调度代码、本地迁移及契约验收已完成：UTC 日期/有界分钟偏移、数据库唯一调度键、独立 outbox、消费复查、延期/重试/停用/多节点与并发扫描。已部署 internal，真实事件验收仍待完成。
 - [x] Automation 可靠 `cron` 与 Sprint 事件触发器已完成本地实现及契约验收；保持激活白名单只包含已实现并验证的执行器。
-- [ ] Automation 下一编码节点为 Sprint 动作、Agent 动作、Call API/Webhook，随后完成完整浏览器契约。
+- [ ] Sprint 动作收尾真实浏览器验收，后续编码节点为 Agent 动作、Call API/Webhook，随后完成完整浏览器契约。
 
 ### 本轮实施：到期事件可靠调度
 
@@ -62,8 +62,16 @@
 - 最小交付物：`update_sprint` 和 `complete_sprint` 的严格配置、真实 Sprint 目标解析、复用迭代领域校验和完成时任务流转、同事务 Run 步骤/业务审计/事件，以及前端已验收入口与输入反馈。
 - 验证命令：Worker 类型/lint/回归、PostgreSQL 事务/幂等/作用域/任务流转契约、Workers 编排；Web 类型/回归/internal build 和部署预检。
 - 回滚路径：先停用相关图并等待已接受的新动作 Run 完成，再回滚 Worker；保留数据库事件和 Run 审计，不回退至 legacy 执行器。
-- [ ] Sprint 动作实现及完整本地验收。
-- [ ] internal Worker 部署和真实事件/浏览器验收。
+- [x] Sprint 动作实现及完整本地验收：严格字段与日期配置、空字段清除、目标持久化、冻结 Run 配置、同事务业务写入/步骤与审计、未完成任务迁移、重复完成 no-op、权限作用域和归档/删除拒绝；修复用户完成 Sprint 时 Drizzle insert-select 缺少默认列的真实数据库错误。前端输入反馈、目的 Sprint 加载重试与失效目标保护、九种语言、完整回归和类型/lint/build，真实 PostgreSQL 并发/回滚/用户审计与 Workers 编排及部署预检通过。
+- [x] internal Worker 已部署 Sprint 动作，真实 `sprint_started` 事件→更新目标与清除日期→完成迭代→未完成任务迁移及 Done 任务保留、两步记录和 system 审计验收通过；同轮任务条件、扇出及 wait 链路通过，临时资源和数据库角色清理完成。
+- [ ] Sprint 动作真实浏览器输入、保存与运行详情验收。
+
+### internal 首位用户初始化验收
+
+- [x] 用户已自行设置密码并登录；数据库确认密码账户和活动 Session 存在，不读取或缓存密码、Cookie 或 Session token。
+- [x] 修正并发 smoke 注册占用首位管理员名额的问题：测试账号清理后，在唯一真实用户、无既有管理员、原角色为默认 MEMBER/USER 的事务守卫下恢复首位用户的 SUPER_ADMIN、Organization OWNER 和 owner 成员角色；专用短期数据库角色已清理，当前没有正式项目。
+- [x] Automation smoke 增加真实管理员初始化前置检查、临时账号权限最小化及 CLI/HTTP/数据库超时；防止空实例测试账号再次占用管理员名额。
+- [ ] 用户首页创建正式项目、项目权限和设置导航的真实浏览器验收；其余 smoke 的首次注册前置检查统一补齐。
 
 ### 当前优先顺序
 
@@ -149,7 +157,7 @@
 ### 已知阻塞或待人工验收
 
 - [x] 目标 Cloudflare 账号部署授权已恢复，项目 `paca` auth profile 已绑定并完成部署。
-- [ ] 用户已确认 Codex 内置浏览器能正常显示页面，但标签页控制接口仍连续超时；恢复后继续真实页面交互验收，HTTP/协议 smoke 不能替代渲染验收。
+- [ ] Codex 内置浏览器控制稳定性仍待修复：清理重复页面后保留一个 Paca 标签，曾在当前聊天/面板前台下完成正文读取、DOM、截图和点击；后续跨轮读取再次超时，且一次 visibility 为 true 时仍超时，不能把前台状态当作充分恢复条件。页面功能验收尚未完成。
 - [ ] 在 Hyperdrive dashboard 确认查询和连接指标。
 - [ ] 用真实登录浏览器完成 Sprint 生命周期、自定义字段和 View CRUD E2E。
 - [ ] 用真实浏览器完成 BlockNote 协作编辑、刷新恢复及 Agent 独占时只读提示验收。

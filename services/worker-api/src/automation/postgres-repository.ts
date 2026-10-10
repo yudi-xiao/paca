@@ -10,6 +10,7 @@ import {
   pacaSprints,
   pacaTasks,
 } from "../db/schema";
+import { sprintActionFromNode } from "../iteration/automation-config";
 import { cronTriggerConfig, nextCronOccurrence } from "./cron";
 import { AutomationExecutionError } from "./errors";
 import {
@@ -283,6 +284,22 @@ export class PostgresAutomationRepository {
         validateRunnableAutomationGraph(nodes, edges);
         const predecessorTaskIds = new Set<string>();
         for (const node of nodes) {
+          if (node.kind === "action" && node.type === "complete_sprint") {
+            const config = sprintActionFromNode(node);
+            if (config.type === "complete_sprint" && config.destinationSprintId) {
+              const [destination] = await tx
+                .select({ id: pacaSprints.id, status: pacaSprints.status })
+                .from(pacaSprints)
+                .where(
+                  and(
+                    eq(pacaSprints.id, config.destinationSprintId),
+                    eq(pacaSprints.projectId, projectId),
+                  ),
+                );
+              if (!destination || destination.status === "completed")
+                throw new AutomationExecutionError("AUTOMATION_SPRINT_DESTINATION_INVALID");
+            }
+          }
           if (node.kind !== "trigger") continue;
           if (node.type === "cron") {
             const config = cronTriggerConfig(node.config);

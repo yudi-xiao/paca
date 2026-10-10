@@ -87,6 +87,8 @@ export type ActionType = (typeof ACTION_TYPES)[number];
 export const INTERNAL_PREVIEW_ACTION_TYPES = [
 	"update_task",
 	"wait",
+	"update_sprint",
+	"complete_sprint",
 ] as const satisfies readonly ActionType[];
 
 export const CONDITION_NODE_TYPE = "condition";
@@ -356,9 +358,9 @@ export interface TaskFieldUpdate {
  * the triggering task's sprint_id). */
 export interface SprintFieldUpdate {
 	name?: string;
-	start_date?: string;
-	end_date?: string;
-	goal?: string;
+	start_date?: string | null;
+	end_date?: string | null;
+	goal?: string | null;
 	status?: "planned" | "active" | "completed";
 }
 

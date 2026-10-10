@@ -1640,7 +1640,8 @@
 			"expandSidebar": "Expandir painel",
 			"tabGraph": "Gráfico",
 			"tabRuns": "Histórico de execuções",
-			"tabDependencyMap": "Mapa de dependências"
+			"tabDependencyMap": "Mapa de dependências",
+			"contextConnectionError": "Esta conexão não fornece a tarefa ou o sprint necessário para a ação."
 		},
 		"palette": {
 			"title": "Adicionar nó",
@@ -1826,7 +1827,12 @@
 				"pluginConditionLabel": "Condição de plugin",
 				"pluginConditionHint": "Delega a correspondência deste ramo a uma condição fornecida por um plugin em vez de comparar um campo da tarefa.",
 				"selectPluginPlaceholder": "Selecione uma condição de plugin…",
-				"addCustomField": "Adicionar campo personalizado…"
+				"addCustomField": "Adicionar campo personalizado…",
+				"sprintContextHint": "Atualiza os campos ativados do sprint que disparou o evento ou do sprint da tarefa que o disparou.",
+				"clearSprintField": "Limpar {{field}}",
+				"sprintStatusOnlyHint": "Alterar o status não move tarefas. Use Concluir sprint para mover as tarefas pendentes.",
+				"sprintUpdateInvalid": "Verifique o nome (1–200 caracteres), a meta (até 10.000 caracteres), o status e as datas.",
+				"sprintDestinationMissing": "O destino não existe ou foi concluído. Escolha outro sprint ou o backlog."
 			},
 			"target": {
 				"label": "Aplica-se a",

@@ -1640,7 +1640,8 @@
 			"expandSidebar": "Expandir panel",
 			"tabGraph": "Gráfico",
 			"tabRuns": "Historial de ejecuciones",
-			"tabDependencyMap": "Mapa de dependencias"
+			"tabDependencyMap": "Mapa de dependencias",
+			"contextConnectionError": "Esta conexión no tiene el contexto de tarea o sprint necesario para la acción."
 		},
 		"palette": {
 			"title": "Añadir nodo",
@@ -1826,7 +1827,12 @@
 				"pluginConditionLabel": "Condición de plugin",
 				"pluginConditionHint": "Delega la coincidencia de esta rama a una condición de plugin en lugar de comparar un campo de la tarea.",
 				"selectPluginPlaceholder": "Selecciona una condición de plugin…",
-				"addCustomField": "Añadir campo personalizado…"
+				"addCustomField": "Añadir campo personalizado…",
+				"sprintContextHint": "Actualiza los campos activados del sprint que dispara el evento o del sprint de la tarea que lo dispara.",
+				"clearSprintField": "Vaciar {{field}}",
+				"sprintStatusOnlyHint": "Cambiar el estado no mueve tareas. Use Completar sprint para mover las tareas pendientes.",
+				"sprintUpdateInvalid": "Revise el nombre (1–200 caracteres), el objetivo (máximo 10 000), el estado y las fechas.",
+				"sprintDestinationMissing": "El destino no existe o está completado. Elija otro sprint o el backlog."
 			},
 			"target": {
 				"label": "Se aplica a",

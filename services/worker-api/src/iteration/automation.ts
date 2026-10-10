@@ -1,5 +1,4 @@
 import * as z from "zod";
-import type { SprintUpdateInput } from "./service";
 
 export const sprintActionResultSchema = z
   .object({
@@ -20,12 +19,8 @@ export type SprintAutomationAction = {
   projectId: string;
   runId: string;
   nodeId: string;
-  taskId?: string | null;
   sprintId: string;
-} & (
-  | { type: "update_sprint"; update: SprintUpdateInput }
-  | { type: "complete_sprint"; destinationSprintId: string | null }
-);
+};
 export interface SprintAutomationRepository {
   resolveSprint(
     projectId: string,

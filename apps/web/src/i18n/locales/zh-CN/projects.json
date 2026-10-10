@@ -1640,7 +1640,8 @@
 			"expandSidebar": "展开面板",
 			"tabGraph": "图谱",
 			"tabRuns": "运行历史",
-			"tabDependencyMap": "依赖关系图"
+			"tabDependencyMap": "依赖关系图",
+			"contextConnectionError": "此连线缺少动作所需的任务或迭代上下文。"
 		},
 		"palette": {
 			"title": "添加节点",
@@ -1826,7 +1827,12 @@
 				"pluginConditionLabel": "插件条件",
 				"pluginConditionHint": "将此分支的匹配委托给插件提供的条件，而不是比较任务字段。",
 				"selectPluginPlaceholder": "选择插件条件…",
-				"addCustomField": "添加自定义字段…"
+				"addCustomField": "添加自定义字段…",
+				"sprintContextHint": "修改触发事件对应迭代或触发任务所属迭代中启用的字段。",
+				"clearSprintField": "清空{{field}}",
+				"sprintStatusOnlyHint": "修改状态不会移动任务。请使用“完成迭代”来转移未完成任务。",
+				"sprintUpdateInvalid": "请检查名称（1–200 字）、目标（最多 10,000 字）、状态和日期范围。",
+				"sprintDestinationMissing": "目标迭代已删除或完成。请选择其他迭代或待办池。"
 			},
 			"target": {
 				"label": "作用对象",

@@ -25,7 +25,12 @@ describe("internal preview route availability", () => {
 			"sprint_completed",
 			"sprint_deleted",
 		]);
-		expect(INTERNAL_PREVIEW_ACTION_TYPES).toEqual(["update_task", "wait"]);
+		expect(INTERNAL_PREVIEW_ACTION_TYPES).toEqual([
+			"update_task",
+			"wait",
+			"update_sprint",
+			"complete_sprint",
+		]);
 	});
 
 	it.each([

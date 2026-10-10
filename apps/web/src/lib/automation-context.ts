@@ -39,3 +39,17 @@ export function workerTriggerHasNoTask(node: AutomationNode): boolean {
 			(node.type === "cron" && !(node.config as TriggerConfig).target_task_id))
 	);
 }
+
+export function workerNodeRequiresSprint(node: AutomationNode): boolean {
+	return (
+		node.kind === "action" &&
+		["update_sprint", "complete_sprint"].includes(node.type)
+	);
+}
+export function workerTriggerHasNoSprint(node: AutomationNode): boolean {
+	return (
+		node.kind === "trigger" &&
+		(node.type === "sprint_deleted" ||
+			(node.type === "cron" && !(node.config as TriggerConfig).target_task_id))
+	);
+}

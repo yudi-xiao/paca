@@ -508,6 +508,11 @@ export async function completeSprintInTransaction(
           actorMemberId: sql<string | null>`null::uuid`.as("actorMemberId"),
           activityType: sql<string>`'task.updated'`.as("activityType"),
           content: sql<Record<string, unknown>>`${JSON.stringify(content)}::jsonb`.as("content"),
+          // Drizzle insert-select requires every table column in schema order,
+          // including columns that would have defaults in a values insert.
+          createdAt: sql<Date>`now()`.as("createdAt"),
+          updatedAt: sql<Date>`now()`.as("updatedAt"),
+          deletedAt: sql<Date | null>`null::timestamptz`.as("deletedAt"),
         })
         .from(moved),
     );

@@ -79,6 +79,8 @@ import type {
 } from "@/lib/project-api";
 import { createLoadMoreScrollHandler } from "@/lib/scroll-pagination";
 
+import { SprintActionConfig } from "./sprint-action-config";
+
 interface AutomationNodeConfigPanelProps {
 	node: AutomationNode;
 	projectId: string;
@@ -2209,24 +2211,6 @@ function ActionConfigForm({
 	const [waitMinutes, setWaitMinutes] = useState(
 		config.wait_minutes?.toString() ?? "",
 	);
-	const [sprintName, setSprintName] = useState(
-		config.sprint_update?.name ?? "",
-	);
-	const [sprintStartDate, setSprintStartDate] = useState(
-		config.sprint_update?.start_date ?? "",
-	);
-	const [sprintEndDate, setSprintEndDate] = useState(
-		config.sprint_update?.end_date ?? "",
-	);
-	const [sprintGoal, setSprintGoal] = useState(
-		config.sprint_update?.goal ?? "",
-	);
-	const [sprintStatus, setSprintStatus] = useState(
-		config.sprint_update?.status ?? "",
-	);
-	const [moveToSprintId, setMoveToSprintId] = useState(
-		config.move_to_sprint_id ?? "",
-	);
 
 	// update_task's fields, each independently enabled — an unset field is
 	// left untouched on the task; only enabled fields are sent.
@@ -2238,7 +2222,7 @@ function ActionConfigForm({
 	const [fields, setFields] = useState<TaskFieldUpdate>(initialFields);
 	const { data: sprints } = useQuery({
 		...sprintsQueryOptions(projectId),
-		enabled: !!projectId,
+		enabled: !!projectId && type === "update_task",
 	});
 
 	function toggleField(key: keyof TaskFieldUpdate, on: boolean) {
@@ -2351,174 +2335,16 @@ function ActionConfigForm({
 		);
 	}
 
-	if (type === "update_sprint") {
-		const hasAnyField =
-			sprintName.trim() !== "" ||
-			sprintStartDate !== "" ||
-			sprintEndDate !== "" ||
-			sprintGoal.trim() !== "" ||
-			sprintStatus !== "";
+	if (type === "update_sprint" || type === "complete_sprint") {
 		return (
-			<div className="space-y-3">
-				<p className="text-xs text-muted-foreground">
-					{t("automation.nodeConfig.action.updateSprintHint")}{" "}
-					{t("automation.nodeConfig.action.variablesHint")}
-				</p>
-				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.action.sprintNameLabel")}</Label>
-					<Input
-						value={sprintName}
-						onChange={(e) => setSprintName(e.target.value)}
-						disabled={!canEdit}
-					/>
-				</div>
-				<div className="space-y-1.5">
-					<Label>
-						{t("automation.nodeConfig.action.sprintStartDateLabel")}
-					</Label>
-					<Input
-						type="date"
-						value={toDateInputValue(sprintStartDate)}
-						onChange={(e) =>
-							setSprintStartDate(fromDateInputValue(e.target.value))
-						}
-						disabled={!canEdit}
-					/>
-				</div>
-				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.action.sprintEndDateLabel")}</Label>
-					<Input
-						type="date"
-						value={toDateInputValue(sprintEndDate)}
-						onChange={(e) =>
-							setSprintEndDate(fromDateInputValue(e.target.value))
-						}
-						disabled={!canEdit}
-					/>
-				</div>
-				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.action.sprintGoalLabel")}</Label>
-					<Textarea
-						value={sprintGoal}
-						onChange={(e) => setSprintGoal(e.target.value)}
-						rows={3}
-						disabled={!canEdit}
-					/>
-				</div>
-				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.action.sprintStatusLabel")}</Label>
-					<Select
-						value={sprintStatus || "__unchanged__"}
-						onValueChange={(v) =>
-							setSprintStatus(
-								!v || v === "__unchanged__"
-									? ""
-									: (v as "planned" | "active" | "completed"),
-							)
-						}
-						disabled={!canEdit}
-					>
-						<SelectTrigger className="w-full">
-							<SelectValue>
-								{
-									{
-										"": t("automation.nodeConfig.action.sprintStatusUnchanged"),
-										planned: t(
-											"automation.nodeConfig.action.sprintStatusPlanned",
-										),
-										active: t(
-											"automation.nodeConfig.action.sprintStatusActive",
-										),
-										completed: t(
-											"automation.nodeConfig.action.sprintStatusCompleted",
-										),
-									}[sprintStatus]
-								}
-							</SelectValue>
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="__unchanged__">
-								{t("automation.nodeConfig.action.sprintStatusUnchanged")}
-							</SelectItem>
-							<SelectItem value="planned">
-								{t("automation.nodeConfig.action.sprintStatusPlanned")}
-							</SelectItem>
-							<SelectItem value="active">
-								{t("automation.nodeConfig.action.sprintStatusActive")}
-							</SelectItem>
-							<SelectItem value="completed">
-								{t("automation.nodeConfig.action.sprintStatusCompleted")}
-							</SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
-				{canEdit && (
-					<SaveButton
-						saving={saving}
-						disabled={!hasAnyField}
-						onClick={() =>
-							onSave({
-								sprint_update: {
-									name: sprintName.trim() || undefined,
-									start_date: sprintStartDate || undefined,
-									end_date: sprintEndDate || undefined,
-									goal: sprintGoal.trim() || undefined,
-									status: sprintStatus || undefined,
-								},
-							})
-						}
-					/>
-				)}
-			</div>
-		);
-	}
-
-	if (type === "complete_sprint") {
-		return (
-			<div className="space-y-3">
-				<p className="text-xs text-muted-foreground">
-					{t("automation.nodeConfig.action.completeSprintHint")}
-				</p>
-				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.action.moveToSprintLabel")}</Label>
-					<Select
-						value={moveToSprintId || "__backlog__"}
-						onValueChange={(v) =>
-							setMoveToSprintId(!v || v === "__backlog__" ? "" : v)
-						}
-						disabled={!canEdit}
-					>
-						<SelectTrigger className="w-full">
-							<SelectValue>
-								{moveToSprintId
-									? (sprints ?? []).find((s) => s.id === moveToSprintId)?.name
-									: t("automation.nodeConfig.action.moveToSprintBacklog")}
-							</SelectValue>
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="__backlog__">
-								{t("automation.nodeConfig.action.moveToSprintBacklog")}
-							</SelectItem>
-							{(sprints ?? []).map((s) => (
-								<SelectItem key={s.id} value={s.id}>
-									{s.name}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-					<p className="text-xs text-muted-foreground">
-						{t("automation.nodeConfig.action.moveToSprintHint")}
-					</p>
-				</div>
-				{canEdit && (
-					<SaveButton
-						saving={saving}
-						onClick={() =>
-							onSave({ move_to_sprint_id: moveToSprintId || undefined })
-						}
-					/>
-				)}
-			</div>
+			<SprintActionConfig
+				type={type}
+				config={config}
+				projectId={projectId}
+				canEdit={canEdit}
+				saving={saving}
+				onSave={onSave}
+			/>
 		);
 	}
 

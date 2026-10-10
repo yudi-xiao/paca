@@ -1640,7 +1640,8 @@
 			"expandSidebar": "パネルを展開する",
 			"tabGraph": "グラフ",
 			"tabRuns": "実行履歴",
-			"tabDependencyMap": "依存関係マップ"
+			"tabDependencyMap": "依存関係マップ",
+			"contextConnectionError": "この接続には、アクションに必要なタスクまたはスプリントの情報がありません。"
 		},
 		"palette": {
 			"title": "ノードを追加",
@@ -1826,7 +1827,12 @@
 				"pluginConditionLabel": "プラグイン条件",
 				"pluginConditionHint": "タスクフィールドの比較の代わりに、このブランチの判定をプラグイン提供の条件に委任します。",
 				"selectPluginPlaceholder": "プラグイン条件を選択…",
-				"addCustomField": "カスタムフィールドを追加…"
+				"addCustomField": "カスタムフィールドを追加…",
+				"sprintContextHint": "トリガーのスプリント、またはトリガーとなったタスクのスプリントの有効な項目を更新します。",
+				"clearSprintField": "{{field}}をクリア",
+				"sprintStatusOnlyHint": "状態変更ではタスクは移動しません。未完了タスクを移動するには「スプリントを完了」を使ってください。",
+				"sprintUpdateInvalid": "名前（1〜200文字）、目標（10,000文字以内）、状態、日付の範囲を確認してください。",
+				"sprintDestinationMissing": "移動先が削除済みまたは完了済みです。別のスプリントかバックログを選んでください。"
 			},
 			"target": {
 				"label": "適用先",

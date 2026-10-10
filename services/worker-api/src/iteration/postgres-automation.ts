@@ -1,4 +1,5 @@
 import { and, eq, isNull } from "drizzle-orm";
+import { automationRunSnapshotSchema } from "../automation/run-protocol";
 import { renderAutomationText } from "../automation/template";
 import type { PacaDatabase } from "../database";
 import {
@@ -16,6 +17,7 @@ import {
   type SprintAutomationRepository,
   sprintActionResultSchema,
 } from "./automation";
+import { sprintActionFromNode } from "./automation-config";
 import { completeSprintInTransaction, sprintFromRow } from "./postgres-repository";
 import { IterationError, iterationErrorCodes, normalizeSprintUpdate } from "./service";
 
@@ -68,6 +70,15 @@ export class PostgresSprintAutomationRepository implements SprintAutomationRepos
         )
         .for("update", { of: pacaAutomationRuns });
       if (!run) throw new Error("AUTOMATION_RUN_NOT_FOUND");
+      const snapshot = automationRunSnapshotSchema.parse(run.snapshot);
+      if (snapshot.projectId !== action.projectId) throw new Error("AUTOMATION_RUN_SCOPE_INVALID");
+      const node = snapshot.nodes.find((node) => node.id === action.nodeId);
+      if (!node) throw new Error("AUTOMATION_SPRINT_NODE_INVALID");
+      const config = sprintActionFromNode(node);
+      if (snapshot.event.sprintSnapshot && snapshot.event.sprintSnapshot.id !== action.sprintId)
+        throw new Error("AUTOMATION_SPRINT_TARGET_INVALID");
+      if (snapshot.event.type === "sprint_deleted")
+        throw new Error("AUTOMATION_EDGE_REQUIRES_TARGET_SPRINT");
       const [completed] = await tx
         .select()
         .from(pacaAutomationRunSteps)
@@ -79,7 +90,10 @@ export class PostgresSprintAutomationRepository implements SprintAutomationRepos
         );
       if (completed) {
         if (completed.status !== "completed") throw new Error("AUTOMATION_SPRINT_STEP_INVALID");
-        return sprintActionResultSchema.parse(completed.outputSnapshot);
+        const result = sprintActionResultSchema.parse(completed.outputSnapshot);
+        if (result.sprint_id !== action.sprintId)
+          throw new Error("AUTOMATION_SPRINT_TARGET_INVALID");
+        return result;
       }
       if (run.status !== "running") throw new Error("AUTOMATION_RUN_NOT_RUNNING");
       const [project] = await tx
@@ -89,12 +103,12 @@ export class PostgresSprintAutomationRepository implements SprintAutomationRepos
         .for("share");
       if (!project) throw new Error("AUTOMATION_PROJECT_NOT_FOUND");
       let result: SprintActionResult;
-      if (action.type === "complete_sprint") {
+      if (config.type === "complete_sprint") {
         const completed = await completeSprintInTransaction(
           tx,
           action.projectId,
           action.sprintId,
-          action.destinationSprintId,
+          config.destinationSprintId,
           automationTaskActor(action.runId),
           true,
         );
@@ -117,8 +131,8 @@ export class PostgresSprintAutomationRepository implements SprintAutomationRepos
         if (!current) throw new IterationError(iterationErrorCodes.sprintNotFound);
         const vars: Record<string, string> = {
           "automation.name":
-            typeof run.snapshot.automationName === "string"
-              ? run.snapshot.automationName
+            typeof snapshot.automationName === "string"
+              ? snapshot.automationName
               : run.automationName,
           "sprint.id": current.id,
           "sprint.name": current.name,
@@ -127,13 +141,13 @@ export class PostgresSprintAutomationRepository implements SprintAutomationRepos
         if (current.goal !== null) vars["sprint.goal"] = current.goal;
         if (current.startDate) vars["sprint.start_date"] = `${current.startDate}T00:00:00Z`;
         if (current.endDate) vars["sprint.end_date"] = `${current.endDate}T00:00:00Z`;
-        if (action.taskId) {
+        if (snapshot.event.taskId) {
           const [task] = await tx
             .select()
             .from(pacaTasks)
             .where(
               and(
-                eq(pacaTasks.id, action.taskId),
+                eq(pacaTasks.id, snapshot.event.taskId),
                 eq(pacaTasks.projectId, action.projectId),
                 isNull(pacaTasks.deletedAt),
               ),
@@ -148,7 +162,7 @@ export class PostgresSprintAutomationRepository implements SprintAutomationRepos
           if (task.storyPoints !== null) vars["task.story_points"] = String(task.storyPoints);
           if (task.sprintId) vars["task.sprint_id"] = task.sprintId;
         }
-        const update = { ...action.update };
+        const update = { ...config.update };
         if (update.name !== undefined) update.name = renderAutomationText(update.name, vars);
         if (update.goal !== undefined && update.goal !== null)
           update.goal = renderAutomationText(update.goal, vars);
@@ -184,13 +198,13 @@ export class PostgresSprintAutomationRepository implements SprintAutomationRepos
         stepKey: action.nodeId,
         status: "completed",
         inputSnapshot: {
-          action: action.type,
+          action: config.type,
           actor_type: "system",
           actor_id: "system",
           sprint_id: action.sprintId,
-          fields: action.type === "update_sprint" ? Object.keys(action.update) : ["status"],
-          ...(action.type === "complete_sprint"
-            ? { move_to_sprint_id: action.destinationSprintId }
+          fields: config.type === "update_sprint" ? Object.keys(config.update) : ["status"],
+          ...(config.type === "complete_sprint"
+            ? { move_to_sprint_id: config.destinationSprintId }
             : {}),
         },
         outputSnapshot: result,
