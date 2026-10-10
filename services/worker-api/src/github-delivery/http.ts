@@ -176,6 +176,34 @@ export function createGitHubDeliveryRoutes(
       return failure(context, error);
     }
   });
+  app.get(
+    `${taskPath}/completed-runs`,
+    requireProjectPermission(authorize, { tasks: ["read"] }),
+    async (context) => {
+      try {
+        validScope(context, true);
+        const cursors = context.req.queries("cursor") ?? [];
+        if (cursors.length > 1 || (cursors.length === 1 && !z.uuid().safeParse(cursors[0]).success))
+          throw new DeliveryWorkflowError("DELIVERY_INPUT_INVALID");
+        const page = await runtime.completedRuns(
+          context.env,
+          context.req.param("projectId"),
+          context.req.param("taskId"),
+          cursors[0],
+        );
+        return context.json({
+          success: true as const,
+          data: {
+            ...page,
+            items: page.items.map((run) => ({ ...run, finishedAt: run.finishedAt.toISOString() })),
+          },
+          request_id: context.get("requestId"),
+        });
+      } catch (error) {
+        return failure(context, error);
+      }
+    },
+  );
   for (const operation of ["submit", "refresh", "decide"] as const) {
     app.post(
       operation === "submit"

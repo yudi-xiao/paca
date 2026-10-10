@@ -197,6 +197,66 @@ function submit(leaseId: string, expectedVersion = 0) {
   return { requestId: crypto.randomUUID(), expectedVersion, leaseId, pullNumber: 42, headSha };
 }
 describe.skipIf(!databaseURL)("PostgreSQL GitHub delivery acceptance", () => {
+  it("paginates completed runs with stable ties, excludes other tasks and hides archived work", async () =>
+    fixture(
+      async ({
+        database,
+        repository,
+        projectId,
+        taskId,
+        otherTaskId,
+        leaseId,
+        foreignLeaseId,
+        activeLeaseId,
+      }) => {
+        const [original] = await database
+          .select()
+          .from(pacaAgentTaskLeases)
+          .where(eq(pacaAgentTaskLeases.id, leaseId));
+        if (!original) throw Error("LEASE_FIXTURE_MISSING");
+        await database
+          .insert(pacaAgentTaskLeases)
+          .values(Array.from({ length: 24 }, () => ({ ...original, id: crypto.randomUUID() })));
+        await database.insert(pacaAgentTaskLeases).values({
+          ...original,
+          id: crypto.randomUUID(),
+          status: "failed",
+          errorCode: "EXECUTION_FAILED",
+        });
+        const first = await repository.completedRuns(projectId, taskId);
+        expect(first.items).toHaveLength(20);
+        expect(first.nextCursor).toBe(first.items.at(-1)?.leaseId);
+        const second = await repository.completedRuns(
+          projectId,
+          taskId,
+          first.nextCursor ?? undefined,
+        );
+        expect(second.items).toHaveLength(5);
+        expect(second.nextCursor).toBeNull();
+        const all = [...first.items, ...second.items];
+        expect(new Set(all.map((run) => run.leaseId)).size).toBe(25);
+        expect(all.map((run) => run.leaseId)).toEqual(
+          all
+            .map((run) => run.leaseId)
+            .sort()
+            .reverse(),
+        );
+        expect(Object.keys(all[0] ?? {}).sort()).toEqual(["finishedAt", "harnessKind", "leaseId"]);
+        expect((await repository.completedRuns(projectId, otherTaskId)).items).toEqual([]);
+        for (const cursor of [foreignLeaseId, activeLeaseId])
+          await expect(repository.completedRuns(projectId, taskId, cursor)).rejects.toMatchObject({
+            code: "DELIVERY_INPUT_INVALID",
+          });
+        await database
+          .update(pacaTasks)
+          .set({ deletedAt: new Date() })
+          .where(eq(pacaTasks.id, taskId));
+        expect((await repository.completedRuns(projectId, taskId)).items).toEqual([]);
+        await expect(repository.completedRuns(projectId, taskId, leaseId)).rejects.toMatchObject({
+          code: "DELIVERY_INPUT_INVALID",
+        });
+      },
+    ));
   it("invalidates accepted evidence atomically, deduplicates concurrent delivery and rejects a reused ID", async () =>
     fixture(async ({ database, service, repository, projectId, taskId, actorId, leaseId }) => {
       await service.submit(projectId, taskId, actorId, submit(leaseId));

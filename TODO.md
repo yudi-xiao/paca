@@ -109,8 +109,9 @@
 - [x] GitHub App 短期 JWT 与单仓库只读 installation token 适配；原始 bytes HMAC-SHA256 Webhook 校验、事务回执与证据失效、安装撤销、回执有界清理；本地/Workers runtime 已验证。
 - [x] 服务端人工接受/要求修改、失效与历史状态：接受前重新取证，保留人工要求修改，拒绝过期或未知证据，不自动关闭任务。
 - [x] 专用私有只读 GitHub App `paca-yudi-delivery` 已创建，安装事件确认仅选择 `yudi-xiao/paca`；internal 三项 Secret 已配置，单仓库访问与签名 ping 验证通过，真实安装事件及首次 ping 重投均收到成功响应。本地 manifest 引导与私有凭据恢复流程已验证，临时创建页面已关闭。
-- [ ] 项目仓库与任务交付页面、浏览器体验及真实 PR→CI→人工验收链路。
-- [ ] 发布交付 PR 并验证真实 CI：本地 `codex/paca-release-readiness` 分支已保存当前实现，Worker CI 已补充 Workers runtime contracts；本机 GitHub CLI 登录待恢复，连接服务的 Git 对象写入返回权限拒绝。专用 Paca App 的只读权限保持不变。
+- [x] 任务交付卡片与受权限保护的已完成运行选择：固定 PR/SHA、CI 状态、证据时效、人工验收/修改说明、版本冲突和不确定网络结果的同请求重试；九种语言及交互、权限隔离和真实 PostgreSQL 分页已验证。
+- [ ] 项目仓库配置页面、交付页面的真实浏览器体验及 PR→CI→人工验收完整链路。
+- [x] 已发布 [Draft PR #1](https://github.com/yudi-xiao/paca/pull/1)，GitHub CLI 登录恢复；首轮 Web/MCP/Worker CI 全部通过，Worker CI 包含运行时及真实 PostgreSQL 契约。只读 App 确认三项 CI 属于固定提交，Draft 状态仍阻止验收；真实 PR/Check 事件投递成功。后续变更继续随 PR 验证。
 
 ### 已纳入计划的上游功能（2026-10-10）
 

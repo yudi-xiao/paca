@@ -1885,5 +1885,44 @@
 			"empty": "No predecessor dependencies configured yet",
 			"watchedTasks": "Waiting on {{count}} task(s)"
 		}
+	},
+	"delivery": {
+		"title": "GitHub delivery",
+		"hint": "Select a completed Agent run and pin its PR and commit. CI evidence and human acceptance are separate steps.",
+		"noRepository": "An administrator must bind this project to a GitHub repository first.",
+		"revoked": "Repository access was revoked. An administrator must reconnect it.",
+		"noRuns": "No completed Agent runs are available for this task.",
+		"run": "Completed Agent run",
+		"chooseRun": "Select a run",
+		"pr": "Pull request number",
+		"sha": "Commit SHA (40 characters)",
+		"submit": "Submit delivery",
+		"refresh": "Refresh evidence",
+		"accept": "Accept this commit",
+		"requestChanges": "Request changes",
+		"note": "Acceptance or change notes",
+		"error": "Could not complete the operation. Check access and retry.",
+		"conflict": "Delivery changed. Review the latest evidence before acting again.",
+		"notReady": "Evidence is not ready for acceptance. Review the current checks.",
+		"draft": "This PR is a draft. Publish it for review before acceptance.",
+		"headChanged": "The PR head changed. Submit the new commit for acceptance.",
+		"reviews": "Current commit approvals: {{count}} / {{required}}",
+		"observed": "Evidence checked: {{time}}",
+		"previousAcceptance": "Previously accepted at {{time}}; current evidence needs review.",
+		"state": {
+			"awaiting_acceptance": "Awaiting acceptance",
+			"waiting": "Waiting for checks or review",
+			"needs_changes": "Changes required",
+			"stale": "Evidence needs refresh",
+			"unavailable": "Evidence unavailable",
+			"accepted": "Commit accepted"
+		},
+		"check": {
+			"passed": "Passed",
+			"pending": "Pending",
+			"failed": "Failed",
+			"missing": "Missing",
+			"stale": "Expired"
+		}
 	}
 }

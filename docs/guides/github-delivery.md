@@ -30,6 +30,7 @@ API 使用同源 Better Auth 用户 Session。仓库配置同时要求项目 `pr
 | --- | --- | --- |
 | GET/PUT | `/api/v1/projects/:projectId/github-repository` | 读取或配置仓库及验收策略 |
 | GET/POST | `/api/v1/projects/:projectId/tasks/:taskId/delivery` | 读取交付或提交固定 PR/SHA |
+| GET | `/api/v1/projects/:projectId/tasks/:taskId/delivery/completed-runs` | 选择已完成的本任务 Agent 运行，每页最多 20 条，UUID `cursor` 续页 |
 | POST | `/api/v1/projects/:projectId/tasks/:taskId/delivery/refresh` | 从 GitHub 更新证据 |
 | POST | `/api/v1/projects/:projectId/tasks/:taskId/delivery/decision` | 用户接受或要求修改 |
 

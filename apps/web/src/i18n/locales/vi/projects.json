@@ -1885,5 +1885,44 @@
 			"empty": "Chưa có phụ thuộc công việc trước nào được cấu hình",
 			"watchedTasks": "Đang chờ {{count}} công việc"
 		}
+	},
+	"delivery": {
+		"title": "Bàn giao GitHub",
+		"hint": "Chọn lượt chạy Agent đã hoàn tất và cố định PR cùng commit. Bằng chứng CI và nghiệm thu được xác nhận riêng.",
+		"noRepository": "Quản trị viên cần liên kết dự án với kho GitHub trước.",
+		"revoked": "Quyền truy cập kho đã bị thu hồi. Quản trị viên cần kết nối lại.",
+		"noRuns": "Tác vụ chưa có lượt chạy Agent hoàn tất.",
+		"run": "Lượt chạy Agent đã hoàn tất",
+		"chooseRun": "Chọn lượt chạy",
+		"pr": "Số pull request",
+		"sha": "Commit SHA (40 ký tự)",
+		"submit": "Gửi bàn giao",
+		"refresh": "Làm mới bằng chứng",
+		"accept": "Nghiệm thu commit này",
+		"requestChanges": "Yêu cầu sửa đổi",
+		"note": "Ghi chú nghiệm thu hoặc sửa đổi",
+		"error": "Không hoàn tất thao tác. Kiểm tra quyền truy cập và thử lại.",
+		"conflict": "Bàn giao đã thay đổi. Xem bằng chứng mới nhất trước khi thao tác lại.",
+		"notReady": "Bằng chứng chưa đủ để nghiệm thu. Kiểm tra trạng thái hiện tại.",
+		"draft": "PR là bản nháp. Chuyển sang chờ đánh giá trước khi nghiệm thu.",
+		"headChanged": "Commit mới nhất của PR đã thay đổi. Gửi commit mới để nghiệm thu.",
+		"reviews": "Phê duyệt commit hiện tại: {{count}} / {{required}}",
+		"observed": "Kiểm tra bằng chứng: {{time}}",
+		"previousAcceptance": "Đã nghiệm thu lúc {{time}}; cần kiểm tra lại bằng chứng hiện tại.",
+		"state": {
+			"awaiting_acceptance": "Chờ nghiệm thu",
+			"waiting": "Chờ kiểm tra hoặc đánh giá",
+			"needs_changes": "Cần sửa đổi",
+			"stale": "Cần làm mới bằng chứng",
+			"unavailable": "Không có bằng chứng",
+			"accepted": "Commit đã nghiệm thu"
+		},
+		"check": {
+			"passed": "Đạt",
+			"pending": "Đang chờ",
+			"failed": "Thất bại",
+			"missing": "Thiếu",
+			"stale": "Hết hạn"
+		}
 	}
 }

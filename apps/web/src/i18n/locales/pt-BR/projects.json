@@ -1885,5 +1885,44 @@
 			"empty": "Nenhuma dependência de predecessora configurada ainda",
 			"watchedTasks": "Aguardando {{count}} tarefa(s)"
 		}
+	},
+	"delivery": {
+		"title": "Entrega do GitHub",
+		"hint": "Selecione uma execução de Agent concluída e fixe seu PR e commit. As evidências de CI e a aceitação humana são confirmadas separadamente.",
+		"noRepository": "Um administrador deve primeiro vincular o projeto a um repositório do GitHub.",
+		"revoked": "O acesso ao repositório foi revogado. Um administrador deve reconectá-lo.",
+		"noRuns": "Esta tarefa não tem execuções de Agent concluídas.",
+		"run": "Execução de Agent concluída",
+		"chooseRun": "Selecione uma execução",
+		"pr": "Número do pull request",
+		"sha": "SHA do commit (40 caracteres)",
+		"submit": "Enviar entrega",
+		"refresh": "Atualizar evidências",
+		"accept": "Aceitar este commit",
+		"requestChanges": "Solicitar alterações",
+		"note": "Notas de aceitação ou alterações",
+		"error": "Não foi possível concluir a operação. Verifique o acesso e tente novamente.",
+		"conflict": "A entrega mudou. Revise as evidências atuais antes de agir novamente.",
+		"notReady": "As evidências ainda não permitem a aceitação. Verifique o estado atual.",
+		"draft": "Este PR é um rascunho. Publique-o para revisão antes de aceitar.",
+		"headChanged": "O último commit do PR mudou. Envie o novo commit para aceitação.",
+		"reviews": "Aprovações do commit atual: {{count}} / {{required}}",
+		"observed": "Evidências verificadas: {{time}}",
+		"previousAcceptance": "Aceito anteriormente em {{time}}; as evidências atuais precisam de revisão.",
+		"state": {
+			"awaiting_acceptance": "Aguardando aceitação",
+			"waiting": "Aguardando verificações ou revisão",
+			"needs_changes": "Alterações necessárias",
+			"stale": "Evidências precisam de atualização",
+			"unavailable": "Evidências indisponíveis",
+			"accepted": "Commit aceito"
+		},
+		"check": {
+			"passed": "Aprovado",
+			"pending": "Pendente",
+			"failed": "Falhou",
+			"missing": "Ausente",
+			"stale": "Expirado"
+		}
 	}
 }

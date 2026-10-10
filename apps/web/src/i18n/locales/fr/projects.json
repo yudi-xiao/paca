@@ -1885,5 +1885,44 @@
 			"empty": "Aucune dépendance de prédécesseur configurée pour l'instant",
 			"watchedTasks": "En attente de {{count}} tâche(s)"
 		}
+	},
+	"delivery": {
+		"title": "Livraison GitHub",
+		"hint": "Sélectionnez une exécution Agent terminée et fixez sa PR et son commit. Les preuves CI et la validation humaine sont confirmées séparément.",
+		"noRepository": "Un administrateur doit d’abord associer le projet à un dépôt GitHub.",
+		"revoked": "L’accès au dépôt a été révoqué. Un administrateur doit le reconnecter.",
+		"noRuns": "Aucune exécution Agent terminée pour cette tâche.",
+		"run": "Exécution Agent terminée",
+		"chooseRun": "Sélectionner une exécution",
+		"pr": "Numéro de pull request",
+		"sha": "SHA du commit (40 caractères)",
+		"submit": "Soumettre la livraison",
+		"refresh": "Actualiser les preuves",
+		"accept": "Valider ce commit",
+		"requestChanges": "Demander des modifications",
+		"note": "Notes de validation ou de modification",
+		"error": "L’opération a échoué. Vérifiez les droits et réessayez.",
+		"conflict": "La livraison a changé. Consultez les preuves actuelles avant de continuer.",
+		"notReady": "Les preuves ne permettent pas encore la validation. Vérifiez l’état actuel.",
+		"draft": "Cette PR est un brouillon. Publiez-la pour révision avant de valider.",
+		"headChanged": "Le dernier commit de la PR a changé. Soumettez le nouveau commit.",
+		"reviews": "Approbations du commit actuel : {{count}} / {{required}}",
+		"observed": "Preuves vérifiées : {{time}}",
+		"previousAcceptance": "Validé auparavant le {{time}} ; les preuves actuelles doivent être revérifiées.",
+		"state": {
+			"awaiting_acceptance": "En attente de validation",
+			"waiting": "En attente des contrôles ou de la révision",
+			"needs_changes": "Modifications requises",
+			"stale": "Preuves à actualiser",
+			"unavailable": "Preuves indisponibles",
+			"accepted": "Commit validé"
+		},
+		"check": {
+			"passed": "Réussi",
+			"pending": "En attente",
+			"failed": "Échec",
+			"missing": "Absent",
+			"stale": "Expiré"
+		}
 	}
 }

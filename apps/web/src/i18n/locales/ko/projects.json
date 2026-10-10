@@ -1885,5 +1885,44 @@
 			"empty": "아직 설정된 선행 태스크 종속성이 없습니다",
 			"watchedTasks": "{{count}}개 태스크 대기 중"
 		}
+	},
+	"delivery": {
+		"title": "GitHub 납품",
+		"hint": "완료된 Agent 실행을 선택하고 PR과 커밋을 고정하세요. CI 증거와 사용자 승인은 별도로 확인합니다.",
+		"noRepository": "관리자가 먼저 프로젝트에 GitHub 저장소를 연결해야 합니다.",
+		"revoked": "저장소 접근이 철회되었습니다. 관리자가 다시 연결해야 합니다.",
+		"noRuns": "이 작업에는 완료된 Agent 실행이 없습니다.",
+		"run": "완료된 Agent 실행",
+		"chooseRun": "실행 선택",
+		"pr": "PR 번호",
+		"sha": "커밋 SHA (40자)",
+		"submit": "납품 제출",
+		"refresh": "증거 새로고침",
+		"accept": "이 커밋 승인",
+		"requestChanges": "수정 요청",
+		"note": "승인 또는 수정 메모",
+		"error": "작업을 완료하지 못했습니다. 접근 권한을 확인하고 다시 시도하세요.",
+		"conflict": "납품이 변경되었습니다. 최신 증거를 확인한 후 다시 진행하세요.",
+		"notReady": "승인 조건을 충족하지 못했습니다. 현재 상태를 확인하세요.",
+		"draft": "초안 PR입니다. 검토 대기 상태로 전환한 후 승인하세요.",
+		"headChanged": "PR의 최신 커밋이 변경되었습니다. 새 커밋을 제출하세요.",
+		"reviews": "현재 커밋 검토 승인: {{count}} / {{required}}",
+		"observed": "증거 확인: {{time}}",
+		"previousAcceptance": "{{time}}에 승인했으며 현재 증거는 다시 확인해야 합니다.",
+		"state": {
+			"awaiting_acceptance": "사용자 승인 대기",
+			"waiting": "검사 또는 검토 대기",
+			"needs_changes": "수정 필요",
+			"stale": "증거 새로고침 필요",
+			"unavailable": "증거 사용 불가",
+			"accepted": "커밋 승인됨"
+		},
+		"check": {
+			"passed": "통과",
+			"pending": "대기",
+			"failed": "실패",
+			"missing": "없음",
+			"stale": "만료"
+		}
 	}
 }

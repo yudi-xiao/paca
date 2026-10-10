@@ -1885,5 +1885,44 @@
 			"empty": "Aún no hay dependencias de predecesoras configuradas",
 			"watchedTasks": "Esperando {{count}} tarea(s)"
 		}
+	},
+	"delivery": {
+		"title": "Entrega de GitHub",
+		"hint": "Selecciona una ejecución de Agent completada y fija su PR y commit. La evidencia de CI y la aceptación humana se confirman por separado.",
+		"noRepository": "Un administrador debe vincular primero el proyecto a un repositorio de GitHub.",
+		"revoked": "Se revocó el acceso al repositorio. Un administrador debe volver a conectarlo.",
+		"noRuns": "Esta tarea no tiene ejecuciones de Agent completadas.",
+		"run": "Ejecución de Agent completada",
+		"chooseRun": "Selecciona una ejecución",
+		"pr": "Número de pull request",
+		"sha": "SHA del commit (40 caracteres)",
+		"submit": "Enviar entrega",
+		"refresh": "Actualizar evidencia",
+		"accept": "Aceptar este commit",
+		"requestChanges": "Solicitar cambios",
+		"note": "Notas de aceptación o cambios",
+		"error": "No se pudo completar la operación. Comprueba el acceso y reintenta.",
+		"conflict": "La entrega cambió. Revisa la evidencia actual antes de continuar.",
+		"notReady": "La evidencia no permite aceptar aún. Revisa el estado actual.",
+		"draft": "Este PR es un borrador. Publícalo para revisión antes de aceptar.",
+		"headChanged": "Cambió el último commit del PR. Envía el nuevo commit para aceptar.",
+		"reviews": "Aprobaciones del commit actual: {{count}} / {{required}}",
+		"observed": "Evidencia comprobada: {{time}}",
+		"previousAcceptance": "Aceptado anteriormente el {{time}}; la evidencia actual requiere revisión.",
+		"state": {
+			"awaiting_acceptance": "Pendiente de aceptación",
+			"waiting": "Esperando comprobaciones o revisión",
+			"needs_changes": "Se requieren cambios",
+			"stale": "Actualizar evidencia",
+			"unavailable": "Evidencia no disponible",
+			"accepted": "Commit aceptado"
+		},
+		"check": {
+			"passed": "Correcta",
+			"pending": "Pendiente",
+			"failed": "Fallida",
+			"missing": "Ausente",
+			"stale": "Caducada"
+		}
 	}
 }

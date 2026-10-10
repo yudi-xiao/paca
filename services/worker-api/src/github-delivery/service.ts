@@ -46,6 +46,17 @@ export type RepositoryBinding = {
   status: "active" | "revoked";
   updatedAt: Date;
 };
+export type CompletedDeliveryRunPage = {
+  items: { leaseId: string; harnessKind: string; finishedAt: Date }[];
+  nextCursor: string | null;
+};
+export interface CompletedDeliveryRunRepository {
+  completedRuns(
+    projectId: string,
+    taskId: string,
+    cursor?: string,
+  ): Promise<CompletedDeliveryRunPage>;
+}
 export type TaskDelivery = {
   id: string;
   projectId: string;

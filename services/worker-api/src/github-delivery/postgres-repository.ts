@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { PacaDatabase } from "../database";
 import {
   pacaAgentTaskLeases,
@@ -9,6 +9,8 @@ import {
   pacaTasks,
 } from "../db/schema";
 import {
+  type CompletedDeliveryRunPage,
+  type CompletedDeliveryRunRepository,
   DeliveryWorkflowError,
   type DeliveryWrite,
   type GitHubDeliveryRepository,
@@ -58,8 +60,68 @@ function uniqueConflict(error: unknown): never {
 /** PostgreSQL owns policy revisions, task/run association, decisions and audit.
  * Lock order is project -> repository -> task -> delivery. Remote I/O is never
  * performed while those locks are held. */
-export class PostgresGitHubDeliveryRepository implements GitHubDeliveryRepository {
+export class PostgresGitHubDeliveryRepository
+  implements GitHubDeliveryRepository, CompletedDeliveryRunRepository
+{
   constructor(private readonly database: PacaDatabase) {}
+  async completedRuns(
+    projectId: string,
+    taskId: string,
+    cursor?: string,
+  ): Promise<CompletedDeliveryRunPage> {
+    const scope = and(
+      eq(pacaAgentTaskLeases.projectId, projectId),
+      eq(pacaAgentTaskLeases.taskId, taskId),
+      eq(pacaAgentTaskLeases.status, "completed"),
+      isNotNull(pacaAgentTaskLeases.finishedAt),
+      isNull(pacaTasks.deletedAt),
+      eq(pacaProjects.status, "active"),
+    );
+    const query = () =>
+      this.database
+        .select({
+          leaseId: pacaAgentTaskLeases.id,
+          harnessKind: pacaAgentTaskLeases.harnessKind,
+          finishedAt: pacaAgentTaskLeases.finishedAt,
+        })
+        .from(pacaAgentTaskLeases)
+        .innerJoin(
+          pacaTasks,
+          and(
+            eq(pacaTasks.id, pacaAgentTaskLeases.taskId),
+            eq(pacaTasks.projectId, pacaAgentTaskLeases.projectId),
+          ),
+        )
+        .innerJoin(pacaProjects, eq(pacaProjects.id, pacaAgentTaskLeases.projectId));
+    const [after] = cursor
+      ? await query()
+          .where(and(scope, eq(pacaAgentTaskLeases.id, cursor)))
+          .limit(1)
+      : [];
+    if (cursor && !after?.finishedAt) conflict("DELIVERY_INPUT_INVALID");
+    const rows = await query()
+      .where(
+        and(
+          scope,
+          after?.finishedAt
+            ? or(
+                lt(pacaAgentTaskLeases.finishedAt, after.finishedAt),
+                and(
+                  eq(pacaAgentTaskLeases.finishedAt, after.finishedAt),
+                  lt(pacaAgentTaskLeases.id, after.leaseId),
+                ),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(desc(pacaAgentTaskLeases.finishedAt), desc(pacaAgentTaskLeases.id))
+      .limit(21);
+    const items = rows.slice(0, 20).map((row) => {
+      if (!row.finishedAt) conflict("DELIVERY_RUN_NOT_COMPLETED");
+      return { ...row, finishedAt: row.finishedAt };
+    });
+    return { items, nextCursor: rows.length > 20 ? (items.at(-1)?.leaseId ?? null) : null };
+  }
   async binding(projectId: string): Promise<RepositoryBinding | null> {
     const [row] = await this.database
       .select({ binding: pacaGithubRepositories })

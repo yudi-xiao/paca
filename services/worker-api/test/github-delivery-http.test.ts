@@ -71,6 +71,10 @@ function runtime() {
     },
   };
   const implementation = {
+    completedRuns: vi.fn(async () => ({
+      items: [{ leaseId, harnessKind: "codex", finishedAt: new Date() }],
+      nextCursor: null,
+    })),
     binding: vi.fn(async () => binding),
     delivery: vi.fn(async () => delivery),
     configure: vi.fn(async () => binding),
@@ -96,6 +100,25 @@ function request(body: unknown, method = "POST") {
   };
 }
 describe("GitHub delivery user HTTP boundary", () => {
+  it("lists completed runs only through task read authorization and validates the cursor", async () => {
+    const { app, implementation } = runtime();
+    const response = await app.request(`${taskPath}/completed-runs`, {}, env);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({
+      data: { items: [{ leaseId, harnessKind: "codex" }], nextCursor: null },
+    });
+    expect(implementation.completedRuns).toHaveBeenCalledWith(env, projectId, taskId, undefined);
+    for (const suffix of ["?cursor=bad", `?cursor=${leaseId}&cursor=${leaseId}`])
+      expect((await app.request(`${taskPath}/completed-runs${suffix}`, {}, env)).status).toBe(400);
+    const denied = createApp({
+      githubDelivery: implementation,
+      authorizeProjectPermission: async () => ({ authenticated: false }),
+      log: vi.fn(),
+    });
+    expect((await denied.request(`${taskPath}/completed-runs`, {}, env)).status).toBe(401);
+    expect(implementation.completedRuns).toHaveBeenCalledTimes(1);
+  });
   it("requires authenticated project read/write and separate system approval for repository credentials", async () => {
     const { implementation, binding } = runtime();
     const authorize = vi.fn(allow);

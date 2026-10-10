@@ -1885,5 +1885,44 @@
 			"empty": "尚未配置前置任务依赖关系",
 			"watchedTasks": "等待 {{count}} 个任务"
 		}
+	},
+	"delivery": {
+		"title": "GitHub 交付",
+		"hint": "选择已完成的 Agent 运行，关联固定 PR 和提交。CI 证据与人工验收分别确认。",
+		"noRepository": "请先由管理员为此项目绑定 GitHub 仓库。",
+		"revoked": "仓库访问已撤销，请由管理员重新连接。",
+		"noRuns": "此任务还没有已完成的 Agent 运行。",
+		"run": "已完成的 Agent 运行",
+		"chooseRun": "选择一次运行",
+		"pr": "PR 编号",
+		"sha": "Commit SHA（40 位）",
+		"submit": "提交交付",
+		"refresh": "刷新证据",
+		"accept": "验收此提交",
+		"requestChanges": "要求修改",
+		"note": "验收或修改说明",
+		"error": "操作未完成，请检查访问权限后重试。",
+		"conflict": "交付已变更，请阅读最新证据后重新操作。",
+		"notReady": "证据尚不满足验收条件，请检查当前状态。",
+		"draft": "此 PR 仍是草稿，发布为待评审后才能验收。",
+		"headChanged": "PR 的最新提交已变更，请提交新版本供验收。",
+		"reviews": "当前提交评审通过：{{count}} / {{required}}",
+		"observed": "证据核验时间：{{time}}",
+		"previousAcceptance": "曾于 {{time}} 验收，当前证据需要重新核验。",
+		"state": {
+			"awaiting_acceptance": "等待人工验收",
+			"waiting": "等待 CI 或评审",
+			"needs_changes": "需要修改",
+			"stale": "证据需要刷新",
+			"unavailable": "证据不可用",
+			"accepted": "此提交已验收"
+		},
+		"check": {
+			"passed": "通过",
+			"pending": "等待",
+			"failed": "失败",
+			"missing": "缺少",
+			"stale": "过期"
+		}
 	}
 }

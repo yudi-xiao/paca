@@ -41,6 +41,7 @@ import {
 	taskStatusesQueryOptions,
 	taskTypesQueryOptions,
 } from "@/lib/project-api";
+import { TaskDeliveryCard } from "./task-delivery-card";
 
 type Props = {
 	projectId: string;
@@ -580,6 +581,7 @@ export function InternalPreviewTaskDetail({ projectId, taskId }: Props) {
 							</CardContent>
 						</Card>
 
+						<TaskDeliveryCard projectId={projectId} taskId={taskId} />
 						{canWrite && (
 							<div className="flex flex-wrap justify-between gap-3">
 								<Button

@@ -4,6 +4,7 @@ import { authorizeProjectPermission, authorizeSystemPermission } from "../permis
 import { GitHubAppDeliverySource } from "./github-app";
 import { PostgresGitHubDeliveryRepository } from "./postgres-repository";
 import {
+  type CompletedDeliveryRunPage,
   DeliveryWorkflowError,
   type GitHubDeliveryRepository,
   GitHubDeliveryService,
@@ -12,6 +13,12 @@ import {
 } from "./service";
 
 export type GitHubDeliveryRuntime = {
+  completedRuns(
+    env: AppBindings,
+    projectId: string,
+    taskId: string,
+    cursor?: string,
+  ): Promise<CompletedDeliveryRunPage>;
   binding(env: AppBindings, projectId: string): Promise<RepositoryBinding | null>;
   delivery(env: AppBindings, projectId: string, taskId: string): Promise<TaskDelivery | null>;
   configure(
@@ -92,6 +99,10 @@ function service(env: AppBindings, request: Request) {
   );
 }
 export const githubDeliveryRuntime: GitHubDeliveryRuntime = {
+  completedRuns: (env, projectId, taskId, cursor) =>
+    withDatabase(env, (db) =>
+      new PostgresGitHubDeliveryRepository(db).completedRuns(projectId, taskId, cursor),
+    ),
   binding: (env, projectId) => repository(env).binding(projectId),
   delivery: (env, projectId, taskId) => repository(env).delivery(projectId, taskId),
   configure: (env, request, projectId, actorId, input) =>

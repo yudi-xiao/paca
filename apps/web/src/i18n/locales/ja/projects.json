@@ -1885,5 +1885,44 @@
 			"empty": "先行タスクの依存関係はまだ設定されていません",
 			"watchedTasks": "{{count}}件のタスクの完了待ち"
 		}
+	},
+	"delivery": {
+		"title": "GitHub 納品",
+		"hint": "完了した Agent 実行を選び、PR とコミットを固定します。CI の証拠と人による承認は個別に確認します。",
+		"noRepository": "管理者が先にプロジェクトへ GitHub リポジトリを関連付けてください。",
+		"revoked": "リポジトリへのアクセスが取り消されました。管理者が再接続してください。",
+		"noRuns": "このタスクには完了した Agent 実行がありません。",
+		"run": "完了した Agent 実行",
+		"chooseRun": "実行を選択",
+		"pr": "PR 番号",
+		"sha": "コミット SHA（40 文字）",
+		"submit": "納品を提出",
+		"refresh": "証拠を更新",
+		"accept": "このコミットを承認",
+		"requestChanges": "修正を依頼",
+		"note": "承認または修正のメモ",
+		"error": "操作を完了できませんでした。アクセス権を確認して再試行してください。",
+		"conflict": "納品が変更されました。最新の証拠を確認して再操作してください。",
+		"notReady": "承認条件を満たしていません。現在の状態を確認してください。",
+		"draft": "この PR は下書きです。レビュー待ちにしてから承認してください。",
+		"headChanged": "PR の最新コミットが変わりました。新しいコミットを提出してください。",
+		"reviews": "現在のコミットのレビュー承認：{{count}} / {{required}}",
+		"observed": "証拠の確認日時：{{time}}",
+		"previousAcceptance": "{{time}} に承認済みですが、現在の証拠を再確認してください。",
+		"state": {
+			"awaiting_acceptance": "承認待ち",
+			"waiting": "CI またはレビュー待ち",
+			"needs_changes": "修正が必要",
+			"stale": "証拠の更新が必要",
+			"unavailable": "証拠を取得できません",
+			"accepted": "コミット承認済み"
+		},
+		"check": {
+			"passed": "成功",
+			"pending": "待機中",
+			"failed": "失敗",
+			"missing": "未取得",
+			"stale": "期限切れ"
+		}
 	}
 }
