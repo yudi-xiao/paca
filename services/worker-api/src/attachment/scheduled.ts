@@ -18,7 +18,7 @@ export async function runScheduledAttachmentCleanup(
   if (env.ATTACHMENT_CLEANUP_ENABLED !== "true") {
     return { status: "skipped", reason: "disabled" };
   }
-  if (env.ENVIRONMENT !== "internal" && env.ENVIRONMENT !== "production") {
+  if (env.ENVIRONMENT !== "prod") {
     throw new Error("ATTACHMENT_CLEANUP_ENVIRONMENT_INVALID");
   }
   if (controller.cron !== ATTACHMENT_CLEANUP_CRON) {

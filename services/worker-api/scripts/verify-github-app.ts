@@ -19,10 +19,7 @@ async function main() {
     `../../../.paca/github-app/${deployment.privateFile}`,
   );
   const configuration = await readGitHubAppConfiguration(path);
-  if (environment === "production") {
-    const internal = await readGitHubAppConfiguration(resolve(dirname(path), "internal.json"));
-    if (internal.id === configuration.id) throw Error("GITHUB_APP_ENVIRONMENT_REUSE_FORBIDDEN");
-  }
+
   const credentials = { appId: String(configuration.id), privateKey: configuration.pem };
   const jwt = githubAppJwt(credentials);
   const signal = AbortSignal.timeout(20000);
@@ -98,10 +95,7 @@ async function main() {
   const workerConfiguration = JSON.parse(
     await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
   );
-  const origin = githubAppOrigin(
-    environment,
-    workerConfiguration.env?.[environment]?.vars?.BETTER_AUTH_URL,
-  );
+  const origin = githubAppOrigin(environment, workerConfiguration.vars?.BETTER_AUTH_URL);
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(configuration.webhook_secret),

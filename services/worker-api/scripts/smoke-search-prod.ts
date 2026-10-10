@@ -10,6 +10,7 @@ import {
   writeDelegatedAgentConfig,
 } from "../src/agent-auth/agent-client";
 import { type AgentHostConfig, generateAgentHostIdentity } from "../src/agent-auth/host-enrollment";
+import { cleanupProductionSmokeUsers, productionSmokeFetch } from "./lib/production-smoke-auth";
 
 const origin = "https://paca.howlearnwood.com";
 const execute = promisify(execFile);
@@ -44,7 +45,7 @@ function cookieFrom(response: Response): string {
   return `${match[1]}=${match[2]}`;
 }
 async function request(path: string, method: string, cookie?: string, body?: RecordValue) {
-  return fetch(`${origin}${path}`, {
+  return productionSmokeFetch(`${origin}${path}`, {
     method,
     headers: {
       origin,
@@ -73,14 +74,14 @@ function log(step: string) {
 
 async function main() {
   check(
-    process.env.PACA_SEARCH_SMOKE_CONFIRM === "RUN_INTERNAL_SEARCH_SMOKE",
+    process.env.PACA_SEARCH_SMOKE_CONFIRM === "RUN_PROD_SEARCH_SMOKE",
     "PACA_SEARCH_SMOKE_CONFIRM_REQUIRED",
   );
   check(organization, "PACA_PLANETSCALE_ORG_REQUIRED");
   check(
     !process.env.PACA_PLANETSCALE_TARGET_BRANCH ||
-      process.env.PACA_PLANETSCALE_TARGET_BRANCH === "internal",
-    "SMOKE_BRANCH_MUST_BE_INTERNAL",
+      process.env.PACA_PLANETSCALE_TARGET_BRANCH === "prod",
+    "SMOKE_BRANCH_MUST_MATCH_PROD_DATABASE",
   );
   const suffix = crypto.randomUUID();
   const email = `search-smoke-${suffix}@paca.test`;
@@ -93,7 +94,7 @@ async function main() {
         "role",
         "create",
         "paca",
-        "internal",
+        "prod",
         `paca-search-smoke-${Date.now()}`,
         "--inherited-roles",
         "postgres",
@@ -121,7 +122,7 @@ async function main() {
   try {
     await client.connect();
     const health = await json(await request("/health", "GET"), 200, "HEALTH");
-    check(health.environment === "internal", "SMOKE_WRONG_ENVIRONMENT");
+    check(health.environment === "prod", "SMOKE_WRONG_ENVIRONMENT");
     const registrationResponse = await request("/api/auth/sign-up/email", "POST", undefined, {
       email,
       password: `Paca-${crypto.randomUUID()}-Aa1!`,
@@ -316,7 +317,7 @@ async function main() {
           },
         },
       ],
-      reason: "Temporary internal search protocol verification",
+      reason: "Temporary production search protocol verification",
       bindingMessage: "Only one fixture task and one document; expires in ten minutes.",
     });
     agentId = agent.config.agentId;
@@ -365,7 +366,7 @@ async function main() {
           PACA_SMOKE_DOCUMENT_ID: documentId,
           PACA_SMOKE_SEARCH_QUERY: needle,
           PACA_SMOKE_USER_COOKIE: cookie,
-          PACA_LOCAL_AGENT_SMOKE_CONFIRM: "RUN_INTERNAL_LOCAL_AGENT_SMOKE",
+          PACA_LOCAL_AGENT_SMOKE_CONFIRM: "RUN_PROD_LOCAL_AGENT_SMOKE",
         },
         timeout: 180_000,
         maxBuffer: 16000,
@@ -489,7 +490,7 @@ async function main() {
       await rm(privateDirectory, { recursive: true, force: true }).catch(() =>
         cleanupErrors.push("PRIVATE_FILE_CLEANUP_FAILED"),
       );
-    await pscale(["role", "delete", "paca", "internal", roleIdentifier, "--force"]).catch(() =>
+    await pscale(["role", "delete", "paca", "prod", roleIdentifier, "--force"]).catch(() =>
       cleanupErrors.push("TEMP_ROLE_DELETE_FAILED"),
     );
     if (cleanupErrors.length) {
@@ -499,18 +500,20 @@ async function main() {
     }
   }
   check(cleanupErrors.length === 0, "SEARCH_SMOKE_CLEANUP_FAILED");
-  log("search-internal-smoke-complete");
+  log("search-prod-smoke-complete");
 }
-main().catch((error: unknown) => {
-  console.error(
-    JSON.stringify({
-      status: "error",
-      step: "search-internal-smoke",
-      code:
-        error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)
-          ? error.message
-          : "SEARCH_SMOKE_FAILED",
-    }),
-  );
-  process.exitCode = 1;
-});
+main()
+  .finally(cleanupProductionSmokeUsers)
+  .catch((error: unknown) => {
+    console.error(
+      JSON.stringify({
+        status: "error",
+        step: "search-prod-smoke",
+        code:
+          error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)
+            ? error.message
+            : "SEARCH_SMOKE_FAILED",
+      }),
+    );
+    process.exitCode = 1;
+  });

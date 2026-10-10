@@ -6,21 +6,15 @@
 
 ## GitHub App
 
-为 Paca 创建专用 GitHub App，只安装到批准的仓库。仓库权限为 Metadata: Read、Checks: Read、Pull requests: Read；无需 Contents、Actions、Issues 或写权限。Paca 每次请求签发仅覆盖目标 repository ID 的短期 installation token，校验返回的仓库 ID、名称、权限和有效期。Token 和 App 私钥不会进入业务数据库、日志或客户端。
+prod 复用既有只读 GitHub App `paca-yudi-delivery`，只安装到 `yudi-xiao/paca`。仓库权限为 Metadata: Read、Checks: Read、Pull requests: Read；无需 Contents、Actions、Issues 或写权限。Paca 每次请求签发仅覆盖目标 repository ID 的短期 installation token，校验返回的仓库 ID、名称、权限和有效期。Token 和 App 私钥不会进入业务数据库、日志或客户端。
 
-Worker 从 Secret 读取 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY`。App ID 为应用数字 ID；私钥使用 GitHub 下载的 RSA PEM，由本机私有文件传入 Wrangler，不要写入仓库或聊天。先确认 Wrangler 使用项目的 `paca` profile，再在 Worker 目录配置：
+Worker 继续使用既有 `GITHUB_APP_ID`、`GITHUB_APP_PRIVATE_KEY` 和 `GITHUB_WEBHOOK_SECRET`，本机配置保存在 Git 忽略的 `.paca/github-app/prod.json`（权限 `0600`）。所有部署命令使用项目 Wrangler `paca` profile，无 `--env` 参数，也不创建另一套 App、Secret 或安装范围。
 
-专用 internal App 可以通过本地 manifest 引导创建：在 Worker 目录执行 `bun run github:app:setup`，在 Codex 浏览器打开输出的本机地址，再以 `yudi-xiao` 创建私有 App，并仅安装到 `paca` 仓库。回调有一次性随机 state 和路径保护，不使用用户 OAuth。脚本校验 App 所有者、只读权限和 RSA 私钥，忽略 GitHub 返回的 OAuth client secret；将必要凭据保存到 Git 忽略的 `.paca/github-app/internal.json`（权限 `0600`），并通过 stdin 写入 `paca` profile 对应 Worker 的三个 Secret。写入失败可以用 `bun run github:app:setup --resume` 恢复，不重复创建 App。引导页面 55 分钟后关闭。
+在 Worker 目录执行 `bun run github:app:verify`，确认安装属于 `yudi-xiao`、选择指定仓库且未暂停、只读权限、目标仓库可访问，并发送一次签名 ping 验证 Worker Secret。命令只输出非敏感 App/Installation/Repository ID；不会自动为项目指定 CI 名称或评审策略。需恢复已有私有配置的 Secret 时使用 `bun run github:app:setup --resume`，无需重新创建 App。
 
-安装后执行 `bun run github:app:verify`，确认安装属于 `yudi-xiao`、选择指定仓库且未暂停、只读权限、目标仓库可访问，并发送一次签名 ping 验证 Worker Secret。命令只输出配置所需的非敏感 App/Installation/Repository ID；不会自动为项目指定 CI 名称或评审策略。
+Webhook 保持 `https://paca.howlearnwood.com/api/integrations/github/webhook`。`bun run github:app:webhook-config` 核验同一 App 和 prod 根配置后更新并回读该固定地址。
 
-```sh
-bunx wrangler secret put GITHUB_APP_ID --env internal
-bunx wrangler secret put GITHUB_APP_PRIVATE_KEY --env internal < /secure/path/paca-github-app.pem
-bunx wrangler secret put GITHUB_WEBHOOK_SECRET --env internal
-```
-
-这些命令只配置 internal。生产资源、Secret 和安装范围须单独验收。实现依据：[GitHub installation token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)、[App JWT](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app) 和 [Workers crypto](https://developers.cloudflare.com/workers/runtime-apis/nodejs/crypto/)。
+实现依据：[GitHub installation token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)、[App JWT](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app) 和 [Workers crypto](https://developers.cloudflare.com/workers/runtime-apis/nodejs/crypto/)。
 
 ## 用户 API
 
@@ -58,13 +52,13 @@ API 使用同源 Better Auth 用户 Session。仓库配置同时要求项目 `pr
 
 每个 Check 同时固定名称和发布它的 GitHub App ID，不将 Paca 的 App ID 自动当作 CI 发布者。评审策略使用获信任 GitHub 用户的数字 ID；PR 作者自己的批准不计入。服务端拒绝未知、过期、截断、错误仓库或其他提交的证据。
 
-internal 项目设置的「GitHub 交付设置」提供配置入口，也可从尚未连接仓库的任务交付卡片打开。输入 `owner/repository`、一项已有 CI 的示例 PR 编号和可信评审者用户名，点击发现后选择必需 CI、批准数量和检查有效期，再保存。检查列表同时显示名称和发布方 ID，避免将同名检查混为一项；评审用户名由 GitHub 核验并固定为数字 ID。保存仓库或策略变更会失效之前的交付验收。
+prod 项目设置的「GitHub 交付设置」提供配置入口，也可从尚未连接仓库的任务交付卡片打开。输入 `owner/repository`、一项已有 CI 的示例 PR 编号和可信评审者用户名，点击发现后选择必需 CI、批准数量和检查有效期，再保存。检查列表同时显示名称和发布方 ID，避免将同名检查混为一项；评审用户名由 GitHub 核验并固定为数字 ID。保存仓库或策略变更会失效之前的交付验收。
 
 发现请求包含 `owner`、`repository`、`pullNumber`，可选 `reviewerLogins` 或用于核对已有策略的 `reviewerIds`，二者不能同时提交。最多解析 20 名真人评审者和 500 项完整 CI 结果，整个 GitHub 查询共用 20 秒预算；检查前后重新读取 PR head，变化时要求重新发现。仅返回仓库/安装 ID、固定 head、CI 发布方和账号 ID/用户名；不返回令牌、个人资料或任意 GitHub payload。发现与保存均要求上述两类管理权限，并在外部请求后重新检查权限。
 
 页面以读取的策略版本保护保存；其他管理员修改后须重新加载并发现。网络断开或 5xx 导致结果不确定时，显式重试复用原请求 ID、版本和 payload；不能切换目标后复用旧命令。只读成员可查看当前策略，不会取得管理按钮。
 
-部署后在 Worker 目录执行 `PACA_GITHUB_REPOSITORY_SMOKE_CONFIRM=RUN_INTERNAL_GITHUB_REPOSITORY_SMOKE bun run smoke:github-repository:internal` 可重复验证仓库配置 API。该命令另需已登录的 `pscale` 和 `PACA_PLANETSCALE_ORG`，仅访问 `paca/internal` 与已安装的 `yudi-xiao/paca`：创建 15 分钟数据库角色和临时 Session/项目，验证真实发现、保存/重放、版本冲突和系统权限撤销后清理。它不代表真实浏览器或真实开发任务的人工验收。
+部署后在 Worker 目录执行 `PACA_PROD_SMOKE_CONFIRM=RUN_PACA_PROD_SMOKE PACA_GITHUB_REPOSITORY_SMOKE_CONFIRM=RUN_PROD_GITHUB_REPOSITORY_SMOKE bun run smoke:github-repository:prod` 可重复验证仓库配置 API。该命令另需已登录的 `pscale` 和 `PACA_PLANETSCALE_ORG`，仅访问 `paca/prod` 与已安装的 `yudi-xiao/paca`：创建 15 分钟数据库角色和临时 Session/项目，验证真实发现、保存/重放、版本冲突和系统权限撤销后清理。它不代表真实浏览器或真实开发任务的人工验收。
 
 提交交付包含 `requestId`、`expectedVersion`、`leaseId`、`pullNumber` 和完整 40 位小写 `headSha`。租约须已完成且属于 URL 的项目及 Task。浏览器不提交 CI 结果、验收身份、其他仓库 URL 或证据 payload。
 

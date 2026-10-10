@@ -13,7 +13,7 @@ export const githubAppPermissions = {
 } as const;
 export function githubAppManifest(
   callback: string,
-  environment: GitHubAppEnvironment = "internal",
+  environment: GitHubAppEnvironment = "prod",
   configuredOrigin?: string,
 ) {
   const url = new URL(callback);

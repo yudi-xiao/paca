@@ -25,8 +25,8 @@ function optionalDuration(name: string, fallback: number): number {
   return parsed;
 }
 
-function internalBaseURL(): string {
-  const configured = new URL(requiredEnvironment("PACA_INTERNAL_BASE_URL"));
+function productionBaseURL(): string {
+  const configured = new URL(requiredEnvironment("PACA_BASE_URL"));
   if (
     configured.protocol !== "https:" ||
     configured.username ||
@@ -35,7 +35,7 @@ function internalBaseURL(): string {
     configured.search ||
     configured.hash
   ) {
-    throw new Error("PACA_INTERNAL_BASE_URL_INVALID");
+    throw new Error("PACA_BASE_URL_INVALID");
   }
   return configured.origin;
 }
@@ -262,7 +262,7 @@ async function updateAndReceive(
 }
 
 async function main(): Promise<void> {
-  const baseURL = internalBaseURL();
+  const baseURL = productionBaseURL();
   const email = requiredEnvironment("PACA_REALTIME_SMOKE_EMAIL");
   const password = requiredEnvironment("PACA_REALTIME_SMOKE_PASSWORD");
   const runId = process.env.PACA_REALTIME_SMOKE_RUN_ID?.trim() || crypto.randomUUID();

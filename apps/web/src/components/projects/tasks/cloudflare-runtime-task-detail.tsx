@@ -103,7 +103,7 @@ function commentText(activity: Activity): string {
 	return blocksToText(activity.content);
 }
 
-export function InternalPreviewTaskDetail({ projectId, taskId }: Props) {
+export function CloudflareTaskDetail({ projectId, taskId }: Props) {
 	const queryClient = useQueryClient();
 	const navigate = useNavigate();
 	const { hasProjectPermission } = useProjectPermissions(projectId);

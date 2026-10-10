@@ -96,7 +96,7 @@ describe("Better Auth protocol", () => {
       },
     });
     database.session = [];
-    const bindings = testBindings({ ENVIRONMENT: "production" });
+    const bindings = testBindings({ ENVIRONMENT: "prod" });
     const auth = betterAuth(createAuthOptions(memoryAdapter(database), bindings));
     const app = createApp({ authHandler: (request) => auth.handler(request), log: vi.fn() });
     const response = await app.request(

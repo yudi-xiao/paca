@@ -1,4 +1,4 @@
-export {};
+import { cleanupProductionSmokeUsers, productionSmokeFetch } from "./lib/production-smoke-auth";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -8,8 +8,8 @@ function requiredEnvironment(name: string): string {
   return value;
 }
 
-function internalBaseURL(): string {
-  const configured = new URL(requiredEnvironment("PACA_INTERNAL_BASE_URL"));
+function productionBaseURL(): string {
+  const configured = new URL(requiredEnvironment("PACA_BASE_URL"));
   if (
     configured.protocol !== "https:" ||
     configured.username ||
@@ -18,7 +18,7 @@ function internalBaseURL(): string {
     configured.search ||
     configured.hash
   ) {
-    throw new Error("PACA_INTERNAL_BASE_URL_INVALID");
+    throw new Error("PACA_BASE_URL_INVALID");
   }
   return configured.origin;
 }
@@ -65,7 +65,7 @@ async function request(
   const headers = new Headers(init.headers);
   headers.set("cookie", cookie);
   headers.set("origin", baseURL);
-  return fetch(`${baseURL}${path}`, { ...init, headers, redirect: "manual" });
+  return productionSmokeFetch(`${baseURL}${path}`, { ...init, headers, redirect: "manual" });
 }
 
 async function jsonRequest(
@@ -83,7 +83,7 @@ async function jsonRequest(
 }
 
 async function main(): Promise<void> {
-  const baseURL = internalBaseURL();
+  const baseURL = productionBaseURL();
   const runId = process.env.PACA_ATTACHMENT_SMOKE_RUN_ID?.trim() || crypto.randomUUID();
   if (!/^[0-9a-f-]{36}$/i.test(runId)) throw new Error("PACA_ATTACHMENT_SMOKE_RUN_ID_INVALID");
   const configuredEmail = process.env.PACA_ATTACHMENT_SMOKE_EMAIL?.trim();
@@ -96,7 +96,7 @@ async function main(): Promise<void> {
 
   let cookie: string;
   if (configuredEmail) {
-    const signIn = await fetch(`${baseURL}/api/auth/sign-in/email`, {
+    const signIn = await productionSmokeFetch(`${baseURL}/api/auth/sign-in/email`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: baseURL },
       body: JSON.stringify({ email, password: smokePassword, rememberMe: false }),
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
     requireStatus(signIn, 200, "SIGN_IN");
     cookie = sessionCookie(signIn);
   } else {
-    const signUp = await fetch(`${baseURL}/api/auth/sign-up/email`, {
+    const signUp = await productionSmokeFetch(`${baseURL}/api/auth/sign-up/email`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: baseURL },
       body: JSON.stringify({ email, name: "Paca Attachment Smoke", password: smokePassword }),
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
       if (signUpBody?.code !== "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL") {
         throw new Error(`SIGN_UP_HTTP_${signUp.status}`);
       }
-      const signIn = await fetch(`${baseURL}/api/auth/sign-in/email`, {
+      const signIn = await productionSmokeFetch(`${baseURL}/api/auth/sign-in/email`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: baseURL },
         body: JSON.stringify({ email, password: smokePassword, rememberMe: false }),
@@ -250,7 +250,7 @@ async function main(): Promise<void> {
   if (process.env.PACA_ATTACHMENT_SMOKE_PERMISSION_REVOKE_ONLY === "true") {
     const memberEmail = `attachment-revoke-${runId}@paca.test`;
     const memberPassword = `${crypto.randomUUID()}-Aa1!`;
-    const memberSignUp = await fetch(`${baseURL}/api/auth/sign-up/email`, {
+    const memberSignUp = await productionSmokeFetch(`${baseURL}/api/auth/sign-up/email`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: baseURL },
       body: JSON.stringify({
@@ -552,7 +552,11 @@ async function main(): Promise<void> {
 }
 
 try {
-  await main();
+  try {
+    await main();
+  } finally {
+    await cleanupProductionSmokeUsers();
+  }
 } catch (error: unknown) {
   const code = error instanceof Error ? error.message : "UNKNOWN_ERROR";
   console.error(JSON.stringify({ status: "error", step: "attachment-smoke", code }));

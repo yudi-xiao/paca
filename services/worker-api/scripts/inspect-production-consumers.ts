@@ -4,8 +4,7 @@ import { cloudflareOperator, deployedHyperdriveConsumers } from "./lib/cloudflar
 try {
   const request = await cloudflareOperator();
   const consumers = await deployedHyperdriveConsumers(request, [
-    "f2c6d6944f65417785dd49964e0c3238",
-    "98086061f9064f6c8f815303002c4a88",
+    "ec828e1b80664166ab38aa511cfd1f82",
   ]);
   const domains = z
     .array(z.object({ hostname: z.string(), service: z.string() }))

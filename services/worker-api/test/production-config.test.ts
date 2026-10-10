@@ -1,9 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import {
-  assertProductionConfiguration,
-  LOCAL_HYPERDRIVE_ID,
-} from "../scripts/lib/production-config";
+import { assertProductionConfiguration } from "../scripts/lib/production-config";
 
 type Config = {
   name: string;
@@ -21,12 +18,10 @@ type Config = {
   workflows: { binding: string; name: string; script_name?: string }[];
   services: { binding: string; service: string }[];
   durable_objects: { bindings: { name: string; class_name: string; script_name?: string }[] };
-  containers: { max_instances: number; image: string }[];
+  containers: { max_instances: number; image: string; name?: string }[];
   assets: { run_worker_first: string[] };
   triggers: { crons: string[] };
 };
-
-type RootConfig = Config & { env: { production: Config; internal: Config } };
 
 function element<T>(values: T[], index: number): T {
   const value = values[index];
@@ -37,186 +32,122 @@ function element<T>(values: T[], index: number): T {
 function fixtures() {
   const worker = JSON.parse(
     readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
-  ) as RootConfig;
+  ) as Config & { env?: unknown };
   const gateway = JSON.parse(
     readFileSync(new URL("../../environment-gateway/wrangler.jsonc", import.meta.url), "utf8"),
-  ) as RootConfig;
-  return { worker, gateway, production: worker.env.production, internal: worker.env.internal };
+  ) as Config & { env?: unknown };
+  return { worker, gateway, production: worker, internal: worker };
 }
 
-describe("production deployment isolation", () => {
-  it("validates the checked-in candidate without taking either current domain", () => {
+describe("single production deployment", () => {
+  it("reuses existing identities with no deployable environment branches", () => {
     const { worker, gateway } = fixtures();
-    expect(worker.hyperdrive[0]?.id).toBe(LOCAL_HYPERDRIVE_ID);
-    expect(() => assertProductionConfiguration(worker, gateway, "candidate")).not.toThrow();
-    expect(() => assertProductionConfiguration(worker, gateway, "release")).toThrow(
-      "RELEASE_ROUTE_INVALID",
-    );
+    expect(worker.env).toBeUndefined();
+    expect(gateway.env).toBeUndefined();
+    expect(worker.hyperdrive[0]?.id).toBe("ec828e1b80664166ab38aa511cfd1f82");
+    expect(() => assertProductionConfiguration(worker, gateway)).not.toThrow();
   });
-
   it.each([
     [
-      "default remote database",
+      "second environment",
       ({ worker }) => {
-        element(worker.hyperdrive, 0).id = "f2c6d6944f65417785dd49964e0c3238";
+        worker.env = { internal: {} };
       },
     ],
     [
-      "production reusing preview database",
-      ({ production, internal }) => {
-        element(production.hyperdrive, 0).id = element(internal.hyperdrive, 0).id;
+      "public registration label",
+      ({ worker }) => {
+        worker.vars.ENVIRONMENT = "internal";
       },
     ],
     [
-      "production reusing retired broad database role",
-      ({ production }) => {
-        element(production.hyperdrive, 0).id = "f2c6d6944f65417785dd49964e0c3238";
+      "foreign account",
+      ({ gateway }) => {
+        gateway.account_id = "other";
       },
     ],
     [
-      "database password in config",
-      ({ production }) => {
-        element(production.hyperdrive, 0).localConnectionString = "postgres://invalid";
+      "replacement database",
+      ({ worker }) => {
+        element(worker.hyperdrive, 0).id = "98086061f9064f6c8f815303002c4a88";
       },
     ],
     [
-      "root public hostname",
+      "database password",
+      ({ worker }) => {
+        element(worker.hyperdrive, 0).localConnectionString = "postgres://invalid";
+      },
+    ],
+    [
+      "preview URL",
+      ({ gateway }) => {
+        gateway.preview_urls = true;
+      },
+    ],
+    [
+      "workers.dev URL",
       ({ worker }) => {
         worker.workers_dev = true;
       },
     ],
     [
-      "production public hostname before acceptance",
-      ({ production }) => {
-        production.workers_dev = true;
-      },
-    ],
-    [
-      "production version preview URL",
-      ({ production }) => {
-        production.preview_urls = true;
-      },
-    ],
-    [
-      "gateway default preview URL",
-      ({ gateway }) => {
-        delete gateway.env.production.preview_urls;
-      },
-    ],
-    [
-      "production taking current domain early",
-      ({ production }) => {
-        production.routes = [{ pattern: "paca.howlearnwood.com", custom_domain: true }];
-      },
-    ],
-    [
-      "gateway taking current domain early",
-      ({ gateway }) => {
-        gateway.env.production.routes = [
-          { pattern: "paca-env.howlearnwood.com", custom_domain: true },
-        ];
-      },
-    ],
-    [
-      "preview attachment bucket",
-      ({ production, internal }) => {
-        element(production.r2_buckets, 0).bucket_name = element(internal.r2_buckets, 0).bucket_name;
-      },
-    ],
-    [
-      "preview snapshot bucket",
-      ({ production, internal }) => {
-        element(production.r2_buckets, 1).bucket_name = element(internal.r2_buckets, 1).bucket_name;
-      },
-    ],
-    [
-      "preview queue producer",
-      ({ production, internal }) => {
-        element(production.queues.producers, 0).queue = element(internal.queues.producers, 0).queue;
-      },
-    ],
-    [
-      "preview dead letter queue",
-      ({ production, internal }) => {
-        element(production.queues.consumers, 1).dead_letter_queue = element(
-          internal.queues.consumers,
-          1,
-        ).dead_letter_queue;
-      },
-    ],
-    [
-      "disabled queue recovery",
-      ({ production }) => {
-        element(production.queues.consumers, 2).max_retries = 0;
-      },
-    ],
-    [
-      "preview workflow",
-      ({ production, internal }) => {
-        element(production.workflows, 0).name = element(internal.workflows, 0).name;
-      },
-    ],
-    [
-      "remote workflow",
-      ({ production }) => {
-        element(production.workflows, 1).script_name = "paca-worker-api-internal";
-      },
-    ],
-    [
-      "preview Durable Object namespace",
-      ({ production }) => {
-        element(production.durable_objects.bindings, 2).script_name = "paca-worker-api-internal";
-      },
-    ],
-    [
-      "missing Agent coordinator",
-      ({ production }) => {
-        production.durable_objects.bindings.pop();
-      },
-    ],
-    [
-      "preview Gateway binding",
-      ({ production, internal }) => {
-        element(production.services, 0).service = element(internal.services, 0).service;
-      },
-    ],
-    [
-      "preview label enabling public signup",
-      ({ production }) => {
-        production.vars.ENVIRONMENT = "internal";
-      },
-    ],
-    [
-      "additional trusted auth origin",
-      ({ production }) => {
-        production.vars.TRUSTED_ORIGINS += ",https://example.com";
-      },
-    ],
-    [
-      "preview Gateway namespace",
-      ({ gateway }) => {
-        element(gateway.env.production.durable_objects.bindings, 0).script_name =
-          "paca-environment-gateway-internal";
-      },
-    ],
-    [
-      "unbounded Sandbox capacity",
-      ({ gateway }) => {
-        element(gateway.env.production.containers, 0).max_instances = 100;
-      },
-    ],
-    [
-      "discovery handled by SPA",
+      "other domain",
       ({ worker }) => {
-        worker.assets.run_worker_first = worker.assets.run_worker_first.filter(
-          (p) => p !== "/.well-known/*",
-        );
+        element(worker.routes, 0).pattern = "paca-internal.howlearnwood.com";
       },
     ],
     [
-      "disabled outbox scheduler",
-      ({ production }) => {
-        production.triggers.crons = ["15 10 * * *"];
+      "foreign auth origin",
+      ({ worker }) => {
+        worker.vars.TRUSTED_ORIGINS += ",https://example.com";
+      },
+    ],
+    [
+      "unbound gateway",
+      ({ worker }) => {
+        element(worker.services, 0).service = "paca-environment-gateway-production";
+      },
+    ],
+    [
+      "replacement bucket",
+      ({ worker }) => {
+        element(worker.r2_buckets, 0).bucket_name = "paca-attachments-production";
+      },
+    ],
+    [
+      "missing coordinator",
+      ({ worker }) => {
+        worker.durable_objects.bindings.pop();
+      },
+    ],
+    [
+      "disabled queue retry",
+      ({ worker }) => {
+        element(worker.queues.consumers, 0).max_retries = 0;
+      },
+    ],
+    [
+      "disabled scheduler",
+      ({ worker }) => {
+        worker.triggers.crons = [];
+      },
+    ],
+    [
+      "replacement Sandbox application",
+      ({ gateway }) => {
+        element(gateway.containers, 0).name = "new-sandbox";
+      },
+    ],
+    [
+      "unbounded sandbox",
+      ({ gateway }) => {
+        element(gateway.containers, 0).max_instances = 100;
+      },
+    ],
+    [
+      "SPA auth boundary",
+      ({ worker }) => {
+        worker.assets.run_worker_first = ["/health"];
       },
     ],
   ] satisfies [
@@ -225,28 +156,6 @@ describe("production deployment isolation", () => {
   ][])("rejects %s", (_name, mutate) => {
     const fixture = fixtures();
     mutate(fixture);
-    expect(() =>
-      assertProductionConfiguration(fixture.worker, fixture.gateway, "candidate"),
-    ).toThrow();
-  });
-
-  it("requires all API, auth and Gateway domain changes together for release", () => {
-    const { worker, gateway, production, internal } = fixtures();
-    production.routes = [{ pattern: "paca.howlearnwood.com", custom_domain: true }];
-    gateway.env.production.routes = [{ pattern: "paca-env.howlearnwood.com", custom_domain: true }];
-    expect(() => assertProductionConfiguration(worker, gateway, "release")).toThrow(
-      "RELEASE_AUTH_ORIGIN_INVALID",
-    );
-    internal.vars.BETTER_AUTH_URL = internal.vars.TRUSTED_ORIGINS =
-      "https://paca-internal.howlearnwood.com";
-    internal.routes = [{ pattern: "paca-internal.howlearnwood.com", custom_domain: true }];
-    gateway.env.internal.vars.PUBLIC_ORIGIN = "https://paca-env-internal.howlearnwood.com";
-    gateway.env.internal.routes = [
-      { pattern: "paca-env-internal.howlearnwood.com", custom_domain: true },
-    ];
-    expect(() => assertProductionConfiguration(worker, gateway, "release")).not.toThrow();
-    expect(() => assertProductionConfiguration(worker, gateway, "candidate")).toThrow(
-      "RELEASE_ROUTE_INVALID",
-    );
+    expect(() => assertProductionConfiguration(fixture.worker, fixture.gateway)).toThrow();
   });
 });

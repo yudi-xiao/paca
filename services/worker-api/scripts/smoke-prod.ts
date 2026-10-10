@@ -6,8 +6,6 @@ type HeadersWithSetCookie = Headers & {
   getSetCookie?: () => string[];
 };
 
-const expectedUserExistsCode = "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL";
-
 function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -16,8 +14,8 @@ function requiredEnvironment(name: string): string {
   return value;
 }
 
-function internalBaseURL(): string {
-  const configured = new URL(requiredEnvironment("PACA_INTERNAL_BASE_URL"));
+function productionBaseURL(): string {
+  const configured = new URL(requiredEnvironment("PACA_BASE_URL"));
   if (
     configured.protocol !== "https:" ||
     configured.username ||
@@ -26,7 +24,7 @@ function internalBaseURL(): string {
     configured.search ||
     configured.hash
   ) {
-    throw new Error("PACA_INTERNAL_BASE_URL_INVALID");
+    throw new Error("PACA_BASE_URL_INVALID");
   }
   return configured.origin;
 }
@@ -47,11 +45,6 @@ function asRecord(value: unknown): JsonRecord | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonRecord)
     : null;
-}
-
-function responseCode(value: unknown): string | null {
-  const code = asRecord(value)?.code;
-  return typeof code === "string" ? code : null;
 }
 
 function requireStatus(response: Response, expected: number, step: string): void {
@@ -97,11 +90,10 @@ async function authPost(
 }
 
 async function main(): Promise<void> {
-  const baseURL = internalBaseURL();
+  const baseURL = productionBaseURL();
   const email = requiredEnvironment("PACA_SMOKE_EMAIL");
   const password = requiredEnvironment("PACA_SMOKE_PASSWORD");
-  const healthToken = requiredEnvironment("PACA_INTERNAL_HEALTH_TOKEN");
-  const name = process.env.PACA_SMOKE_NAME?.trim() || "Paca Internal Tester";
+  const healthToken = requiredEnvironment("PACA_HEALTH_TOKEN");
 
   if (!email.includes("@")) {
     throw new Error("PACA_SMOKE_EMAIL_INVALID");
@@ -113,7 +105,7 @@ async function main(): Promise<void> {
   const health = await fetch(`${baseURL}/health`, { redirect: "manual" });
   requireStatus(health, 200, "PUBLIC_HEALTH");
   const healthBody = asRecord(await readJson(health));
-  if (healthBody?.environment !== "internal") {
+  if (healthBody?.environment !== "prod") {
     throw new Error("PUBLIC_HEALTH_WRONG_ENVIRONMENT");
   }
   log("public-health");
@@ -125,29 +117,14 @@ async function main(): Promise<void> {
   requireStatus(databaseHealth, 200, "DATABASE_HEALTH");
   log("database-health");
 
-  const signUp = await authPost(baseURL, "/api/auth/sign-up/email", {
+  const signIn = await authPost(baseURL, "/api/auth/sign-in/email", {
     email,
-    name,
     password,
+    rememberMe: false,
   });
-  const signUpBody = await readJson(signUp);
-
-  let cookie: string;
-  if (signUp.ok) {
-    cookie = readSessionCookie(signUp);
-    log("sign-up");
-  } else if (responseCode(signUpBody) === expectedUserExistsCode) {
-    const signIn = await authPost(baseURL, "/api/auth/sign-in/email", {
-      email,
-      password,
-      rememberMe: true,
-    });
-    requireStatus(signIn, 200, "SIGN_IN");
-    cookie = readSessionCookie(signIn);
-    log("sign-in-existing-user");
-  } else {
-    throw new Error(`SIGN_UP_${responseCode(signUpBody) ?? `HTTP_${signUp.status}`}`);
-  }
+  requireStatus(signIn, 200, "SIGN_IN");
+  const cookie = readSessionCookie(signIn);
+  log("sign-in-existing-user");
 
   const session = await fetch(`${baseURL}/api/auth/get-session`, {
     headers: { cookie, origin: baseURL },

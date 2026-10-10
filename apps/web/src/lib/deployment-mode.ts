@@ -1,10 +1,8 @@
-/** Runtime selection is independent from whether test signup is exposed. */
+/** Select the API runtime independently of account onboarding. */
 export function usesCloudflareRuntime(): boolean {
 	return import.meta.env.VITE_PACA_RUNTIME === "cloudflare";
 }
-
-export function allowsInternalTestSignup(): boolean {
-	return (
-		usesCloudflareRuntime() && import.meta.env.VITE_INTERNAL_PREVIEW === "true"
-	);
+/** Public account creation is disabled for the single production deployment. */
+export function allowsTestSignup(): boolean {
+	return false;
 }

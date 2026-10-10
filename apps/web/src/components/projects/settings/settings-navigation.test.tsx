@@ -72,7 +72,7 @@ async function mount() {
 }
 beforeEach(() => {
 	vi.stubEnv("VITE_PACA_RUNTIME", "cloudflare");
-	vi.stubEnv("VITE_INTERNAL_PREVIEW", "false");
+	vi.stubEnv("VITE_CLOUDFLARE", "false");
 	mocks.section = "github";
 	mocks.navigate.mockReset();
 	mocks.get.mockReset();

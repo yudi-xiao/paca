@@ -13,9 +13,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
 	ACTION_TYPES,
+	CLOUDFLARE_ACTION_TYPES,
+	CLOUDFLARE_TRIGGER_TYPES,
 	CONDITION_NODE_TYPE,
-	INTERNAL_PREVIEW_ACTION_TYPES,
-	INTERNAL_PREVIEW_TRIGGER_TYPES,
 	type PluginNodeType,
 	pluginNodeTypesQueryOptions,
 	TRIGGER_TYPE_GROUPS,
@@ -38,25 +38,25 @@ export function AutomationNodePalette({
 	onAddAction,
 }: AutomationNodePaletteProps) {
 	const { t } = useTranslation("projects");
-	const internalPreview = usesCloudflareRuntime();
+	const cloudflare = usesCloudflareRuntime();
 	const { data: pluginTypes } = useQuery({
 		...pluginNodeTypesQueryOptions(projectId),
-		enabled: !internalPreview,
+		enabled: !cloudflare,
 	});
 	if (!canEdit) return null;
 
 	const pluginTriggers = pluginTypes?.triggers ?? [];
 	const pluginConditions = pluginTypes?.conditions ?? [];
 	const pluginActions = pluginTypes?.actions ?? [];
-	const runnableTriggers = new Set<string>(INTERNAL_PREVIEW_TRIGGER_TYPES);
-	const runnableActions = new Set<string>(INTERNAL_PREVIEW_ACTION_TYPES);
+	const runnableTriggers = new Set<string>(CLOUDFLARE_TRIGGER_TYPES);
+	const runnableActions = new Set<string>(CLOUDFLARE_ACTION_TYPES);
 	const triggerGroups = TRIGGER_TYPE_GROUPS.map((group) => ({
 		...group,
-		types: internalPreview
+		types: cloudflare
 			? group.types.filter((type) => runnableTriggers.has(type))
 			: group.types,
 	})).filter((group) => group.types.length > 0);
-	const actionTypes = internalPreview
+	const actionTypes = cloudflare
 		? ACTION_TYPES.filter((type) => runnableActions.has(type))
 		: ACTION_TYPES;
 

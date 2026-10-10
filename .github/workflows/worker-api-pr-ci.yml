@@ -71,19 +71,19 @@ jobs:
         working-directory: services/environment-gateway
         run: bun install --frozen-lockfile
 
-      - name: Build internal React assets
+      - name: Build production React assets
         working-directory: apps/web
-        run: ./node_modules/.bin/tsc -b && VITE_PACA_RUNTIME=cloudflare VITE_INTERNAL_PREVIEW=true ./node_modules/.bin/vite build
+        run: ./node_modules/.bin/tsc -b && VITE_PACA_RUNTIME=cloudflare ./node_modules/.bin/vite build
 
       - name: Verify generated Worker types
         run: bun run types:check
 
-      - name: Verify isolated candidate configuration
-        run: bun run deploy:guard && bun run deploy:guard:production
+      - name: Verify single production configuration
+        run: bun run deploy:guard
 
       - name: Verify Environment Gateway
         working-directory: services/environment-gateway
-        run: bun run types:check && bun run typecheck && bun run lint && bun run test && bunx wrangler deploy --dry-run --env production
+        run: bun run types:check && bun run typecheck && bun run lint && bun run test && bunx wrangler deploy --dry-run
 
       - name: Verify Drizzle migrations
         run: bun run db:check
@@ -107,6 +107,3 @@ jobs:
 
       - name: Build deployment bundle
         run: bun run deploy:dry-run
-
-      - name: Build production Cloudflare assets and candidate bundle
-        run: bun run build:web:production && bun run deploy:dry-run:production

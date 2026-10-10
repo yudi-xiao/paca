@@ -1,12 +1,12 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-
 import {
   executeAgentCapability,
   readAgentHostConfig,
   registerDelegatedAgentWithCapabilities,
 } from "../src/agent-auth/agent-client";
+import { cleanupProductionSmokeUsers, productionSmokeFetch } from "./lib/production-smoke-auth";
 
 type JsonRecord = Record<string, unknown>;
 type HeadersWithSetCookie = Headers & { getSetCookie?: () => string[] };
@@ -64,7 +64,7 @@ async function userRequest(
   const headers = new Headers({ origin: baseURL });
   if (cookie) headers.set("cookie", cookie);
   if (body) headers.set("content-type", "application/json");
-  const response = await fetch(`${baseURL}${path}`, {
+  const response = await productionSmokeFetch(`${baseURL}${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
@@ -116,7 +116,7 @@ async function createTemporaryDatabaseRole(organization: string): Promise<{
         "role",
         "create",
         "paca",
-        "internal",
+        "prod",
         `paca-environment-smoke-${Date.now()}`,
         "--inherited-roles",
         "postgres",
@@ -143,7 +143,7 @@ async function deleteTemporaryDatabaseRole(organization: string, roleId: string)
     "role",
     "delete",
     "paca",
-    "internal",
+    "prod",
     roleId,
     "--successor",
     "postgres",
@@ -300,7 +300,7 @@ async function providerActionWithRetry(
   ) {
     let response: Response;
     try {
-      response = await fetch(endpoint, {
+      response = await productionSmokeFetch(endpoint, {
         method: "POST",
         headers: {
           authorization: `Bearer ${connection.accessToken}`,
@@ -366,9 +366,8 @@ function sqlLiteral(value: string): string {
 }
 
 async function main(): Promise<void> {
-  const baseURL = new URL(
-    process.env.PACA_INTERNAL_BASE_URL?.trim() || "https://paca.howlearnwood.com",
-  ).origin;
+  const baseURL = new URL(process.env.PACA_BASE_URL?.trim() || "https://paca.howlearnwood.com")
+    .origin;
   const organizationId = process.env.PACA_ORGANIZATION_ID?.trim() || "paca-default";
   const projectId = uuid(required("PACA_PROJECT_ID"), "PACA_PROJECT_ID_INVALID");
   const operationMode = (process.env.PACA_ENVIRONMENT_SMOKE_MODE?.trim() ||
@@ -781,8 +780,10 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  const code = error instanceof Error ? redact(error.message) : "UNKNOWN_ERROR";
-  console.error(JSON.stringify({ status: "error", step: "environment-smoke", code }));
-  process.exitCode = 1;
-});
+main()
+  .finally(cleanupProductionSmokeUsers)
+  .catch((error: unknown) => {
+    const code = error instanceof Error ? redact(error.message) : "UNKNOWN_ERROR";
+    console.error(JSON.stringify({ status: "error", step: "environment-smoke", code }));
+    process.exitCode = 1;
+  });

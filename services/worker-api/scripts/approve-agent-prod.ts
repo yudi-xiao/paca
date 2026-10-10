@@ -54,9 +54,8 @@ async function post(
 }
 
 async function main(): Promise<void> {
-  const baseURL = new URL(
-    process.env.PACA_INTERNAL_BASE_URL?.trim() || "https://paca.howlearnwood.com",
-  ).origin;
+  const baseURL = new URL(process.env.PACA_BASE_URL?.trim() || "https://paca.howlearnwood.com")
+    .origin;
   const email = required("PACA_APPROVER_EMAIL");
   const password = required("PACA_APPROVER_PASSWORD");
   const agentId = required("PACA_AGENT_ID");

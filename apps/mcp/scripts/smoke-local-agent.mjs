@@ -12,7 +12,7 @@ const documentId = process.env.PACA_SMOKE_DOCUMENT_ID;
 const query = process.env.PACA_SMOKE_SEARCH_QUERY;
 check(
 	process.env.PACA_LOCAL_AGENT_SMOKE_CONFIRM ===
-		"RUN_INTERNAL_LOCAL_AGENT_SMOKE",
+		"RUN_PROD_LOCAL_AGENT_SMOKE",
 	"SMOKE_CONFIRM_REQUIRED",
 );
 for (const id of [projectId, taskId, documentId])
@@ -42,7 +42,7 @@ const transportOptions = {
 	env: {
 		...environment,
 		PACA_AGENT_HARNESS_KIND: "codex",
-		PACA_AGENT_HARNESS_VERSION: "internal-smoke",
+		PACA_AGENT_HARNESS_VERSION: "prod-smoke",
 		PACA_AGENT_HARNESS_INSTANCE_ID: `local-smoke-${randomUUID()}`,
 	},
 	stderr: "pipe",

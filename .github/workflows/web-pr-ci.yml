@@ -55,5 +55,4 @@ jobs:
       - name: Build production bundle
         env:
           VITE_PACA_RUNTIME: cloudflare
-          VITE_INTERNAL_PREVIEW: "false"
         run: bun run build

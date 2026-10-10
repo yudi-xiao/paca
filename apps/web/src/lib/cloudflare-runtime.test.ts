@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	INTERNAL_PREVIEW_ACTION_TYPES,
-	INTERNAL_PREVIEW_TRIGGER_TYPES,
+	CLOUDFLARE_ACTION_TYPES,
+	CLOUDFLARE_TRIGGER_TYPES,
 } from "./automation-api";
 import {
-	internalPreviewNavigationTarget,
-	isInternalPreviewRouteAvailable,
-} from "./internal-preview";
+	cloudflareNavigationTarget,
+	isCloudflareRouteAvailable,
+} from "./cloudflare-runtime";
 
-describe("internal preview route availability", () => {
+describe("Cloudflare route availability", () => {
 	it("offers only Worker-executable Automation nodes", () => {
-		expect(INTERNAL_PREVIEW_TRIGGER_TYPES).toEqual([
+		expect(CLOUDFLARE_TRIGGER_TYPES).toEqual([
 			"task_created",
 			"status_changed",
 			"assignee_changed",
@@ -25,7 +25,7 @@ describe("internal preview route availability", () => {
 			"sprint_completed",
 			"sprint_deleted",
 		]);
-		expect(INTERNAL_PREVIEW_ACTION_TYPES).toEqual([
+		expect(CLOUDFLARE_ACTION_TYPES).toEqual([
 			"update_task",
 			"wait",
 			"update_sprint",
@@ -61,7 +61,7 @@ describe("internal preview route availability", () => {
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/interactions/sprints/c9d8cdf1-b208-4c87-b71f-cf4cdf2d373a",
 		"/projects/6bdb7f3a-e59d-4826-8383-0104192157a8/settings/",
 	])("allows the migrated route %s", (pathname) => {
-		expect(isInternalPreviewRouteAvailable(pathname)).toBe(true);
+		expect(isCloudflareRouteAvailable(pathname)).toBe(true);
 	});
 
 	it.each([
@@ -72,18 +72,18 @@ describe("internal preview route availability", () => {
 		"/projects/project-123/docs/doc-123/activity",
 		"/projects/project-123/tasks/task-123/activity",
 	])("blocks the legacy-backed route %s", (pathname) => {
-		expect(isInternalPreviewRouteAvailable(pathname)).toBe(false);
+		expect(isCloudflareRouteAvailable(pathname)).toBe(false);
 	});
 
 	it("keeps migrated navigation targets and redirects legacy targets", () => {
 		expect(
-			internalPreviewNavigationTarget("/projects/project-123/tasks/task-123"),
+			cloudflareNavigationTarget("/projects/project-123/tasks/task-123"),
 		).toBe("/projects/project-123/tasks/task-123");
+		expect(cloudflareNavigationTarget("/projects/project-123/automation")).toBe(
+			"/projects/project-123/automation",
+		);
 		expect(
-			internalPreviewNavigationTarget("/projects/project-123/automation"),
-		).toBe("/projects/project-123/automation");
-		expect(
-			internalPreviewNavigationTarget(
+			cloudflareNavigationTarget(
 				"/projects/project-123/docs",
 				"/projects/project-123",
 			),

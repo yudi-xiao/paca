@@ -16,16 +16,13 @@ async function main() {
     githubAppDeployment(environment).privateFile,
   );
   const configuration = await readGitHubAppConfiguration(path);
-  if (environment === "production") {
-    const internal = await readGitHubAppConfiguration(resolve(dirname(path), "internal.json"));
-    if (configuration.id === internal.id) throw Error("GITHUB_APP_ENVIRONMENT_REUSE_FORBIDDEN");
-  }
+
   const worker = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
   console.log(
     JSON.stringify(
       await configureGitHubAppWebhook({
         environment,
-        origin: worker.env?.[environment]?.vars?.BETTER_AUTH_URL,
+        origin: worker.vars?.BETTER_AUTH_URL,
         token: githubAppJwt({ appId: String(configuration.id), privateKey: configuration.pem }),
         apply: process.argv.includes("--apply"),
       }),

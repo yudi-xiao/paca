@@ -7,7 +7,7 @@ export async function cloudflareOperator() {
   const auth = z
     .object({ type: z.enum(["oauth", "api_token"]), token: z.string().min(1) })
     .parse(
-      await operatorJson("bun", [
+      await operatorJson("node", [
         "node_modules/wrangler/bin/wrangler.js",
         "auth",
         "token",

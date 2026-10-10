@@ -1,4 +1,4 @@
-const INTERNAL_PREVIEW_ROUTES = new Set([
+const CLOUDFLARE_ROUTES = new Set([
 	"/home",
 	"/profile",
 	"/admin/global-roles",
@@ -14,20 +14,20 @@ function normalizePathname(pathname: string): string {
 	return pathname;
 }
 
-const INTERNAL_PREVIEW_PROJECT_ROUTE =
+const CLOUDFLARE_PROJECT_ROUTE =
 	/^\/projects\/[^/]+(?:\/(?:agents|team|settings|docs\/[^/]+|tasks(?:\/[^/]+)?|environments(?:\/[^/]+\/terminal)?|automation(?:\/[^/]+)?|interactions\/(?:backlog|timeline|sprints\/[^/]+)))?$/;
 
 /**
- * The Cloudflare internal preview exposes only routes whose backing APIs have
+ * The Cloudflare runtime exposes only routes whose backing APIs have
  * already moved behind the same-origin Worker boundary. Keeping this list
  * explicit prevents legacy pages from rendering and then issuing guaranteed
- * 404 requests to Go endpoints that are not part of the preview deployment.
+ * 404 requests to Go endpoints that are not part of the Worker deployment.
  */
-export function isInternalPreviewRouteAvailable(pathname: string): boolean {
+export function isCloudflareRouteAvailable(pathname: string): boolean {
 	const normalized = normalizePathname(pathname);
 	return (
-		INTERNAL_PREVIEW_ROUTES.has(normalized) ||
-		INTERNAL_PREVIEW_PROJECT_ROUTE.test(normalized)
+		CLOUDFLARE_ROUTES.has(normalized) ||
+		CLOUDFLARE_PROJECT_ROUTE.test(normalized)
 	);
 }
 
@@ -37,9 +37,9 @@ export function isInternalPreviewRouteAvailable(pathname: string): boolean {
  * and imperative navigation, which can otherwise bypass hidden sidebar items
  * and mount a legacy route whose API is not present in the Worker deployment.
  */
-export function internalPreviewNavigationTarget(
+export function cloudflareNavigationTarget(
 	pathname: string,
 	fallback = "/home",
 ): string {
-	return isInternalPreviewRouteAvailable(pathname) ? pathname : fallback;
+	return isCloudflareRouteAvailable(pathname) ? pathname : fallback;
 }

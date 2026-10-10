@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { useBranding } from "@/hooks/use-branding";
 import { useLoginForm } from "@/hooks/use-login-form";
 import { validatePassword, validateUsername } from "@/lib/auth-validation";
-import { allowsInternalTestSignup } from "@/lib/deployment-mode";
+import { allowsTestSignup } from "@/lib/deployment-mode";
 import { cn } from "@/lib/utils";
 
 import { FieldError } from "./FieldError";
@@ -16,7 +16,7 @@ import { FieldError } from "./FieldError";
 export function LoginFormPanel({ returnTo }: { returnTo?: string | null }) {
 	const { t } = useTranslation("auth");
 	const { t: tCommon } = useTranslation("common");
-	const { form, serverError, isRegistering, createInternalPreviewAccount } =
+	const { form, serverError, isRegistering, createCloudflareAccount } =
 		useLoginForm(returnTo);
 	const [showPassword, setShowPassword] = useState(false);
 	const branding = useBranding();
@@ -197,7 +197,7 @@ export function LoginFormPanel({ returnTo }: { returnTo?: string | null }) {
 									>
 										{isSubmitting ? t("login.signingIn") : t("login.signIn")}
 									</button>
-									{allowsInternalTestSignup() ? (
+									{allowsTestSignup() ? (
 										<button
 											type="button"
 											className={cn(
@@ -208,7 +208,7 @@ export function LoginFormPanel({ returnTo }: { returnTo?: string | null }) {
 												isSubmitting || isRegistering || credentialsInvalid
 											}
 											onClick={() =>
-												void createInternalPreviewAccount(username, password)
+												void createCloudflareAccount(username, password)
 											}
 										>
 											{isRegistering
@@ -225,7 +225,7 @@ export function LoginFormPanel({ returnTo }: { returnTo?: string | null }) {
 				{/* Divider + admin note */}
 				<div className="mt-6 border-t border-(--line) pt-5">
 					<p className="text-xs leading-relaxed text-(--sea-ink-soft)/70">
-						{allowsInternalTestSignup()
+						{allowsTestSignup()
 							? t("login.previewSignUpNote")
 							: t("login.adminManagedNote")}
 					</p>

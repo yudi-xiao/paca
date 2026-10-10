@@ -17,7 +17,7 @@ export async function runScheduledBrandingCleanup(
   if (env.ATTACHMENT_CLEANUP_ENABLED !== "true") {
     return { status: "skipped", reason: "disabled" };
   }
-  if (env.ENVIRONMENT !== "internal" && env.ENVIRONMENT !== "production") {
+  if (env.ENVIRONMENT !== "prod") {
     throw new Error("BRANDING_CLEANUP_ENVIRONMENT_INVALID");
   }
   return {

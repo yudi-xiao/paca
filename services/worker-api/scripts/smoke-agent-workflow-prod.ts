@@ -154,9 +154,8 @@ async function archiveStaleSmokeDocuments(baseURL: string, projectId: string, co
 }
 
 async function main() {
-  const baseURL = new URL(
-    process.env.PACA_INTERNAL_BASE_URL?.trim() || "https://paca.howlearnwood.com",
-  ).origin;
+  const baseURL = new URL(process.env.PACA_BASE_URL?.trim() || "https://paca.howlearnwood.com")
+    .origin;
   const organizationId = process.env.PACA_ORGANIZATION_ID?.trim() || "paca-default";
   const projectId = required("PACA_PROJECT_ID");
   const configPath =

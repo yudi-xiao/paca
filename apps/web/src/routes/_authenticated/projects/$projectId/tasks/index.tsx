@@ -30,10 +30,10 @@ import {
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/tasks/",
 )({
-	component: InternalPreviewTasksPage,
+	component: CloudflareTasksPage,
 });
 
-function InternalPreviewTasksPage() {
+function CloudflareTasksPage() {
 	const { projectId } = Route.useParams();
 	const queryClient = useQueryClient();
 	const { hasProjectPermission } = useProjectPermissions(projectId);

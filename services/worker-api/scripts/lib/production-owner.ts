@@ -49,7 +49,7 @@ export async function createProductionOwner(
     const options = createAuthOptions(
       drizzleAdapter(transaction, { provider: "pg", schema }),
       {
-        ENVIRONMENT: "production",
+        ENVIRONMENT: "prod",
         BETTER_AUTH_SECRET: randomBytes(48).toString("hex"),
         BETTER_AUTH_URL: "https://paca.howlearnwood.com",
         TRUSTED_ORIGINS: "https://paca.howlearnwood.com",

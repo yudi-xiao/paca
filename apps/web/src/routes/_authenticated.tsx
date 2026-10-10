@@ -16,8 +16,8 @@ import {
 import { onTokenRefreshed } from "@/lib/api-client";
 import { isPasswordChangeRequired } from "@/lib/api-error";
 import { currentUserQueryOptions } from "@/lib/auth-api";
+import { cloudflareNavigationTarget } from "@/lib/cloudflare-runtime";
 import { usesCloudflareRuntime } from "@/lib/deployment-mode";
-import { internalPreviewNavigationTarget } from "@/lib/internal-preview";
 import { playNotificationSound } from "@/lib/notification-sound";
 import { PluginRegistryProvider } from "@/lib/plugins/registry";
 import { ShortcutProvider } from "@/lib/shortcuts/provider";
@@ -49,7 +49,7 @@ const CONVERSATIONS_ROUTE_RE = /^\/conversations(\/|$)/;
 export const Route = createFileRoute("/_authenticated")({
 	beforeLoad: async ({ context: { queryClient }, location }) => {
 		if (usesCloudflareRuntime()) {
-			const target = internalPreviewNavigationTarget(location.pathname);
+			const target = cloudflareNavigationTarget(location.pathname);
 			if (target !== location.pathname) {
 				throw redirect({ to: target as "/home" });
 			}

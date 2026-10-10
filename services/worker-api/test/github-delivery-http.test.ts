@@ -13,7 +13,7 @@ import type { AuthorizeProjectPermission, AuthorizeSystemPermission } from "../s
 const projectId = "11111111-1111-4111-8111-111111111111";
 const taskId = "22222222-2222-4222-8222-222222222222";
 const leaseId = "33333333-3333-4333-8333-333333333333";
-const env = { ENVIRONMENT: "internal", TRUSTED_ORIGINS: "https://paca.example" } as AppBindings;
+const env = { ENVIRONMENT: "prod", TRUSTED_ORIGINS: "https://paca.example" } as AppBindings;
 const allow: AuthorizeProjectPermission = async () => ({
   authenticated: true,
   userId: "trusted-user",

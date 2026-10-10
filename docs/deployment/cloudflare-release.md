@@ -1,183 +1,74 @@
-# Cloudflare release runbook
+# Paca 单一 prod 发布手册
 
-Paca's release target is Workers Static Assets + Hono, Better Auth/Paca Permission/Agent Auth,
-Hyperdrive/PostgreSQL, R2, Queues, Workflows and separate Durable Object namespaces. Track
-completion and evidence in the root [TODO.md](../../TODO.md). The checked-in production
-configuration is a candidate and has no public routes.
+Paca 只部署 prod。React、Hono API 和 Better Auth 同源于 `https://paca.howlearnwood.com`；Environment Gateway 使用 `https://paca-env.howlearnwood.com`。不建立 internal/staging、不拆分 GitHub App 或业务资源。所有命令使用项目绑定的 Wrangler `paca` auth profile。
 
-## Environments and domains
+## 既有资源
 
-| Environment | Worker | API/web origin after cutover | Environment Gateway |
-| --- | --- | --- | --- |
-| Local | Default configuration | Localhost | Localhost |
-| Internal | `paca-worker-api-internal` | `https://paca-internal.howlearnwood.com` | `paca-environment-gateway-internal` at `https://paca-env-internal.howlearnwood.com` |
-| Production | `paca-worker-api-production` | `https://paca.howlearnwood.com` | `paca-environment-gateway-production` at `https://paca-env.howlearnwood.com` |
+| 组件 | 唯一 prod 资源 |
+| --- | --- |
+| API Worker | `paca-worker-api-internal`（历史物理名） |
+| Gateway Worker | `paca-environment-gateway-internal`（历史物理名） |
+| PostgreSQL | `paca/prod`，分支 ID `dshooho15033` |
+| Hyperdrive | `ec828e1b80664166ab38aa511cfd1f82` |
+| Runtime role | `paca-worker-internal`，只允许版本化 runtime grants |
+| R2 | `paca-attachments-internal` / `paca-document-snapshots-internal` |
+| Queues / DLQ | `paca-{realtime-events,document-materialization,automation-events}-internal` 及各自 `-dlq` |
+| Workflows | `paca-document-agent-internal` / `paca-automation-internal` |
+| Sandbox application | `paca-environment-gateway-internal-sandbox-internal` |
+| GitHub App | `paca-yudi-delivery`，App `5260553`，Installation `169867188` |
 
-During candidate preparation, internal still owns both current domains. Production's route
-arrays are empty and both `workers_dev` and `preview_urls` are false. A configuration guard rejects taking those domains
-early. Do not deploy the default local Worker: its all-zero Hyperdrive ID represents only a local
-simulator, supplied with `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE`.
+物理资源名与运行环境是不同概念。保留历史名字可复用 Secret、DO storage、业务数据和 Sandbox，不产生第二套环境。两个 Wrangler 文件均无 `env` 分支，`ENVIRONMENT=prod`；不要添加内部域名或再次初始化管理员。原工作区账号与密码继续有效。
 
-Each named environment repeats its non-inheritable bindings. Production has separate R2 buckets,
-three source Queues and three dead-letter Queues, two Workflows, Agent/Project/User/Document DO
-namespaces, and a Gateway with its own Sandbox and principal/ticket registries. Never reference
-another Worker's DO namespace. See [Wrangler environments](https://developers.cloudflare.com/workers/wrangler/environments/)
-and [Hyperdrive local development](https://developers.cloudflare.com/hyperdrive/configuration/local-development/).
+## 发布
 
-## Database and credentials
-
-The production Hyperdrive `98086061f9064f6c8f815303002c4a88` uses a new dedicated runtime role on
-the existing `main` branch; internal remains on its independent `internal` branch and Hyperdrive
-`ec828e1b80664166ab38aa511cfd1f82`. The former main Hyperdrive is excluded from all checked-in
-development/production bindings. Inventory and retire any existing deployed consumer and broad
-runtime role before initializing production.
-
-Use versioned PostgreSQL migrations and the explicit runtime grant/verification SQL in
-`services/worker-api/scripts/sql/`. The runtime role must have neither broad inherited roles,
-schema creation, migration-ledger access, nor database/role administration privileges. Give
-migration credentials a short lifetime, transfer object ownership to the stable operator role,
-and delete the temporary role after verification. Never pass database URLs/passwords as CLI
-arguments, save them in repository configuration, or print auth tokens. Use the project-bound
-`paca` Wrangler profile; Cloudflare account IDs are pinned in both configs.
-
-Initialize production from a clean schema with the full migration ledger. Preserve current
-internal user/project data. Do not copy internal accounts, passwords, Sessions, Agent/Host keys,
-Grants, attachments or business records into production. A current production database inventory
-is required before applying the clean-slate plan.
-
-Set independent `BETTER_AUTH_SECRET`, `INTERNAL_HEALTH_TOKEN`, GitHub App credentials and any
-Host-enrollment secret for the production Worker. Put Secrets directly in the correct Worker
-environment using private operator tooling. The production GitHub App and webhook installation
-must be verified against the production callback; internal Secrets are not a production default.
-Public email signup is disabled for production and unknown environment labels. The first-owner
-operator onboarding flow must be completed and tested before publishing a login page. Do not
-open public signup briefly to create the owner or copy a test user's password.
-
-### One-time unpublished production initialization
-
-`bun run db:inspect:production` captures only deployed Hyperdrive consumers and Paca domain
-ownership, never Secret bindings. The script listing API returns all scripts (its only optional
-filter is tags); a failed settings read fails the inventory. Both the known former-main and new
-production Hyperdrive must be unused. Inventory does not retire an unknown non-Worker consumer;
-the former broad main role is explicitly retired by initialization.
-
-Create and verify an immediately preceding named backup using the database provider's backup
-tool. For this initial clean-slate release, the operator is pinned to `paca/main`, branch ID
-`1taj95uxia8x`, and the known pre-release migration baseline through `0014`. Supply the successful
-backup ID and explicit initialization confirmation:
+在 `services/worker-api`：
 
 ```bash
-PACA_INITIALIZE_PRODUCTION=INITIALIZE_UNPUBLISHED_PACA_MAIN \
-PACA_PRODUCTION_BACKUP_ID=<verified-backup-id> bun run db:initialize:production
-PACA_PRODUCTION_OWNER_EMAIL=<owner-email> bun run auth:owner:production
-```
-
-These variables contain no passwords. Initialization rejects an old/unfinished backup, wrong
-branch, an existing production Worker or a consumed Hyperdrive. It resets the schema, replays
-versioned migrations and applies/verifies runtime grants in one transaction. Failure restores the
-previous schema. It cannot reset a current migration baseline again and is not a post-release
-maintenance command. A temporary TLS-verified operator credential stays in process memory,
-expires shortly, transfers ownership to `postgres` and is explicitly deleted on completion.
-
-The owner command verifies the complete ledger, runtime privileges and empty user table before
-opening a random one-time URL on `127.0.0.1`. The owner enters their own name and password there.
-The page expires after ten minutes and checks exact Host/Origin, email, input size, password
-confirmation and concurrent submissions. Account creation, canonical first-owner provisioning
-and bootstrap Session revocation share one transaction; failure leaves no partial user or role
-assignment. Repeated initialization is rejected. No account password, login cookie or provider credential
-is saved, printed or sent to a public endpoint. The local setup URL is shown once for the owner's
-direct input and expires shortly. Production stays unpublished until this step and
-the remaining candidate validation gates pass.
-
-## Candidate validation
-
-### Isolated GitHub Apps and webhook cutover
-
-From `services/worker-api`, create production's private read-only App separately:
-
-```bash
-bun run github:app:setup:production
-bun run github:app:verify:production-installation
-```
-
-The manifest uses a different App name and saves its one-time conversion to
-`.paca/github-app/production.json` with owner-only permissions. It does not create a placeholder
-Worker or write production Secrets before the owner/database gates pass. Internal's App and
-private configuration remain separate. If conversion was already saved, resume with
-`PACA_GITHUB_APP_ENVIRONMENT=production bun run github:app:setup --resume` rather than creating
-another App. Installation verification checks the exact owner, selected repository, immutable
-repository ID and read-only Metadata/Checks/Pull requests permissions. This command deliberately
-reports `signedWebhook: not_checked`; it is not an end-to-end callback test.
-
-After changing the checked-in origins and moving the domains, inspect/apply each App's webhook:
-
-```bash
-PACA_GITHUB_APP_ENVIRONMENT=internal bun run github:app:webhook-config --apply
-PACA_GITHUB_APP_ENVIRONMENT=production bun run github:app:webhook-config --apply
-PACA_GITHUB_APP_ENVIRONMENT=internal bun run github:app:verify
-PACA_GITHUB_APP_ENVIRONMENT=production bun run github:app:verify
-```
-
-Without `--apply`, webhook configuration is read-only. Applying first checks that the intended
-origin's health endpoint reports the matching Paca environment, then updates only the fixed
-GitHub App hook endpoint and verifies it by readback. Redirects are refused, responses are bounded,
-TLS verification stays enabled, and neither App JWT nor webhook secret is printed. Keep actual
-delivery inspection/redelivery evidence separate from a synthetic signed ping. The operator API
-uses GitHub's documented [App webhook configuration](https://docs.github.com/en/rest/apps/webhooks)
-and [manifest conversion](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest).
-
-For first deployment, upload independent Secrets alongside code using Wrangler's
-[`--secrets-file` option](https://developers.cloudflare.com/workers/configuration/secrets/#upload-secrets-alongside-code).
-Use an owner-only temporary file and remove it after deployment. This avoids a Secret operation
-creating a placeholder Worker before database/owner validation. Later deployments preserve
-existing Secrets; do not generate a new auth/ticket key for every deployment.
-
-From `services/worker-api`:
-
-```bash
-bun run types:check
+bun run build:web:production
 bun run deploy:guard
-bun run deploy:guard:production
+bun run types:check
 bun run typecheck
 bun run lint
 bun run test
 bun run test:workers
-bun run build:web:production
-bun run deploy:dry-run:production
+bun run deploy:dry-run
 ```
 
-Run the PostgreSQL contracts/recovery exercise against a disposable local `_test` database and
-the Gateway's own checks. Then verify actual remote runtime privileges, schema, independent
-Secrets, R2 writes/read/deletion, Queue retry/DLQ recovery, Workflow restart/cancellation and DO
-revocation. A dry run validates the bundle and binding configuration; it does not validate those
-remote resources. The config guard also does not assert remote database state or Secret values.
+PostgreSQL 契约和恢复测试只连接受保护的本机 `_test` 数据库；这不是另一套部署环境。使用 `PACA_TEST_DATABASE_URL` 后执行 `bun run test:postgres`。
 
-Use a controlled candidate entry point for same-origin Session/Agent/attachment/collaboration/
-search/delivery tests before domain cutover. Browser acceptance must cover real login, project
-creation, local Codex/Claude Code work, search, GitHub PR/CI/human acceptance, and error recovery.
-Keep the delivery PR in draft until its full acceptance gate passes.
+Gateway 先发布，然后 API。使用项目锁定的 Wrangler 和 Node runtime：
 
-## Cutover and rollback
+```bash
+# services/environment-gateway
+bun run deploy:prod
+# services/worker-api
+bun run deploy:prod
+bun run smoke:production
+bun run github:app:verify
+bun run github:app:webhook-config
+```
 
-1. Record internal and production Worker/Gateway versions, current domain owners, the migration
-   ledger, backups and restore evidence, outstanding leases/Workflows, operator and stop conditions.
-2. Verify the production candidate and owner onboarding, then stop starting new leases while
-   the domain change is in progress. Resolve or cancel outstanding work according to the durable
-   lease protocol; a domain change must not trigger replay of uncertain shell/PTY operations.
-3. Move internal API/web and Gateway domains and their exact auth/public origins to the internal
-   hostnames in the table. Existing host-scoped internal cookies do not transfer to the new hostname;
-   users sign in again there. Preserve their database and password accounts.
-4. Add production's custom domains, keep exact production origins, regenerate types and run
-   `bun run deploy:guard:release`. Build production assets with `VITE_PACA_RUNTIME=cloudflare`
-   and `VITE_INTERNAL_PREVIEW=false`; disabling test signup must not select the legacy UI.
-   Deploy each environment explicitly, then verify domain ownership and all public auth boundaries.
-5. Verify the production health and protected database health, create/use a real project, complete
-   a real Agent task and fixed-commit GitHub acceptance, and inspect operational/error metrics.
-   Record actual versions and evidence in `TODO.md` before declaring the release complete.
+不传 `--env`。Wrangler 部署保留现有 Secret；不轮换 Better Auth / Gateway / App 凭据。`smoke:production` 仅轮换私有数据库健康诊断 token，并创建受高熵 bearer 保护的短期固定范围 probe；验证后删除 probe 与私有临时文件。CLI 返回成功后仍需验证真实远端。
 
-On failure, stop new work and roll back only the affected Worker/Gateway versions to the recorded
-versions using `wrangler rollback <recorded-version-id> --env <environment>`. Coordinate domain
-ownership and auth origins as a separate operation; code rollback alone does not restore domains,
-database schemas, queued messages or running Workflows. Never point production at internal's
-database/Secrets as a rollback shortcut. Restore database state only through the rehearsed recovery
-procedure. Do not reset internal or silently discard new production writes.
+## 账号与 GitHub
+
+生产 HTTP 注册始终关闭，管理员已在当前工作区。禁止复制密码、Session 或 legacy 身份。GitHub App 私钥缓存仅位于忽略的 `.paca/github-app/prod.json`，文件 0600、目录 0700，不进入 Git 或日志。既有 App 已安装至唯一 `yudi-xiao/paca`，权限仍为 Metadata/Checks/Pull requests 只读。
+
+`github:app:setup` 在缓存存在时拒绝重复创建；有确切 Secret 修复需求时用 `github:app:setup --resume` 恢复同一个 App。回调地址保持 `https://paca.howlearnwood.com/api/integrations/github/webhook`。不要创建独立生产 App。
+
+## 临时验收数据
+
+正文检索和仓库设置 smoke 使用本机短期 operator role，通过 Better Auth 私有 API 创建 `smoke…@paca.test` 账号，再以实际远端登录取得 Session。要求真实 Owner 已存在，拒绝创建首位管理员；结束后删除临时账号和角色，公开注册不改变。
+
+```bash
+PACA_PLANETSCALE_ORG=463708580 PACA_PROD_SMOKE_CONFIRM=RUN_PACA_PROD_SMOKE PACA_SEARCH_SMOKE_CONFIRM=RUN_PROD_SEARCH_SMOKE bun run smoke:search:prod
+PACA_PLANETSCALE_ORG=463708580 PACA_PROD_SMOKE_CONFIRM=RUN_PACA_PROD_SMOKE PACA_GITHUB_REPOSITORY_SMOKE_CONFIRM=RUN_PROD_GITHUB_REPOSITORY_SMOKE bun run smoke:github-repository:prod
+```
+
+测试不读取、修改或注销人类账号的 Session。现有用户 smoke 需要由操作员通过私有环境变量提供测试账号，禁止在聊天、argv、提交或输出里提供密码。
+
+## 恢复与运行边界
+
+发布前保存当前 Worker version 和数据库备份。失败可回滚同一 Worker 的代码版本；版本化数据库 migration 只执行经过审查的前滚，不把旧身份复制回来。发布不会自动合并 PR、批准任务交付或发布业务数据。
+
+同源认证、Project 权限、Agent capability constraints、User/Agent Gateway registry、Queue 幂等与恢复仍是正式运行条件，不属于被移除的部署环境隔离。上线待办与实测证据统一记录在根目录 `TODO.md`。

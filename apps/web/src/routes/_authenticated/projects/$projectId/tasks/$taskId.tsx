@@ -3,7 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { AlertCircle, ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { TaskDetailModal } from "@/components/projects/interactions/task-detail-modal";
-import { InternalPreviewTaskDetail } from "@/components/projects/tasks/internal-preview-task-detail";
+import { CloudflareTaskDetail } from "@/components/projects/tasks/cloudflare-runtime-task-detail";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { usesCloudflareRuntime } from "@/lib/deployment-mode";
@@ -101,7 +101,7 @@ function TaskDetailPage() {
 	const isCloudflareRuntime = usesCloudflareRuntime();
 
 	if (isCloudflareRuntime) {
-		return <InternalPreviewTaskDetail projectId={projectId} taskId={taskId} />;
+		return <CloudflareTaskDetail projectId={projectId} taskId={taskId} />;
 	}
 	return <LegacyTaskDetailPage projectId={projectId} taskId={taskId} />;
 }

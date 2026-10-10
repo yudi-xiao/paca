@@ -1,15 +1,15 @@
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
-
 import pg from "pg";
+import { cleanupProductionSmokeUsers, productionSmokeFetch } from "./lib/production-smoke-auth";
 
 type JsonRecord = Record<string, unknown>;
 type HeadersWithSetCookie = Headers & { getSetCookie?: () => string[] };
 
 const baseURL = "https://paca.howlearnwood.com";
 const database = "paca";
-const branch = "internal";
+const branch = "prod";
 const execFileAsync = promisify(execFile);
 const organization = process.env.PACA_PLANETSCALE_ORG?.trim();
 const workerDirectory = resolve(import.meta.dirname, "..");
@@ -71,7 +71,7 @@ async function request(path: string, method: string, cookie?: string, body?: Jso
   const headers = new Headers({ origin: baseURL });
   if (cookie) headers.set("cookie", cookie);
   if (body) headers.set("content-type", "application/json");
-  return fetch(`${baseURL}${path}`, {
+  return productionSmokeFetch(`${baseURL}${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
@@ -112,7 +112,7 @@ async function waitForCompletedRun(
 }
 
 async function main(): Promise<void> {
-  if (process.env.PACA_AUTOMATION_SMOKE_CONFIRM !== "RUN_INTERNAL_AUTOMATION_SMOKE") {
+  if (process.env.PACA_AUTOMATION_SMOKE_CONFIRM !== "RUN_PROD_AUTOMATION_SMOKE") {
     throw new Error("PACA_AUTOMATION_SMOKE_CONFIRM_REQUIRED");
   }
   if (!organization) throw new Error("PACA_PLANETSCALE_ORG_REQUIRED");
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
     process.env.PACA_PLANETSCALE_TARGET_BRANCH?.trim() !== undefined &&
     process.env.PACA_PLANETSCALE_TARGET_BRANCH?.trim() !== branch
   ) {
-    throw new Error("AUTOMATION_SMOKE_TARGET_BRANCH_MUST_BE_INTERNAL");
+    throw new Error("AUTOMATION_SMOKE_TARGET_BRANCH_MUST_MATCH_PROD_DATABASE");
   }
 
   const suffix = crypto.randomUUID();
@@ -157,7 +157,7 @@ async function main(): Promise<void> {
   try {
     await client.connect();
     const health = await expectJson(await request("/health", "GET"), 200, "HEALTH");
-    if (health.environment !== "internal") throw new Error("AUTOMATION_SMOKE_WRONG_ENVIRONMENT");
+    if (health.environment !== "prod") throw new Error("AUTOMATION_SMOKE_WRONG_ENVIRONMENT");
 
     // Run only after real onboarding. A smoke signup must never claim the
     // clean-slate instance's first-owner slot, even briefly during registration.
@@ -794,7 +794,7 @@ async function main(): Promise<void> {
     );
     await expectJson(await request(sprintGraphPath, "DELETE", cookie), 200, "SPRINT_GRAPH_ARCHIVE");
     automationId = undefined;
-    console.log(JSON.stringify({ status: "ok", step: "automation-sprint-actions-internal" }));
+    console.log(JSON.stringify({ status: "ok", step: "automation-sprint-actions-prod" }));
 
     // Exercise the durable sleep path separately after the immediate task action.
     const workflowGraph = await expectJson(
@@ -932,16 +932,18 @@ async function main(): Promise<void> {
     }
   }
   if (cleanupFailure) throw new Error(cleanupFailure);
-  console.log(JSON.stringify({ status: "ok", step: "automation-internal-smoke", graphCrud: true }));
+  console.log(JSON.stringify({ status: "ok", step: "automation-prod-smoke", graphCrud: true }));
 }
 
-main().catch((error: unknown) => {
-  console.error(
-    JSON.stringify({
-      status: "error",
-      step: "automation-internal-smoke",
-      code: error instanceof Error ? error.message : "UNKNOWN_ERROR",
-    }),
-  );
-  process.exitCode = 1;
-});
+main()
+  .finally(cleanupProductionSmokeUsers)
+  .catch((error: unknown) => {
+    console.error(
+      JSON.stringify({
+        status: "error",
+        step: "automation-prod-smoke",
+        code: error instanceof Error ? error.message : "UNKNOWN_ERROR",
+      }),
+    );
+    process.exitCode = 1;
+  });

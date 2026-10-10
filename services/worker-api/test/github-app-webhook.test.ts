@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { configureGitHubAppWebhook } from "../scripts/github-app-webhook";
 
-const origin = "https://paca-internal.howlearnwood.com";
+const origin = "https://paca.howlearnwood.com";
 const desired = {
   url: `${origin}/api/integrations/github/webhook`,
   content_type: "json",
   insecure_ssl: "0",
 };
-const old = { ...desired, url: "https://paca.howlearnwood.com/api/integrations/github/webhook" };
-const health = () => Response.json({ service: "paca-worker-api", environment: "internal" });
-const input = { environment: "internal" as const, origin, token: "jwt-fixture", apply: true };
+const old = { ...desired, url: "https://obsolete.example/api/integrations/github/webhook" };
+const health = () => Response.json({ service: "paca-worker-api", environment: "prod" });
+const input = { environment: "prod" as const, origin, token: "jwt-fixture", apply: true };
 
 describe("operator GitHub App webhook cutover", () => {
   it("updates only the fixed App configuration after checking the destination and re-reads it", async () => {
@@ -52,11 +52,13 @@ describe("operator GitHub App webhook cutover", () => {
     expect(fetch_).toHaveBeenCalledTimes(2);
   });
   it("refuses a production destination still served by internal", async () => {
-    const fetch_ = vi.fn<typeof fetch>().mockResolvedValue(health());
+    const fetch_ = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ service: "paca-worker-api", environment: "internal" }));
     await expect(
       configureGitHubAppWebhook({
         ...input,
-        environment: "production",
+        environment: "prod",
         origin: "https://paca.howlearnwood.com",
         fetch: fetch_,
       }),

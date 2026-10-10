@@ -58,7 +58,7 @@ if (process.env.PACA_REQUIRE_POSTGRES_CONTRACTS === "true" && !databaseURL)
       );
       expect(counts.rows).toEqual([{ users: 1, sessions: 0, assignments: 1 }]);
       const auth = createAuth(db, {
-        ENVIRONMENT: "production",
+        ENVIRONMENT: "prod",
         BETTER_AUTH_SECRET: randomBytes(48).toString("hex"),
         BETTER_AUTH_URL: "https://paca.howlearnwood.com",
         TRUSTED_ORIGINS: "https://paca.howlearnwood.com",

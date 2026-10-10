@@ -5,9 +5,9 @@ import { ShortcutHelpDialog } from "@/components/shortcuts/shortcut-help-dialog"
 import { usePermissions } from "@/hooks/use-permissions";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { currentUserQueryOptions } from "@/lib/auth-api";
+import { cloudflareNavigationTarget } from "@/lib/cloudflare-runtime";
 import { usesCloudflareRuntime } from "@/lib/deployment-mode";
 import { sprintsQueryOptions } from "@/lib/interaction-api";
-import { internalPreviewNavigationTarget } from "@/lib/internal-preview";
 import { useShortcutHelpStore } from "./help-dialog-store";
 import { useHoveredTaskStore } from "./hovered-task-store";
 import { matchShortcut, type ShortcutActionId } from "./keymap";
@@ -61,7 +61,7 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
 	const goto = useCallback(
 		(path: string) => {
 			const target = usesCloudflareRuntime()
-				? internalPreviewNavigationTarget(path)
+				? cloudflareNavigationTarget(path)
 				: path;
 			return navigate({ to: target as "/" });
 		},

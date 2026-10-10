@@ -7,8 +7,8 @@ import pg from "pg";
 const execFileAsync = promisify(execFile);
 const organization = process.env.PACA_PLANETSCALE_ORG?.trim();
 const database = process.env.PACA_PLANETSCALE_DATABASE?.trim() || "paca";
-const branch = process.env.PACA_PLANETSCALE_TARGET_BRANCH?.trim() || "internal";
-const expectedConfirmation = "SMOKE_AGENT_TASK_RECOVERY_INTERNAL";
+const branch = process.env.PACA_PLANETSCALE_TARGET_BRANCH?.trim() || "prod";
+const expectedConfirmation = "SMOKE_AGENT_TASK_RECOVERY_PROD";
 const workerDirectory = resolve(import.meta.dirname, "..");
 
 type RolePayload = {
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     throw new Error(`PACA_AGENT_TASK_RECOVERY_CONFIRM must equal ${expectedConfirmation}`);
   }
   if (!organization) throw new Error("PACA_PLANETSCALE_ORG_REQUIRED");
-  if (branch !== "internal") throw new Error("TARGET_BRANCH_MUST_BE_INTERNAL");
+  if (branch !== "prod") throw new Error("TARGET_BRANCH_MUST_MATCH_PROD_DATABASE");
 
   const role = parseRole(
     await pscale([

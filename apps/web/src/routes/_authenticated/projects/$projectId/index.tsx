@@ -15,10 +15,10 @@ export const Route = createFileRoute("/_authenticated/projects/$projectId/")({
 			params: { projectId: params.projectId },
 		});
 	},
-	component: InternalPreviewProjectOverview,
+	component: ProjectOverview,
 });
 
-function InternalPreviewProjectOverview() {
+function ProjectOverview() {
 	const { projectId } = Route.useParams();
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	const { t } = useTranslation("shared");
@@ -48,9 +48,7 @@ function InternalPreviewProjectOverview() {
 
 			<Card className="border-border/60">
 				<CardHeader>
-					<CardTitle className="text-base">
-						Cloudflare internal preview
-					</CardTitle>
+					<CardTitle className="text-base">{project.name}</CardTitle>
 				</CardHeader>
 				<CardContent className="grid gap-4 text-sm sm:grid-cols-2">
 					<div className="flex items-center gap-3 rounded-lg border border-border/50 p-4">

@@ -27,7 +27,7 @@ type Configuration = ReturnType<typeof githubAppConfiguration>;
 function command(args: string[], input?: string) {
   return new Promise<void>((success, failure) => {
     // Secret material is delivered only on stdin, never argv or shell expansion.
-    const child = spawn("bun", args, {
+    const child = spawn(args[0] === "run" ? "bun" : "node", args, {
       cwd: directory,
       stdio: ["pipe", "ignore", "ignore"],
       signal: AbortSignal.timeout(60000),
@@ -57,28 +57,11 @@ async function main() {
   const workerConfiguration = JSON.parse(
     await readFile(resolve(directory, "wrangler.jsonc"), "utf8"),
   );
-  const appOrigin = githubAppOrigin(
-    environment,
-    workerConfiguration.env?.[environment]?.vars?.BETTER_AUTH_URL,
-  );
+  const appOrigin = githubAppOrigin(environment, workerConfiguration.vars?.BETTER_AUTH_URL);
   const configure = async (configuration: Configuration) => {
-    if (environment === "production") {
-      const internal = await readGitHubAppConfiguration(
-        resolve(directory, "../../.paca/github-app/internal.json"),
-      );
-      if (internal.id === configuration.id) throw Error("GITHUB_APP_ENVIRONMENT_REUSE_FORBIDDEN");
-    }
     const report = await configureGitHubAppEnvironment(environment, configuration, (secrets) =>
       command(
-        [
-          "node_modules/wrangler/bin/wrangler.js",
-          "secret",
-          "bulk",
-          "--env",
-          "internal",
-          "--profile",
-          "paca",
-        ],
+        ["node_modules/wrangler/bin/wrangler.js", "secret", "bulk", "--profile", "paca"],
         JSON.stringify(secrets),
       ),
     );
@@ -121,7 +104,7 @@ async function main() {
       const manifest = githubAppManifest(`${origin}/callback/${nonce}`, environment, appOrigin);
       response.end(
         html(
-          `<h1>创建 Paca ${environment} 交付验收 App</h1><p>专用于 <strong>yudi-xiao/paca</strong>。请在 GitHub 上以 yudi-xiao 登录，创建后选择 <strong>Only select repositories → paca</strong>。</p><ul><li>Metadata：只读</li><li>Checks：只读</li><li>Pull requests：只读</li></ul><p>${deployment.stageOnly ? "生产 App 私钥将通过本机回调保存为独立私有配置；候选部署完成后再写入 production Worker Secret。" : "私钥将通过本机回调保存为私有配置，并写入当前项目的 Cloudflare internal Worker Secret。"}</p><form action="https://github.com/settings/apps/new?state=${nonce}" method="post"><input type="hidden" name="manifest" value="${escapeHtml(JSON.stringify(manifest))}"><button type="submit">前往 GitHub 创建 App</button></form><p><small>此页面不会请求代码写入、合并、发布或用户 OAuth 权限。</small></p>`,
+          `<h1>创建 Paca ${environment} 交付验收 App</h1><p>专用于 <strong>yudi-xiao/paca</strong>。请在 GitHub 上以 yudi-xiao 登录，创建后选择 <strong>Only select repositories → paca</strong>。</p><ul><li>Metadata：只读</li><li>Checks：只读</li><li>Pull requests：只读</li></ul><p>私钥将通过本机回调保存为私有配置，并写入当前项目的 Cloudflare prod Worker Secret。</p><form action="https://github.com/settings/apps/new?state=${nonce}" method="post"><input type="hidden" name="manifest" value="${escapeHtml(JSON.stringify(manifest))}"><button type="submit">前往 GitHub 创建 App</button></form><p><small>此页面不会请求代码写入、合并、发布或用户 OAuth 权限。</small></p>`,
         ),
       );
       return;

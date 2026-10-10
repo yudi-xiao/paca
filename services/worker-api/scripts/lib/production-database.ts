@@ -5,12 +5,11 @@ import { operatorJson } from "./operator-command";
 export const productionDatabase = {
   organization: "463708580",
   database: "paca",
-  branch: "main",
-  branchId: "1taj95uxia8x",
-  runtimeRoleName: "paca-worker-production",
-  runtimeRole: "pscale_api_gtltb4ltanqs",
-  productionHyperdrive: "98086061f9064f6c8f815303002c4a88",
-  retiredHyperdrive: "f2c6d6944f65417785dd49964e0c3238",
+  branch: "prod",
+  branchId: "dshooho15033",
+  runtimeRoleName: "paca-worker-internal",
+  runtimeRole: "pscale_api_m5nnyv00jm5v",
+  productionHyperdrive: "ec828e1b80664166ab38aa511cfd1f82",
 } as const;
 
 export async function productionCommand(args: string[]): Promise<unknown> {
@@ -69,26 +68,25 @@ export function parseOperatorRole(payload: unknown): {
 }
 
 export async function withProductionOperator<T>(
-  purpose: "initialize" | "owner",
+  purpose: "verify" | "smoke",
   operation: (client: Client, role: string) => Promise<T>,
 ): Promise<T> {
   const target = z.object({
     id: z.literal(productionDatabase.branchId),
-    name: z.literal("main"),
+    name: z.literal(productionDatabase.branch),
     ready: z.literal(true),
-    production: z.literal(true),
   });
-  target.parse(await productionCommand(["branch", "show", "paca", "main"]));
+  target.parse(await productionCommand(["branch", "show", "paca", productionDatabase.branch]));
   const payload = await productionCommand([
     "role",
     "create",
     "paca",
-    "main",
+    productionDatabase.branch,
     `paca-${purpose}-${Date.now()}`,
     "--inherited-roles",
     "postgres",
     "--ttl",
-    purpose === "owner" ? "30m" : "15m",
+    "15m",
   ]);
   const identity = z.object({ id: z.string().regex(/^[a-z0-9]+$/u) }).parse(payload);
   let client: Client | undefined;
@@ -105,41 +103,11 @@ export async function withProductionOperator<T>(
       "role",
       "delete",
       "paca",
-      "main",
+      productionDatabase.branch,
       identity.id,
       "--successor",
       "postgres",
       "--force",
     ]);
   }
-}
-
-export function assertRecentProductionBackup(payload: unknown, now = Date.now()): void {
-  const backup = z
-    .object({
-      id: z.string(),
-      name: z.literal("paca-pre-production-clean-slate-20261010"),
-      state: z.literal("success"),
-      completed_at: z.iso.datetime({ offset: true }),
-      expires_at: z.iso.datetime({ offset: true }),
-    })
-    .parse(payload);
-  const completed = Date.parse(backup.completed_at);
-  if (
-    completed > now ||
-    now - completed > 2 * 60 * 60 * 1000 ||
-    Date.parse(backup.expires_at) <= now
-  )
-    throw new Error("PRODUCTION_BACKUP_NOT_RECENT");
-}
-
-export function assertUnpublishedProduction(
-  consumers: { worker: string; hyperdriveId: string }[],
-  scripts: { id: string }[],
-): void {
-  if (
-    consumers.length !== 0 ||
-    scripts.some((script) => script.id === "paca-worker-api-production")
-  )
-    throw new Error("PRODUCTION_DATABASE_ALREADY_CONSUMED");
 }

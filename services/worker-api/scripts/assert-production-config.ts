@@ -1,15 +1,16 @@
 import { readFile } from "node:fs/promises";
-import { assertProductionConfiguration, type ReleaseStage } from "./lib/production-config";
+import { assertProductionConfiguration } from "./lib/production-config";
 
 async function main(): Promise<void> {
-  const stage = process.argv[2];
-  if (stage !== "candidate" && stage !== "release") throw new Error("RELEASE_STAGE_REQUIRED");
+  if (process.argv.length !== 2) throw new Error("RELEASE_ARGUMENT_INVALID");
   const [worker, gateway] = await Promise.all([
     readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
     readFile(new URL("../../environment-gateway/wrangler.jsonc", import.meta.url), "utf8"),
   ]);
-  assertProductionConfiguration(JSON.parse(worker), JSON.parse(gateway), stage as ReleaseStage);
-  console.log(JSON.stringify({ status: "ok", step: "production-deploy-config", stage }));
+  assertProductionConfiguration(JSON.parse(worker), JSON.parse(gateway));
+  console.log(
+    JSON.stringify({ status: "ok", step: "production-deploy-config", environment: "prod" }),
+  );
 }
 
 main().catch((error: unknown) => {

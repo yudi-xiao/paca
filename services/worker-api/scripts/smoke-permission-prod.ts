@@ -1,4 +1,4 @@
-export {};
+import { cleanupProductionSmokeUsers, productionSmokeFetch } from "./lib/production-smoke-auth";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -8,8 +8,8 @@ function requiredEnvironment(name: string): string {
   return value;
 }
 
-function internalBaseURL(): string {
-  const configured = new URL(requiredEnvironment("PACA_INTERNAL_BASE_URL"));
+function productionBaseURL(): string {
+  const configured = new URL(requiredEnvironment("PACA_BASE_URL"));
   if (
     configured.protocol !== "https:" ||
     configured.username ||
@@ -18,7 +18,7 @@ function internalBaseURL(): string {
     configured.search ||
     configured.hash
   ) {
-    throw new Error("PACA_INTERNAL_BASE_URL_INVALID");
+    throw new Error("PACA_BASE_URL_INVALID");
   }
   return configured.origin;
 }
@@ -48,7 +48,7 @@ async function authPost(
 ): Promise<Response> {
   const headers = new Headers({ "content-type": "application/json", origin: baseURL });
   if (cookie) headers.set("cookie", cookie);
-  return fetch(`${baseURL}${path}`, {
+  return productionSmokeFetch(`${baseURL}${path}`, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -61,7 +61,7 @@ function log(step: string, details: JsonRecord = {}): void {
 }
 
 async function main(): Promise<void> {
-  const baseURL = internalBaseURL();
+  const baseURL = productionBaseURL();
   const runId = crypto.randomUUID();
   const email = `permission-smoke-${runId}@paca.test`;
   const password = `Paca-${crypto.randomUUID()}-Aa1!`;
@@ -75,7 +75,7 @@ async function main(): Promise<void> {
   const cookie = sessionCookie(signUp);
   log("sign-up-and-provision");
 
-  const session = await fetch(`${baseURL}/api/auth/get-session`, {
+  const session = await productionSmokeFetch(`${baseURL}/api/auth/get-session`, {
     headers: { cookie, origin: baseURL },
   });
   requireStatus(session, 200, "GET_SESSION");
@@ -86,9 +86,12 @@ async function main(): Promise<void> {
   }
   log("default-organization-active");
 
-  const legacyPermissions = await fetch(`${baseURL}/api/v1/users/me/global-permissions`, {
-    headers: { cookie, origin: baseURL },
-  });
+  const legacyPermissions = await productionSmokeFetch(
+    `${baseURL}/api/v1/users/me/global-permissions`,
+    {
+      headers: { cookie, origin: baseURL },
+    },
+  );
   requireStatus(legacyPermissions, 200, "LEGACY_PERMISSIONS");
   const legacyBody = asRecord(await legacyPermissions.json());
   const legacyData = asRecord(legacyBody?.data);
@@ -139,8 +142,10 @@ async function main(): Promise<void> {
   log("permission-smoke-complete", { cleanupEmail: email });
 }
 
-main().catch((error: unknown) => {
-  const code = error instanceof Error ? error.message : "UNKNOWN_ERROR";
-  console.error(JSON.stringify({ status: "error", step: "permission-smoke", code }));
-  process.exitCode = 1;
-});
+main()
+  .finally(cleanupProductionSmokeUsers)
+  .catch((error: unknown) => {
+    const code = error instanceof Error ? error.message : "UNKNOWN_ERROR";
+    console.error(JSON.stringify({ status: "error", step: "permission-smoke", code }));
+    process.exitCode = 1;
+  });

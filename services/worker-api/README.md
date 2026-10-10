@@ -2,63 +2,20 @@
 
 Cloudflare Workers + Hono entrypoint for the incremental Paca API migration. It contains
 public liveness, a token-protected Hyperdrive/PostgreSQL health check, the Better Auth route
-boundary, the React internal preview, and the Drizzle schema/migration baseline.
+boundary, the React Cloudflare runtime, and the Drizzle schema/migration baseline.
 
 Native project repository approval and fixed-commit delivery APIs use a dedicated,
 read-only GitHub App. See [GitHub delivery setup](../../docs/guides/github-delivery.md)
 for permissions, Secret configuration, user API contracts, and recovery behavior.
 Release and acceptance status remains in the root `TODO.md`.
 
-## Commands
+## 唯一 prod 部署
 
-```bash
-bun install
-bun run types
-bun run db:check
-bun run check
-```
+只使用根 Wrangler 配置，`ENVIRONMENT=prod`，不使用 `--env`。部署复用现有账号、GitHub App 和所有资源；部分资源的历史物理名字带 `prod` 后缀，不代表另一个环境。
 
-`bun run dev` and `dev:local` use the default local development configuration. Its Hyperdrive
-ID is an unbound simulator placeholder, so it cannot reach the future production branch.
-Use `dev:internal` explicitly for the remote internal preview. The legacy remote-preview mode
-can be unreliable behind a system proxy.
+运行 `bun run build:web:production`、`bun run deploy:guard`、`bun run check` 后用 `bun run deploy:prod` 发布。Gateway 先执行其 `deploy:prod`。实际验收使用 `smoke:production`，GitHub App 用 `github:app:verify`。详细资源、凭据、恢复与验收流程见 [单一 prod 发布手册](../../docs/deployment/cloudflare-release.md)。
 
-For local execution, copy `.dev.vars.example` to `.dev.vars`, export the Hyperdrive local
-connection environment variable from the root `DATABASE_URL`, and run:
-
-```bash
-source ../../.env
-export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="$DATABASE_URL"
-bun run dev:local
-```
-
-Never add the connection string to `wrangler.jsonc`.
-
-Production configuration and the domain cutover sequence are described in
-[the Cloudflare release runbook](../../docs/deployment/cloudflare-release.md). Types are generated
-without selecting one environment so both `Cloudflare.InternalEnv` and
-`Cloudflare.ProductionEnv` are checked. The production candidate has no public route; its
-configuration is preparation for a verified release, not an already usable production instance.
-
-## Local Cloudflare auth profile
-
-Use the named `paca` Wrangler OAuth profile for this checkout. From `services/worker-api`,
-create or refresh the profile and bind it to the repository root:
-
-```bash
-bunx wrangler auth create paca
-bunx wrangler auth activate paca ../..
-bunx wrangler auth list
-bunx wrangler deployments list --env internal
-```
-
-The root binding also applies to `services/environment-gateway` and other subdirectories.
-Wrangler stores credentials and directory bindings in its local user configuration; no OAuth
-token is stored in the repository. Both Worker configurations pin the Paca Cloudflare account
-ID. To use another account in another project, create a different named profile and activate
-it at that project's root. A new machine or checkout path needs its own login/binding.
-`CLOUDFLARE_API_TOKEN` overrides profiles, including in CI; `--profile paca` selects this
-profile for an individual supported command. See the [Cloudflare command reference](https://developers.cloudflare.com/workers/wrangler/commands/general/).
+本地开发通过 Wrangler simulator 和受保护的 `_test` PostgreSQL 运行；不建立远端 development/internal/staging。项目已绑定 Wrangler `paca` auth profile，OAuth 缓存不进入 Git。
 
 ## Project body search
 
@@ -77,15 +34,16 @@ next page. It excludes deleted content and arbitrary BlockNote properties, and r
 requires PostgreSQL's `pg_trgm` extension and creates stored text projections plus partial GIN
 indexes; deploy the migration before the Worker.
 
-After building `apps/mcp`, run the isolated online search/Agent protocol check:
+After building `apps/mcp`, run the prod search/Agent protocol check:
 
 ```bash
-PACA_SEARCH_SMOKE_CONFIRM=RUN_INTERNAL_SEARCH_SMOKE \
+PACA_PROD_SMOKE_CONFIRM=RUN_PACA_PROD_SMOKE \
+PACA_SEARCH_SMOKE_CONFIRM=RUN_PROD_SEARCH_SMOKE \
 PACA_PLANETSCALE_ORG={organization-id} \
-bun run smoke:search:internal
+bun run smoke:search:prod
 ```
 
-The script fixes both the Worker origin and database branch to `internal`, provisions only its
+The script fixes both the Worker origin and database branch to `prod`, provisions only its
 temporary permission fixtures, exercises public Session/Agent Auth APIs and the built local
 MCP process, then revokes identities and cleans up its project/user/private files/database role.
 It checks protocol behavior; a real coding task and rendered browser interaction need separate
@@ -105,179 +63,11 @@ failed, skipped, untrusted or stale checks fail the gate. Its output is inspecti
 Native project/Run binding, GitHub App credential provisioning, reliable events and user acceptance
 are still separate integration requirements.
 
-## React internal preview
+## React 与数据库
 
-The internal Worker serves `apps/web/dist` with Cloudflare Static Assets on the same origin as
-the Hono API. SPA routes such as `/home` fall back to `index.html`; `/api/*`,
-`/.well-known/*`, `/health`, `/internal/*`, and `/ws/*` run through the Worker first and
-therefore never fall back to HTML.
+React 由当前 Worker Static Assets 同源提供；Cloudflare runtime 独立于注册策略，公开测试注册开关已移除。仅显示已迁移 API 支持的入口，未实现能力不通过旧 Go 认证回退。
 
-Both Cloudflare builds select `VITE_PACA_RUNTIME=cloudflare` for native feature/navigation
-boundaries. `bun run build:web:internal` additionally enables the internal-preview signup flag;
-`build:web:production` explicitly disables it without restoring legacy pages. The internal login page
-then exposes a test-account button accepting any valid email and a password of at least 12
-characters. Authentication uses Better Auth's same-origin HTTP endpoints and secure database
-Session cookie; the preview does not maintain a second frontend auth system.
-
-The existing React shell still contains Paca domain APIs that have not been migrated. Project
-list, workspace statistics, project CRUD, dynamic project roles, human project membership,
-Organization roles/member-role assignments, and the Task foundation/detail/activity slices now
-use the real PostgreSQL repository and Paca Permission boundary. Tasks include type/status reads,
-list, search, create, detail update, status change, soft delete, parent/child hierarchy, typed
-task links, trusted activity history, and author-owned comments. Better Auth remains the
-sole owner of Organization member join/remove lifecycle. Assigned-task aggregation and
-notifications are Worker-native. Task assignment and structured `teamMention` comments create
-owner-scoped notifications and reliable UserParty events in the same PostgreSQL transaction.
-Agent counts, branding, and the plugin registry remain explicit empty/read-only projections until
-their domains move to the Worker.
-
-## Database environments and migrations
-
-- PlanetScale `paca/main` is the future production branch. It still needs a clean-slate
-  initialization and complete migration validation before production traffic.
-- PlanetScale `paca/internal` is the isolated development branch for internal testing.
-- The default local configuration no longer references the original main Hyperdrive.
-  `env.production` uses a separate Hyperdrive and a new non-inheriting `paca-worker-production`
-  role. Runtime grants and the database baseline must still be verified; the old broad role and
-  any deployed Worker using it must be retired before production initialization.
-- The runtime role must not inherit `postgres`, `pg_read_all_data`, or `pg_write_all_data`.
-  `scripts/sql/grant-runtime-role.sql` grants explicit CRUD on the 58 application tables while
-  denying schema creation and access to the schema and attachment-migration ledgers;
-  `verify-runtime-role.sql` checks
-  that boundary. With PlanetScale, use the database role name before the routing-only
-  `.branch_id` username suffix when applying these grants. Future migrations must update this
-  explicit table list when needed.
-- Schema changes are generated by Better Auth/Drizzle and reviewed as SQL. Worker startup never
-  runs migrations.
-
-Pull-request CI also provisions a disposable PostgreSQL database named `paca_worker_test`, resets
-only that database's `public` schema, applies every checked-in migration in order, verifies the
-complete `paca_schema_migration` ledger, runs the shared repository contracts, and exercises both
-a transactionally failed migration and a data-preserving forward fix. The preparation and recovery
-scripts refuse non-local hosts and database names that do not end in `_test`; they never fall back
-to the root `DATABASE_URL`. To run the same flow against an explicitly disposable local database:
-
-```bash
-PACA_TEST_DATABASE_URL='postgresql://user:password@127.0.0.1:5432/paca_worker_test' \
-bun run test:postgres
-```
-
-The first shared contract covers `ProjectRepository` aggregate CRUD, list/stat semantics,
-case-insensitive uniqueness, and transaction rollback when a child insert fails. New PostgreSQL
-repositories should add contracts under `test/contracts` and their adapter binding under
-`test/postgres`; a future D1 adapter should consume the same domain-level contracts where its
-declared feature set matches.
-
-The recovery drill first causes a duplicate-key failure after creating a probe table inside one
-transaction and verifies that PostgreSQL leaves no partial table behind. It then creates a legacy
-row, applies an additive column/backfill/`NOT NULL` forward fix in another transaction, and verifies
-that the original row and normalized value survive. The probe table is always removed afterward.
-This validates the project procedure without pretending that destructive production rollbacks are
-safe: after a committed migration, the default remains Worker version rollback plus a reviewed
-forward migration.
-
-While the project is not live, `internal` uses a clean-slate database policy. The reset command
-never reads or copies `main`; it only accepts the `internal` branch and an exact destructive
-confirmation. It creates a 15-minute PlanetScale admin role, drops and recreates only the target
-branch's `public` schema, applies the complete contiguous migration sequence, restores the
-explicit runtime-role grants, verifies the migration ledger, and transfers object ownership to
-`postgres` before deleting the temporary role. It then exercises Better Auth registration,
-Session and `/api/me` through the deployed Worker/Hyperdrive path with a generated credential and
-removes that smoke user again. Successful completion therefore leaves zero users and no copied
-business data.
-
-Run from `services/worker-api` only when erasing the current internal data is intended:
-
-```bash
-PACA_RESET_INTERNAL_CONFIRM=RESET_PACA_INTERNAL_DATABASE \
-PACA_PLANETSCALE_ORG={organization-id} \
-PACA_POSTGRES_BIN={directory-containing-psql} \
-bun run db:reset:internal
-```
-
-The command rejects missing/gapped migration files, unsafe identifiers, any branch other than
-`internal`, and a missing or incorrect confirmation before it creates a temporary role. The
-current dedicated Hyperdrive remains backed by `paca/internal`; its non-inheriting
-`paca-worker-internal` role has explicit CRUD grants on 58 runtime tables and no schema-create or
-migration-ledger access. The root/main Hyperdrive remains separate and is rejected by the internal
-deployment guard.
-
-Subsequent reviewed internal-only migrations use a separate confirmation gate and a 15-minute
-PlanetScale admin role. The command skips ledger entries already present, reapplies and verifies
-the explicit runtime grants, transfers any newly owned objects to `postgres`, and deletes the
-temporary role without printing credentials:
-
-```bash
-PACA_APPLY_INTERNAL_CONFIRM=APPLY_INTERNAL_MIGRATIONS \
-PACA_PLANETSCALE_ORG='{organization-id}' \
-PACA_POSTGRES_BIN='{directory-containing-psql}' \
-bun run db:migrate:internal
-```
-
-The internal attachment cleanup runs once per day at `10:15 UTC` (`18:15` in Asia/Shanghai). The
-scheduled handler is fail-closed: `ATTACHMENT_CLEANUP_ENABLED` must be exactly `true`, the runtime
-environment must be `internal` or `production`, and the incoming Cron expression must match the
-reviewed Wrangler schedule. Changing the schedule requires updating both the handler constant and
-the deployment guard, then repeating the real deleted-object smoke test before deployment.
-
-Useful local checks:
-
-The Agent Auth audit smoke reuses an existing active delegated Agent, grants only a ten-minute
-`project.read` capability for one Project, executes one read, and immediately revokes the grant.
-It also attempts revocation in the error path, and never prints the approver password or Agent
-private key:
-
-```bash
-PACA_APPROVER_EMAIL='operator@example.com' \
-PACA_APPROVER_PASSWORD='…' \
-PACA_PROJECT_ID='project-id' \
-bun run smoke:agent-audit:internal
-```
-
-```bash
-bun run auth:schema:generate # Generates a draft; review local extensions before keeping it.
-bun run db:generate
-bun run db:check
-```
-
-Reviewed migrations through `drizzle/0014_clear_ultron.sql` were historically applied to both
-`paca/internal` and, after explicit authorization for this not-yet-live setup, `paca/main`.
-`paca/internal` has since been rebuilt from an empty schema and advanced independently.
-`0012_yielding_the_executioner.sql` and `0014_clear_ultron.sql` retain migration-history
-compatibility, while `0027_goofy_warstar.sql` removes their obsolete attachment-migration ledger;
-the product no longer supports importing legacy attachment data. `TODO.md` records the current
-internal ledger and remaining production safeguards.
-
-`0015_dry_quasimodo.sql` adds the PostgreSQL realtime outbox and transaction-bound triggers for
-Task, activity, link, attachment, Sprint and saved-view changes. It was applied to `paca/internal`
-before enabling its `REALTIME_EVENTS` Queue; `paca/main` remains at 0014 until that environment is
-explicitly promoted.
-
-`0016_busy_changeling.sql` and `0017_last_toro.sql` add the Document projection, its Project
-realtime trigger, monotonic Yjs revision and immutable R2 snapshot metadata. They are applied only
-to `paca/internal`; both checksums, the 16-column table, trigger and runtime-role CRUD boundary were
-verified before deploying the DocumentParty slice. The additive schema remains compatible with
-the previous Worker version, which is the first rollback step if the document deployment fails.
-
-`0022_fine_molten_man.sql` adds the owner-scoped Notification projection, actor references,
-idempotent source-activity key and read/query indexes. It is applied only to `paca/internal`;
-the runtime role has explicit CRUD while migration-ledger and DDL access remain denied.
-
-`bun run smoke:task:database` performs a guarded direct-database Task repository smoke test and
-removes its temporary project before exit. It requires a currently valid root `DATABASE_URL`;
-the URL is tooling-only and is never read by the deployed Worker. The current credential needs
-to be refreshed before this smoke test can pass; Hyperdrive connectivity is tracked separately.
-
-`bun run smoke:notification:database` requires an explicit `PACA_SMOKE_DATABASE_URL`. It creates
-an isolated temporary Project and second member, exercises assignment notification creation,
-owner-scoped list/read/read-all and the reliable realtime outbox through the production
-repositories, then deletes the temporary Project and its outbox events.
-
-`bun run smoke:notification:internal` signs in with credentials supplied only through
-`PACA_NOTIFICATION_SMOKE_EMAIL` and `PACA_NOTIFICATION_SMOKE_PASSWORD`, validates anonymous 401,
-authenticated list shape, invalid-cursor 400 and owner-hidden 404, then signs out. It calls
-read-all only when the account already has zero unread notifications, so the smoke never clears
-real user state.
+PostgreSQL 权威数据源为 `paca/prod`（ID 不变）。schema 与 40 份 migration 进入版本控制，runtime role 不允许 DDL 或 migration ledger 访问。部署不会运行 schema push、重建数据库或重复初始化管理员。数据库迁移、测试与恢复步骤见发布手册。
 
 ## Better Auth
 
@@ -285,13 +75,13 @@ real user state.
 `BETTER_AUTH_URL` and `TRUSTED_ORIGINS` are non-secret Wrangler vars. Browser origins not present
 in the trusted list are rejected before a database connection is opened.
 
-The initial internal policy keeps sessions in PostgreSQL for seven days, refreshes them at most
+The production policy keeps sessions in PostgreSQL for seven days, refreshes them at most
 once per day, and disables the cookie session cache so revocation is checked against the database.
 HTTPS deployments use `Secure`, `HttpOnly`, `SameSite=Lax` cookies. Cookie-authenticated mutation
 requests must also carry a trusted `Origin` header.
 
 ```bash
-bunx wrangler secret put BETTER_AUTH_SECRET --env internal
+bunx wrangler secret put BETTER_AUTH_SECRET
 ```
 
 ### Delegated Agent Host enrollment
@@ -326,11 +116,11 @@ short-lived, single-use Ed25519 `host+jwt` containing the Host and Agent public 
 secret never replaces JWT signature, audience, expiry, or JTI checks.
 
 ```bash
-bunx wrangler secret put AUTONOMOUS_HOST_ENROLLMENT_SECRET --env internal
+bunx wrangler secret put AUTONOMOUS_HOST_ENROLLMENT_SECRET
 ```
 
 An autonomous Agent registers active with no capabilities. A user who has
-`agents.approveGrant` in the target Project must then grant a constrained capability. The internal
+`agents.approveGrant` in the target Project must then grant a constrained capability. The production
 Agent management page currently exposes the first minimal path: a 15-minute `project.read` Grant
 bound to one Organization and Project. Revocation uses the Paca Better Auth plugin endpoint and is
 audited with the approving user as actor. Do not place the bootstrap secret in the browser, a
@@ -338,40 +128,40 @@ Worker variable, source control, Agent metadata, or a Capability Grant.
 
 ## Internal database health check
 
-Configure the secret independently for the internal environment:
+Configure the secret independently for the prod environment:
 
 ```bash
-bunx wrangler secret put INTERNAL_HEALTH_TOKEN --env internal
+bunx wrangler secret put INTERNAL_HEALTH_TOKEN
 ```
 
 Then call `GET /internal/health/database` with `Authorization: Bearer <token>`. The response
 contains only health state and latency; database errors and connection details are not returned.
 
-## Internal smoke test
+## Production smoke test
 
-After the dedicated internal Hyperdrive and both Worker secrets are configured, set the following
+After the dedicated existing Hyperdrive and both Worker secrets are configured, set the following
 values in the current shell or another ignored secret file:
 
-- `PACA_INTERNAL_BASE_URL`: the HTTPS origin of the internal Worker.
-- `PACA_INTERNAL_HEALTH_TOKEN`: the same value stored in the Worker health-check secret.
-- `PACA_SMOKE_EMAIL`: the dedicated internal test account.
+- `PACA_BASE_URL`: the HTTPS origin of the prod Worker.
+- `PACA_HEALTH_TOKEN`: the same value stored in the Worker health-check secret.
+- `PACA_SMOKE_EMAIL`: the dedicated test account.
 - `PACA_SMOKE_PASSWORD`: at least 12 characters.
 - `PACA_SMOKE_NAME`: optional display name.
 
 Then run:
 
 ```bash
-bun run smoke:internal
+bun run smoke:prod
 ```
 
-The script refuses a non-HTTPS or non-`internal` target, does not print credentials, and verifies
+The script refuses a non-HTTPS or non-`prod` target, does not print credentials, and verifies
 public health, Hyperdrive health, sign-up or existing-user sign-in, session lookup, sign-out, and
 server-side rejection of the old session cookie.
 
-`bun run smoke:realtime:internal` creates an isolated Project and Task using an existing internal
+`bun run smoke:realtime:prod` creates an isolated Project and Task using an existing
 project administrator, opens an authenticated Bun WebSocket to ProjectParty, waits for a real
 outbox/Queue `task.updated` event, idles for 12 seconds before checking pong, reconnects with a new
-capability and verifies another event. Required variables are `PACA_INTERNAL_BASE_URL`,
+capability and verifies another event. Required variables are `PACA_BASE_URL`,
 `PACA_REALTIME_SMOKE_EMAIL` and `PACA_REALTIME_SMOKE_PASSWORD`. Optional bounded durations
 `PACA_REALTIME_DUPLICATE_WINDOW_MS` and `PACA_REALTIME_ROLLING_WINDOW_MS` keep the client observing
 while an operator deliberately requeues the reported smoke outbox ID or deploys a new Worker
@@ -380,9 +170,9 @@ deployment the script reconnects if needed, then requires pong and a fresh relia
 archives the temporary Project and revokes its Session in `finally`, while printing exact IDs for
 reviewed hard cleanup of the archived fixture and its outbox rows.
 
-`bun run smoke:attachment:internal` verifies the real same-origin attachment path. Set
+`bun run smoke:attachment:prod` verifies the real same-origin attachment path. Set
 `PACA_ATTACHMENT_SMOKE_PASSWORD` and optionally `PACA_ATTACHMENT_SMOKE_EMAIL` to reuse an existing
-internal project administrator; without an email it creates a dedicated smoke user. The default
+project administrator; without an email it creates a dedicated smoke user. The default
 mode covers upload, Range download, soft delete, deleted-list visibility, restore and a second soft
 delete. Setting `PACA_ATTACHMENT_SMOKE_MULTIPART_CANCEL_ONLY=true` instead uploads one real 5 MiB
 multipart part, aborts it, verifies completion is rejected, and confirms no Task attachment was
@@ -392,7 +182,7 @@ starts a multipart upload as that member, removes the member, verifies the old S
 again. All modes create an isolated smoke Project and print exact IDs so generated Project/User
 records can be removed with reviewed targets after verification.
 
-`bun run smoke:document:internal` verifies the deployed DocumentParty path with an existing project
+`bun run smoke:document:prod` verifies the deployed DocumentParty path with an existing project
 administrator. Set `PACA_DOCUMENT_SMOKE_EMAIL` and `PACA_DOCUMENT_SMOKE_PASSWORD`; the script creates
 an isolated Project/Document and a fresh delegated Agent with exact `document.read`/`document.edit`
 constraints. It covers Agent Auth approval, suggest/collaborate/exclusive operations, user
@@ -401,7 +191,7 @@ user recovery and PostgreSQL materialization. The temporary Agent and Session ar
 Project is archived in independent cleanup steps. The script logs only IDs, revisions and status
 codes, never credentials, private keys or document text.
 
-The internal deployment has also passed a controlled remote Queue recovery exercise. A temporary
+The production deployment has also passed a controlled remote Queue recovery exercise. A temporary
 Worker scoped to the smoke Document submitted duplicate/out-of-order revisions followed by one
 revision that was deliberately not present in DocumentParty. The consumer ignored the stale work,
 retried the not-ready revision through the configured limit, and delivered it to the isolated DLQ;
@@ -448,7 +238,7 @@ reversible. Applied content remains auditable and a later product-level revert m
 a new document operation. Execution audit rows contain the trusted Agent/run/Grant/scope, action,
 mode and bounded outcome only, never document content, JWTs or private keys.
 
-The internal Workflow smoke reuses the git-ignored delegated Agent config. It first refreshes an
+The Workflow smoke reuses the git-ignored delegated Agent config. It first refreshes an
 idle Agent session because Agent Auth intentionally clears stale Grants during transparent
 reactivation, then creates and bootstraps a temporary Yjs document, issues exact ten-minute Grants,
 and verifies success plus both idempotency cases. Cleanup revokes the Grants, waits for the short
@@ -458,7 +248,7 @@ lease to expire, archives the document, and signs out:
 PACA_APPROVER_EMAIL='operator@example.com' \
 PACA_APPROVER_PASSWORD='…' \
 PACA_PROJECT_ID='project-id' \
-bun run smoke:agent-workflow:internal
+bun run smoke:agent-workflow:prod
 ```
 
 The script never prints the password, Agent private key, JWT, Grant payload, or document content.
@@ -499,7 +289,7 @@ Task writers can immediately and idempotently terminate an active execution with
 recovery pass marks expired leases and leases whose Host heartbeat has expired as `expired`; both
 manual cancellation and system expiry append trusted actor events.
 
-The internal smoke creates a temporary task and delegated Agent, approves an exact ten-minute
+The production smoke creates a temporary task and delegated Agent, approves an exact ten-minute
 `task.execute` Grant, executes the protocol as a local Codex Harness, checks duplicate and conflict
 paths, restart/checkpoint recovery, short-lease reclaim and idempotent manual cancellation, revokes
 the Grant, archives the fixture, revokes the Agent and signs out:
@@ -508,7 +298,7 @@ the Grant, archives the fixture, revokes the Agent and signs out:
 PACA_APPROVER_EMAIL='operator@example.com' \
 PACA_APPROVER_PASSWORD='…' \
 PACA_PROJECT_ID='project-id' \
-bun run smoke:agent-task-harness:internal
+bun run smoke:agent-task-harness:prod
 ```
 
 It never prints credentials, private keys, JWTs or Grant payloads. Protocol failures are returned as
@@ -523,7 +313,7 @@ lease, restores the original Host runtime values and removes the temporary role:
 ```bash
 PACA_AGENT_TASK_RECOVERY_CONFIRM=SMOKE_AGENT_TASK_RECOVERY_INTERNAL \
 PACA_PLANETSCALE_ORG='{organization-id}' \
-bun run smoke:agent-task-recovery:internal
+bun run smoke:agent-task-recovery:prod
 ```
 
 The reusable `AgentTaskHarnessClient` is transport-independent and keeps request IDs under caller
@@ -548,59 +338,16 @@ copy the key, JWT or full Grant into command output.
 
 ## Deployment and rollback
 
+Use the root config only. `bun run deploy:prod` builds production assets and checks the single prod resource/auth contract before publishing. Public registration, workers.dev and version previews are disabled. Existing Worker Secrets and resource IDs are retained.
+
 ```bash
 bun run deploy:dry-run
-# The guard rejects an internal deployment that shares the root/main Hyperdrive.
-bun run deploy:internal
-
-bunx wrangler versions list --env internal
-bunx wrangler rollback --env internal
+bun run deploy:prod
+bunx wrangler versions list
+bunx wrangler rollback
 ```
 
-Do not deploy the root Wrangler environment. Internal testing uses the explicitly named
-`internal` environment so later production bindings can remain isolated. Internal deployments
-must keep their Hyperdrive distinct from the root/main binding; rollback uses Wrangler's deployed
-version history rather than weakening this configuration guard.
-
-The deploy command builds the internal React assets before running the database-target guard and
-uploading the Worker. The guard also requires `TASK_ATTACHMENTS` to use
-`paca-attachments-development` at the root and `paca-attachments-internal` in the internal
-environment, so a database exception cannot accidentally collapse object-storage isolation.
-After deployment, both the page and API are available at:
-
-`https://paca.howlearnwood.com`
-
-The internal environment declares this hostname as a Wrangler Custom Domain. Its `workers.dev`
-endpoint remains available only for diagnostics and rollback because the current Cloudflare OAuth
-session cannot update the account subdomain setting. `BETTER_AUTH_URL` and `TRUSTED_ORIGINS` are
-pinned exclusively to the custom origin, so the browser, Session cookie, Origin validation, Static
-Assets, and Hono API use `paca.howlearnwood.com` as the canonical entry point.
-
-The internal preview intentionally exposes only the Better Auth session flow, the real project
-home/create/detail slice, Task list/create/search/detail/edit/archive/activity/comments,
-parent/child hierarchy and typed related-task links, Sprint lifecycle,
-the full existing Backlog/Timeline/Sprint Board/Table/Roadmap layouts, persisted task views, project custom fields, project Team and
-migration-safe Settings pages, Organization access, notifications shell, read-only profile,
-password change, dynamic global roles, Documents/BlockNote collaboration, theme, locale, and shortcut UI. Organization access
-manages Paca dynamic roles and multi-role assignments for existing Better Auth Organization
-members, but does not duplicate member lifecycle. Team supports human members only; Agent
-membership remains unavailable until the Better Auth Agent Auth identity is mapped into the
-Project member contract. Settings exposes
-project general data, dynamic roles, custom fields and the existing archive flow. Task queries now
-cover the existing interaction layout's multi-value/null filters, custom-field and range filters,
-built-in/custom/manual-view ordering, opaque keyset cursors, counts and numeric sums. Attachments,
-Agent conversations, API keys, admin settings/plugins,
-environments, workflows and other legacy features stay hidden or redirect to `/home`
-until their Worker-side domain contracts are implemented. Do not re-enable their navigation by
-returning fabricated success data from catch-all endpoints; add each feature only with its real
-authorization and persistence path.
-
-Global Agent management is the first exception to the legacy Agent UI: `/admin/agents` now lists
-and revokes Better Auth Agent Auth identities, while `/device/capabilities` handles the deployed
-device-authorization approval flow. These routes do not call the old `/api/v1/admin/agents`
-contract. Agent Auth discovery is served as JSON from
-`/.well-known/agent-configuration` through the Worker-first boundary.
-
+See the [single prod release runbook](../../docs/deployment/cloudflare-release.md) for actual remote checks, fixture cleanup and database recovery. Do not add a deployment environment or duplicate GitHub App.
 
 ## Automation due-date contract
 
@@ -631,7 +378,7 @@ when introducing future event-retention jobs to preserve deduplication.
 Minute maintenance isolates scanning, realtime delivery and lease recovery:
 failed scanning still allows pending Automation delivery, other recovery loops
 complete, and a sanitized failure is reported to Cron monitoring. Apply the
-migration **before** deploying the new Worker. Until internal deployment and
+migration **before** deploying the new Worker. Until deployment and
 real event/browser smoke pass, this capability is locally verified only.
 
 ## Automation Cron and Sprint contract

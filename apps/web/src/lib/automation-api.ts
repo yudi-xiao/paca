@@ -25,7 +25,7 @@ export const TRIGGER_TYPES = [
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 
 /** Nodes the internal Worker executor can activate and run today. */
-export const INTERNAL_PREVIEW_TRIGGER_TYPES = [
+export const CLOUDFLARE_TRIGGER_TYPES = [
 	"task_created",
 	"status_changed",
 	"assignee_changed",
@@ -84,7 +84,7 @@ export const ACTION_TYPES = [
 ] as const;
 export type ActionType = (typeof ACTION_TYPES)[number];
 
-export const INTERNAL_PREVIEW_ACTION_TYPES = [
+export const CLOUDFLARE_ACTION_TYPES = [
 	"update_task",
 	"wait",
 	"update_sprint",

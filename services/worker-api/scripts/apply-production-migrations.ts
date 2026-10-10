@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const expectedConfirmation = "APPLY_INTERNAL_MIGRATIONS";
+const expectedConfirmation = "APPLY_PROD_MIGRATIONS";
 const organization = process.env.PACA_PLANETSCALE_ORG?.trim();
 const database = process.env.PACA_PLANETSCALE_DATABASE?.trim() || "paca";
-const branch = process.env.PACA_PLANETSCALE_TARGET_BRANCH?.trim() || "internal";
+const branch = process.env.PACA_PLANETSCALE_TARGET_BRANCH?.trim() || "prod";
 const runtimeRoleName =
   process.env.PACA_PLANETSCALE_RUNTIME_ROLE_NAME?.trim() || "paca-worker-internal";
 const postgresBin = process.env.PACA_POSTGRES_BIN?.trim();
@@ -144,11 +144,11 @@ async function psqlFile(
 }
 
 async function main(): Promise<void> {
-  if (process.env.PACA_APPLY_INTERNAL_CONFIRM !== expectedConfirmation) {
-    throw new Error(`PACA_APPLY_INTERNAL_CONFIRM must equal ${expectedConfirmation}`);
+  if (process.env.PACA_APPLY_PROD_CONFIRM !== expectedConfirmation) {
+    throw new Error(`PACA_APPLY_PROD_CONFIRM must equal ${expectedConfirmation}`);
   }
   if (!organization) throw new Error("PACA_PLANETSCALE_ORG_REQUIRED");
-  if (branch !== "internal") throw new Error("TARGET_BRANCH_MUST_BE_INTERNAL");
+  if (branch !== "prod") throw new Error("TARGET_BRANCH_MUST_MATCH_PROD_DATABASE");
   const runtimeDatabaseRole = await resolveRuntimeDatabaseRole();
 
   const role = parseRole(

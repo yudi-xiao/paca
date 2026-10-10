@@ -1,9 +1,5 @@
 type RecordValue = Record<string, unknown>;
-export type ReleaseStage = "candidate" | "release";
 
-// An unbound local simulator cannot silently use the former main database.
-export const LOCAL_HYPERDRIVE_ID = "00000000000000000000000000000000";
-const retiredMainHyperdriveId = "f2c6d6944f65417785dd49964e0c3238";
 const accountId = "25f556b8c06e910fb3115a6c47c25bf9";
 const productionOrigin = "https://paca.howlearnwood.com";
 const productionGatewayOrigin = "https://paca-env.howlearnwood.com";
@@ -73,9 +69,11 @@ function assertDurableObjects(config: RecordValue, classes: string[]): void {
   }
 }
 
-function assertBusinessBindings(config: RecordValue, environment: string): string {
+function assertBusinessBindings(config: RecordValue): void {
+  // Stable resource names preserve existing data, DO state, and credentials.
+  const stableSuffix = "internal";
   const vars = record(config.vars);
-  requireCondition(vars.ENVIRONMENT === environment, "RELEASE_ENVIRONMENT_INVALID");
+  requireCondition(vars.ENVIRONMENT === "prod", "RELEASE_ENVIRONMENT_INVALID");
   const hyperdrive = binding(config.hyperdrive, "binding", "HYPERDRIVE");
   requireCondition(
     records(config.hyperdrive).length === 1 &&
@@ -97,8 +95,8 @@ function assertBusinessBindings(config: RecordValue, environment: string): strin
   ]) {
     requireCondition(
       binding(config.r2_buckets, "binding", name as string).bucket_name ===
-        `paca-${bucket}-${environment}`,
-      "RELEASE_BUCKET_ISOLATION_INVALID",
+        `paca-${bucket}-${stableSuffix}`,
+      "RELEASE_BUCKET_INVALID",
     );
   }
   const queues = record(config.queues);
@@ -111,10 +109,10 @@ function assertBusinessBindings(config: RecordValue, environment: string): strin
     ["DOCUMENT_MATERIALIZATION", "document-materialization", 5, 2],
     ["AUTOMATION_EVENTS", "automation-events", 10, 2],
   ] as const) {
-    const queue = `paca-${suffix}-${environment}`;
+    const queue = `paca-${suffix}-${stableSuffix}`;
     requireCondition(
       binding(queues.producers, "binding", name).queue === queue,
-      "RELEASE_QUEUE_ISOLATION_INVALID",
+      "RELEASE_QUEUE_INVALID",
     );
     const consumer = binding(queues.consumers, "queue", queue);
     requireCondition(
@@ -132,116 +130,70 @@ function assertBusinessBindings(config: RecordValue, environment: string): strin
   ]) {
     const workflow = binding(config.workflows, "binding", name as string);
     requireCondition(
-      workflow.name === `paca-${suffix}-${environment}` &&
+      workflow.name === `paca-${suffix}-${stableSuffix}` &&
         workflow.class_name === className &&
         workflow.script_name === undefined,
-      "RELEASE_WORKFLOW_ISOLATION_INVALID",
+      "RELEASE_WORKFLOW_INVALID",
     );
   }
   assertDurableObjects(config, ["ProjectParty", "UserParty", "DocumentParty", "AgentCoordinator"]);
-  return hyperdrive.id;
+  requireCondition(
+    hyperdrive.id === "ec828e1b80664166ab38aa511cfd1f82",
+    "RELEASE_HYPERDRIVE_INVALID",
+  );
 }
 
-export function assertProductionConfiguration(
-  workerValue: unknown,
-  gatewayValue: unknown,
-  stage: ReleaseStage,
-): void {
-  requireCondition(stage === "candidate" || stage === "release", "RELEASE_STAGE_INVALID");
+export function assertProductionConfiguration(workerValue: unknown, gatewayValue: unknown): void {
   const worker = record(workerValue);
   const gateway = record(gatewayValue);
-  const environments = record(worker.env);
-  const production = record(environments.production);
-  const internal = record(environments.internal);
-  const gatewayEnvironments = record(gateway.env);
-  const productionGateway = record(gatewayEnvironments.production);
-  const internalGateway = record(gatewayEnvironments.internal);
-  for (const root of [worker, gateway]) {
-    requireCondition(root.account_id === accountId, "RELEASE_ACCOUNT_INVALID");
-    requireCondition(root.workers_dev === false, "RELEASE_DEFAULT_PUBLIC_ACCESS_FORBIDDEN");
-    requireCondition(root.preview_urls === false, "RELEASE_DEFAULT_PREVIEW_ACCESS_FORBIDDEN");
-    assertRoutes(root, undefined);
+  for (const config of [worker, gateway]) {
+    requireCondition(config.env === undefined, "RELEASE_MULTIPLE_ENVIRONMENTS_FORBIDDEN");
+    requireCondition(config.account_id === accountId, "RELEASE_ACCOUNT_INVALID");
+    requireCondition(config.workers_dev === false, "RELEASE_WORKERS_DEV_FORBIDDEN");
+    requireCondition(config.preview_urls === false, "RELEASE_PREVIEW_ACCESS_FORBIDDEN");
+    requireCondition(record(config.vars).ENVIRONMENT === "prod", "RELEASE_ENVIRONMENT_INVALID");
   }
-  const rootId = assertBusinessBindings(worker, "development");
-  requireCondition(rootId === LOCAL_HYPERDRIVE_ID, "RELEASE_DEVELOPMENT_DATABASE_MUST_BE_LOCAL");
-  const productionId = assertBusinessBindings(production, "production");
-  const internalId = assertBusinessBindings(internal, "internal");
   requireCondition(
-    new Set([rootId, productionId, internalId]).size === 3 &&
-      productionId !== retiredMainHyperdriveId &&
-      internalId !== retiredMainHyperdriveId,
-    "RELEASE_DATABASE_ISOLATION_INVALID",
+    worker.name === "paca-worker-api-internal" &&
+      gateway.name === "paca-environment-gateway-internal",
+    "RELEASE_EXISTING_WORKER_REQUIRED",
   );
+  assertBusinessBindings(worker);
+  assertOrigin(record(worker.vars), productionOrigin);
+  assertOrigin(record(gateway.vars), productionGatewayOrigin, true);
+  assertRoutes(worker, new URL(productionOrigin).hostname);
+  assertRoutes(gateway, new URL(productionGatewayOrigin).hostname);
   requireCondition(
-    production.name === "paca-worker-api-production" &&
-      internal.name === "paca-worker-api-internal" &&
-      productionGateway.name === "paca-environment-gateway-production" &&
-      internalGateway.name === "paca-environment-gateway-internal",
-    "RELEASE_WORKER_ISOLATION_INVALID",
+    binding(worker.services, "binding", "ENVIRONMENT_GATEWAY").service === gateway.name,
+    "RELEASE_GATEWAY_BINDING_INVALID",
   );
+  const crons = record(worker.triggers).crons;
   requireCondition(
-    production.workers_dev === false && productionGateway.workers_dev === false,
-    "RELEASE_PRODUCTION_WORKERS_DEV_FORBIDDEN",
+    record(worker.vars).ATTACHMENT_CLEANUP_ENABLED === "true" &&
+      Array.isArray(crons) &&
+      crons.length === 2 &&
+      crons.includes("* * * * *") &&
+      crons.includes("15 10 * * *"),
+    "RELEASE_SCHEDULED_RECOVERY_INVALID",
   );
+  assertDurableObjects(gateway, [
+    "Sandbox",
+    "ConnectionTicketDO",
+    "AgentConnectionRegistryDO",
+    "UserConnectionRegistryDO",
+    "EnvironmentTicketBarrierDO",
+  ]);
+  const containers = records(gateway.containers);
   requireCondition(
-    production.preview_urls === false && productionGateway.preview_urls === false,
-    "RELEASE_PRODUCTION_PREVIEW_ACCESS_FORBIDDEN",
+    containers.length === 1 &&
+      containers[0]?.class_name === "Sandbox" &&
+      containers[0].name === "paca-environment-gateway-internal-sandbox-internal" &&
+      containers[0].max_instances === 5 &&
+      containers[0].instance_type === "lite" &&
+      containers[0].image ===
+        "docker.io/cloudflare/sandbox@sha256:4a56a37a3cfd9b38d65bb4b5d0b341e6490a3a4c0226274ae4c1cca4948e85fe",
+    "RELEASE_SANDBOX_CONFIGURATION_INVALID",
   );
-  assertOrigin(record(production.vars), productionOrigin);
-  assertOrigin(record(productionGateway.vars), productionGatewayOrigin, true);
-  assertRoutes(production, stage === "release" ? new URL(productionOrigin).hostname : undefined);
-  assertRoutes(
-    productionGateway,
-    stage === "release" ? new URL(productionGatewayOrigin).hostname : undefined,
-  );
-  const internalOrigin =
-    stage === "candidate" ? productionOrigin : "https://paca-internal.howlearnwood.com";
-  const internalGatewayOrigin =
-    stage === "candidate" ? productionGatewayOrigin : "https://paca-env-internal.howlearnwood.com";
-  assertOrigin(record(internal.vars), internalOrigin);
-  assertOrigin(record(internalGateway.vars), internalGatewayOrigin, true);
-  assertRoutes(internal, new URL(internalOrigin).hostname);
-  assertRoutes(internalGateway, new URL(internalGatewayOrigin).hostname);
-  for (const [config, environment] of [
-    [production, "production"],
-    [internal, "internal"],
-  ] as const) {
-    requireCondition(
-      binding(config.services, "binding", "ENVIRONMENT_GATEWAY").service ===
-        `paca-environment-gateway-${environment}`,
-      "RELEASE_GATEWAY_BINDING_ISOLATION_INVALID",
-    );
-    const crons = record(config.triggers).crons;
-    requireCondition(
-      record(config.vars).ATTACHMENT_CLEANUP_ENABLED === "true" &&
-        Array.isArray(crons) &&
-        crons.length === 2 &&
-        crons.includes("* * * * *") &&
-        crons.includes("15 10 * * *"),
-      "RELEASE_SCHEDULED_RECOVERY_INVALID",
-    );
-    const gatewayConfig = environment === "production" ? productionGateway : internalGateway;
-    requireCondition(
-      record(gatewayConfig.vars).ENVIRONMENT === environment,
-      "RELEASE_GATEWAY_ENVIRONMENT_INVALID",
-    );
-    assertDurableObjects(gatewayConfig, [
-      "Sandbox",
-      "ConnectionTicketDO",
-      "AgentConnectionRegistryDO",
-      "UserConnectionRegistryDO",
-      "EnvironmentTicketBarrierDO",
-    ]);
-    const containers = records(gatewayConfig.containers);
-    requireCondition(
-      containers.length === 1 &&
-        containers[0]?.class_name === "Sandbox" &&
-        containers[0].image === records(gateway.containers)[0]?.image &&
-        containers[0].max_instances === 5 &&
-        containers[0].instance_type === "lite",
-      "RELEASE_SANDBOX_ISOLATION_INVALID",
-    );
-  }
   const assets = record(worker.assets);
   const paths = assets.run_worker_first;
   requireCondition(

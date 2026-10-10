@@ -45,10 +45,8 @@ function optionalDuration(name: string, fallback: number): number {
   return parsed;
 }
 
-function internalBaseURL(): string {
-  const configured = new URL(
-    process.env.PACA_INTERNAL_BASE_URL?.trim() || "https://paca.howlearnwood.com",
-  );
+function productionBaseURL(): string {
+  const configured = new URL(process.env.PACA_BASE_URL?.trim() || "https://paca.howlearnwood.com");
   if (
     configured.protocol !== "https:" ||
     configured.username ||
@@ -57,7 +55,7 @@ function internalBaseURL(): string {
     configured.search ||
     configured.hash
   ) {
-    throw new Error("PACA_INTERNAL_BASE_URL_INVALID");
+    throw new Error("PACA_BASE_URL_INVALID");
   }
   return configured.origin;
 }
@@ -364,7 +362,7 @@ async function poll<T>(
 }
 
 async function main(): Promise<void> {
-  const baseURL = internalBaseURL();
+  const baseURL = productionBaseURL();
   const email = requiredEnvironment("PACA_DOCUMENT_SMOKE_EMAIL");
   const password = requiredEnvironment("PACA_DOCUMENT_SMOKE_PASSWORD");
   const timeoutMs = optionalDuration("PACA_DOCUMENT_SMOKE_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);

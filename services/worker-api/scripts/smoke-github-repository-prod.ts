@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import pg from "pg";
 import { repositoryDiscoverySchema } from "../src/github-delivery/discovery";
+import { cleanupProductionSmokeUsers, productionSmokeFetch } from "./lib/production-smoke-auth";
 
 const execute = promisify(execFile),
   origin = "https://paca.howlearnwood.com";
@@ -39,7 +40,7 @@ async function pscale(args: string[]) {
   }
 }
 async function request(path: string, method: string, cookie?: string, body?: unknown) {
-  return fetch(`${origin}${path}`, {
+  return productionSmokeFetch(`${origin}${path}`, {
     method,
     headers: {
       origin,
@@ -77,24 +78,24 @@ async function json(r: Response, status: number, step: string) {
 }
 async function main() {
   check(
-    process.env.PACA_GITHUB_REPOSITORY_SMOKE_CONFIRM === "RUN_INTERNAL_GITHUB_REPOSITORY_SMOKE",
+    process.env.PACA_GITHUB_REPOSITORY_SMOKE_CONFIRM === "RUN_PROD_GITHUB_REPOSITORY_SMOKE",
     "SMOKE_CONFIRM_REQUIRED",
   );
   check(organization, "PACA_PLANETSCALE_ORG_REQUIRED");
   check(
     !process.env.PACA_PLANETSCALE_TARGET_BRANCH ||
-      process.env.PACA_PLANETSCALE_TARGET_BRANCH === "internal",
-    "SMOKE_BRANCH_MUST_BE_INTERNAL",
+      process.env.PACA_PLANETSCALE_TARGET_BRANCH === "prod",
+    "SMOKE_BRANCH_MUST_MATCH_PROD_DATABASE",
   );
   const health = await json(await request("/health", "GET"), 200, "HEALTH");
-  check(health.environment === "internal", "WRONG_ENVIRONMENT");
+  check(health.environment === "prod", "WRONG_ENVIRONMENT");
   const role = record(
     JSON.parse(
       await pscale([
         "role",
         "create",
         "paca",
-        "internal",
+        "prod",
         `paca-repository-smoke-${Date.now()}`,
         "--inherited-roles",
         "postgres",
@@ -152,7 +153,7 @@ async function main() {
         ).data,
       ).id,
     );
-    // The first internal signup bootstraps an administrator. Reduce only this
+    // The first signup bootstraps an administrator. Reduce only this
     // disposable fixture's system roles to exercise the ordinary permission gate.
     await client.query("DELETE FROM paca_user_system_role WHERE user_id=$1", [userId]);
     const path = `/api/v1/projects/${projectId}/github-repository`,
@@ -274,7 +275,7 @@ async function main() {
       cleanup.push("DATABASE_CLEANUP");
     }
     await client.end().catch(() => cleanup.push("DISCONNECT"));
-    await pscale(["role", "delete", "paca", "internal", roleId, "--force"]).catch(() =>
+    await pscale(["role", "delete", "paca", "prod", roleId, "--force"]).catch(() =>
       cleanup.push("ROLE_CLEANUP"),
     );
     if (cleanup.length)
@@ -283,17 +284,19 @@ async function main() {
       );
     check(!cleanup.length, "SMOKE_CLEANUP_FAILED");
   }
-  log("repository-settings-internal-smoke-complete-and-fixtures-cleaned");
+  log("repository-settings-prod-smoke-complete-and-fixtures-cleaned");
 }
-main().catch((e) => {
-  console.error(
-    JSON.stringify({
-      status: "error",
-      code:
-        e instanceof Error && /^[A-Z0-9_]+$/.test(e.message)
-          ? e.message
-          : "REPOSITORY_SMOKE_FAILED",
-    }),
-  );
-  process.exitCode = 1;
-});
+main()
+  .finally(cleanupProductionSmokeUsers)
+  .catch((e) => {
+    console.error(
+      JSON.stringify({
+        status: "error",
+        code:
+          e instanceof Error && /^[A-Z0-9_]+$/.test(e.message)
+            ? e.message
+            : "REPOSITORY_SMOKE_FAILED",
+      }),
+    );
+    process.exitCode = 1;
+  });
